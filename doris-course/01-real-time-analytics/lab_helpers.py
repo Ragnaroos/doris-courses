@@ -1296,8 +1296,38 @@ class DorisLab:
                 action = "downloaded"
                 temporary = destination.with_name(destination.name + ".part")
                 try:
-                    with urllib.request.urlopen(remote_url, timeout=60) as response:
-                        temporary.write_bytes(response.read())
+                    if remote_url.startswith("s3://"):
+                        try:
+                            import boto3
+                        except ImportError as exc:
+                            raise RuntimeError(
+                                "boto3 is required for the private course S3 fixtures. "
+                                "Install requirements.txt and rerun this cell."
+                            ) from exc
+                        secrets = load_env_file(self.lab_dir / "lab1_secrets.env")
+                        access_key = secrets.get("S3_READ_ONLY_ACCESS_KEY", "")
+                        secret_key = secrets.get("S3_READ_ONLY_SECRET_KEY", "")
+                        if not access_key or not secret_key:
+                            raise RuntimeError(
+                                "Fill both read-only S3 credentials in lab1_secrets.env "
+                                "before downloading the Lab 3 fixtures."
+                            )
+                        parsed = urllib.parse.urlsplit(remote_url)
+                        client = boto3.client(
+                            "s3",
+                            endpoint_url=self.S3_CONFIG["endpoint"],
+                            region_name=self.S3_CONFIG["region"],
+                            aws_access_key_id=access_key,
+                            aws_secret_access_key=secret_key,
+                        )
+                        client.download_file(
+                            parsed.netloc,
+                            parsed.path.lstrip("/"),
+                            str(temporary),
+                        )
+                    else:
+                        with urllib.request.urlopen(remote_url, timeout=60) as response:
+                            temporary.write_bytes(response.read())
                     row_count = self._validate_fixture(temporary, kind)
                     os.replace(temporary, destination)
                 except Exception:

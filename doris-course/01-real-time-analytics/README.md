@@ -84,7 +84,8 @@ Docker network.
 
 The learner-side CSV and nested JSON fixtures represent the same fixed
 1,024-record sample from the Lab 1/2 event dataset. A separate ten-row malformed
-CSV is used only for transaction-rejection evidence. These fixtures are
-included in `lab3/downloads/`; the notebook validates and reuses them instead
-of downloading another copy. Their public course URLs remain visible in the
-notebook as the fallback source.
+CSV is used only for transaction-rejection evidence. Each ingestion section
+downloads its fixture from the course S3 bucket with the read-only credentials
+in `lab1_secrets.env`, placing it in the ignored `lab3/downloads/` runtime cache.
+An existing valid local copy is reused; an incomplete download is never
+installed as the active fixture.

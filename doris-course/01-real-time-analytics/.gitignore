@@ -5,3 +5,4 @@ __pycache__/
 .DS_Store
 lab1_secrets.env
 assets/*.jar
+lab3/downloads/
