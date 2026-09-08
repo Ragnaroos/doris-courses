@@ -5,7 +5,7 @@
 | Course | Real-time Analytics with Apache Doris — Level 1 |
 | Product baseline | Apache Doris 4.x |
 | Lab version | Apache Doris 4.1.3 |
-| Estimated time | 60–65 minutes, including the guided lab |
+| Estimated time | Approximately 60 minutes, including the guided lab |
 
 ## Module goal
 
@@ -43,7 +43,6 @@ After completing this module, you will be able to:
 | 1.4 A First Look at Doris Architecture | Reading/visual | 9 min | Explain FE, BE, and the two deployment architectures |
 | 1.5 Your First Doris Workflow | Guided walkthrough | 5 min | Follow the path from a client connection to an analytical result |
 | Lab 1 | Hands-on | 25 min | Start Doris and build the persistent baseline dataset |
-| Knowledge check | Quiz | 4 min | Verify the workload and architecture mental models |
 
 ---
 
@@ -114,18 +113,6 @@ supports large scans, filtering, joins, and aggregations.
 The [Apache Doris project README](https://github.com/apache/doris) and
 [Apache Doris overview](https://doris.apache.org/docs/4.x/gettingStarted/what-is-apache-doris/)
 are the source of truth for the current product definition and capabilities.
-
-### Check your understanding
-
-Which statement best defines Doris?
-
-1. A dashboard application that stores chart definitions
-2. A row-oriented OLTP database with an analytics plugin
-3. An open-source, MPP-based database for real-time analytics and search
-4. An object-storage service for Parquet files
-
-**Answer:** 3. BI tools can query Doris, and Doris can query object storage, but
-neither of those integrations defines the database itself.
 
 ---
 
@@ -531,40 +518,6 @@ The course transformation preserves `event_time`, `event_type`, `product_id`,
 and `user_id`; creates a stable `event_id`; assigns each user to a synthetic
 `region`; and records price as `revenue` only for purchase events. Synthetic
 regions are teaching data and do not represent real user locations.
-
----
-
-## Knowledge check
-
-1. A request reads five columns from 20 million events, groups by region, and
-   returns eight rows. Which characteristic makes it analytical?
-2. Why can an OLTP database remain the system of record when Doris is added to
-   an architecture?
-3. Which component accepts a MySQL-protocol connection and creates the query
-   plan?
-4. In the integrated architecture, which component stores internal-table data
-   and executes query fragments?
-5. What is the main resource-scaling difference between the integrated and
-   decoupled architectures?
-6. Does querying a Parquet file through a TVF automatically persist those rows
-   in an internal Doris table?
-
-<details>
-<summary>Answers</summary>
-
-1. The query scans and aggregates a large set of records; the small result does
-   not make the work transactional.
-2. The OLTP system continues to commit operational transactions, while a
-   stream or CDC pipeline copies changes to Doris for analytics.
-3. Frontend (FE).
-4. Backend (BE).
-5. Integrated BEs scale storage and compute together; decoupled deployments
-   keep persistent data in shared storage and can scale compute independently.
-6. No. A TVF exposes external data as a temporary relational result. An
-   explicit load such as `INSERT INTO ... SELECT` is required to persist it in
-   an internal table.
-
-</details>
 
 ## Module summary
 
