@@ -3,6 +3,7 @@
 .ipynb_checkpoints/
 __pycache__/
 .DS_Store
-lab1_secrets.env
+course_secrets.env
 assets/*.jar
-lab3/downloads/
+level1/module01-introduction/assets/
+level1/module03-loading-data/downloads/

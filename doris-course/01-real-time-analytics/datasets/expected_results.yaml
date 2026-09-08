@@ -1,0 +1,9 @@
+events:
+  row_count: 10158080
+  distinct_users: 1580057
+  distinct_products: 204231
+  total_revenue: "39984455.64"
+  event_counts:
+    view: 9437184
+    cart: 589824
+    purchase: 131072

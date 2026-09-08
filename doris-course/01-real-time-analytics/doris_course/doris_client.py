@@ -22,7 +22,9 @@ import pymysql
 from IPython.display import HTML, Javascript, display
 
 
-LAB_DIR = Path.cwd().resolve()
+# Every notebook uses the course root as its runtime workspace, even when the
+# notebook file itself lives several module directories below it.
+LAB_DIR = Path(__file__).resolve().parent.parent
 
 
 def install_styles() -> None:
@@ -1304,12 +1306,12 @@ class DorisLab:
                                 "boto3 is required for the private course S3 fixtures. "
                                 "Install requirements.txt and rerun this cell."
                             ) from exc
-                        secrets = load_env_file(self.lab_dir / "lab1_secrets.env")
+                        secrets = load_env_file(self.lab_dir / "course_secrets.env")
                         access_key = secrets.get("S3_READ_ONLY_ACCESS_KEY", "")
                         secret_key = secrets.get("S3_READ_ONLY_SECRET_KEY", "")
                         if not access_key or not secret_key:
                             raise RuntimeError(
-                                "Fill both read-only S3 credentials in lab1_secrets.env "
+                                "Fill both read-only S3 credentials in course_secrets.env "
                                 "before downloading the Lab 3 fixtures."
                             )
                         parsed = urllib.parse.urlsplit(remote_url)
@@ -2093,7 +2095,7 @@ class DorisLab:
         card("Environment ready: Doris is healthy and both FE and BE are available.", "ok")
         return self.connection
 
-    def load_s3_credentials(self, filename: str = "lab1_secrets.env") -> bool:
+    def load_s3_credentials(self, filename: str = "course_secrets.env") -> bool:
         secret_path = self.lab_dir / filename
         try:
             secrets = load_env_file(secret_path)
