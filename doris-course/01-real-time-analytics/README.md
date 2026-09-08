@@ -87,14 +87,16 @@ Run setup from this directory:
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
-python -m pip install -e .
+python -m pip install -r requirements.txt
 cp course_secrets.env.example course_secrets.env
 ```
 
 Use the same `.venv` for all levels. The environment itself is not portable;
 `pyproject.toml` and `requirements.txt` are the reproducible definitions.
 
-Notebooks import one stable learner-facing entry point:
+Each notebook initialization cell finds the course root before importing one
+stable learner-facing entry point. This supports both JupyterLab launched from
+the course root and VS Code opened directly on a module notebook:
 
 ```python
 from doris_course import DorisLab
