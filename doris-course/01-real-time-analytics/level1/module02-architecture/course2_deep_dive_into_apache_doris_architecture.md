@@ -92,8 +92,8 @@ A **plan fragment** is a distributable part of the distributed query plan. For e
 one plan fragment may scan and partially aggregate rows on several BEs, while
 another receives those partial results and completes the aggregation.
 
-The course wording maps to the names displayed by Doris documentation,
-`EXPLAIN`, and source code as follows:
+The terminology maps to the names displayed by Doris documentation, `EXPLAIN`,
+and source code as follows:
 
 | Course term | Doris plan term | Relationship |
 | --- | --- | --- |
@@ -218,7 +218,7 @@ Internal Catalog
     └── Table
 ```
 
-The course uses `internal.doris_course.events`:
+The examples use `internal.doris_course.events`:
 
 - `internal` is the Catalog for Doris internal tables.
 - `doris_course` is the Database.
@@ -262,8 +262,8 @@ provide the same key-based bucket (tablet) pruning.
 
 A Tablet is the basic unit of data distribution, balancing, and parallel scan.
 In the integrated storage-compute architecture, a Tablet may have replicas on
-BE nodes. The single-node course sandbox uses one replica; replication strategy
-is outside this module's scope.
+BE nodes. The single-node sandbox uses one replica. A production deployment
+chooses its replica count from availability and storage requirements.
 
 ### Rowset
 

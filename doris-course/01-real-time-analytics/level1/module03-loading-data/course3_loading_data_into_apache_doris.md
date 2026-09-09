@@ -111,9 +111,8 @@ All four mechanisms can participate in transactional writes, but they expose
 different control and completion models. Select the model that matches the
 producer rather than forcing every source through the same interface.
 
-The official [Load Overview](https://doris.apache.org/docs/4.x/data-operate/import/load-manual/)
-provides the broader method matrix, including methods outside this Level 1
-module.
+See the official [Load Overview](https://doris.apache.org/docs/4.x/data-operate/import/load-manual/)
+for the complete load-method matrix.
 
 ---
 
@@ -147,7 +146,7 @@ than the password-free local course account.
 ### Make the parsing contract explicit
 
 The request headers describe how Doris should interpret the byte stream. A
-course request has this shape:
+Stream Load request has this shape:
 
 ```bash
 curl --location-trusted -u root: \
@@ -374,7 +373,7 @@ casts.
 ### Completion and retry state
 
 `INSERT INTO SELECT` is synchronous: the SQL client receives the statement
-outcome. Unlike Stream Load, this workflow does not expose a learner-supplied
+outcome. Unlike Stream Load, this workflow does not expose a client-supplied
 label in the statement. Blindly rerunning a successful statement is a new
 load transaction. On a Duplicate Key model target, it can append another copy
 of every row.
@@ -426,7 +425,7 @@ splits the job into short-lived **tasks**. Each task consumes a range of Kafka
 messages and writes one micro-batch load transaction. When a task finishes,
 Doris schedules another task so consumption can continue.
 
-This follows the same FE/BE boundary used elsewhere in the course:
+FE and BE divide the work as follows:
 
 - FE manages Routine Load job state, schedules tasks, and commits load
   transactions;
@@ -547,11 +546,6 @@ transaction, and Rowset overhead.
 Group Commit changes the unit and acknowledgement timing of compatible small
 writes. It does not turn a bounded S3 object set into a stream, manage Kafka
 offsets, or replace application-level data semantics.
-
-The Lab 3 decision exercise includes Group Commit so you can identify this
-workload. The hands-on load paths focus on Stream Load, S3 TVF with
-`INSERT INTO SELECT`, and Routine Load, which are the three source contracts
-required by the module.
 
 See the official [Group Commit documentation](https://doris.apache.org/docs/4.x/data-operate/import/load-best-practices/group-commit-manual/)
 for supported statements, modes, flush triggers, and fallback conditions.
@@ -677,8 +671,7 @@ the Level 1 course.
 ## Quiz 3: Load Methods and Retry Safety
 
 Complete the five-question interactive knowledge check after finishing the
-course and Lab 3. Each question covers a different learning objective; the
-quiz does not require a running Doris sandbox, Kafka, or S3 credentials.
+module and Lab 3. It runs without Doris, Kafka, or S3 credentials.
 
 [Open Quiz 3 — Load Methods and Retry Safety](quiz3_load_methods_and_retry_safety.ipynb)
 

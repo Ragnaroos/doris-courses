@@ -284,9 +284,9 @@ component a clear responsibility.
 
 ## 1.4 A First Look at Doris Architecture
 
-This section introduces only the component boundaries needed for the first
-workflow. Module 2 follows query execution and storage organization in greater
-detail.
+The first workflow depends on two component boundaries: FE accepts and plans
+SQL, while BE executes the assigned work and manages internal-table data in an
+integrated storage-compute deployment.
 
 ### Frontend (FE)
 
@@ -370,18 +370,18 @@ This architecture is a strong fit when:
 | What does a BE do? | Stores data and executes queries | Executes queries and caches hot data |
 | How does capacity scale? | Storage and compute scale together | Storage and compute scale independently |
 | Main operational advantage | Simpler component model and local I/O | Elastic compute and workload isolation |
-| Course use | Lab 1 single-node sandbox | Conceptual introduction only |
+| Example deployment | Single-node integrated sandbox | Compute Groups over shared storage |
 
-Neither architecture changes the SQL goal of this module. The choice changes
-where data is stored and how resources are scaled—not whether learners can
-connect with SQL and query a table.
+Both architectures expose the same SQL interface. They differ in where data is
+stored and whether storage and compute resources scale together or
+independently.
 
 ---
 
 ## Lab 1: Start Doris and Build a Baseline Dataset
 
-The lab turns the conceptual workflow into a persistent environment used by
-Modules 2 and 3.
+Lab 1 creates the persistent environment and baseline dataset used by the next
+modules.
 
 You will:
 
@@ -402,7 +402,7 @@ Open the notebook:
 
 ### Dataset source and attribution
 
-The lab uses a transformed teaching copy of **eCommerce behavior data from
+The lab uses a transformed course copy of **eCommerce behavior data from
 multi-category store**, published by Michael Kechinov and provided by the
 REES46 Marketing Platform.
 
@@ -410,10 +410,10 @@ REES46 Marketing Platform.
 - [REES46 public datasets](https://rees46.com/en/datasets)
 - [Firebolt E-Commerce Analytics Primer](https://www.firebolt.io/free-sample-datasets/e-commerce)
 
-The course transformation preserves `event_time`, `event_type`, `product_id`,
+The transformation preserves `event_time`, `event_type`, `product_id`,
 and `user_id`; creates a stable `event_id`; assigns each user to a synthetic
 `region`; and records price as `revenue` only for purchase events. Synthetic
-regions are teaching data and do not represent real user locations.
+regions do not represent real user locations.
 
 ## Module summary
 
@@ -437,8 +437,7 @@ regions are teaching data and do not represent real user locations.
 ## Quiz 1: Apache Doris Fundamentals
 
 Complete the five-question interactive knowledge check after finishing the
-course and Lab 1. Each question covers a different learning objective; the
-quiz does not require a running Doris sandbox.
+module and Lab 1. It runs without a Doris sandbox.
 
 [Open Quiz 1 — Apache Doris Fundamentals](quiz1_doris_fundamentals.ipynb)
 
