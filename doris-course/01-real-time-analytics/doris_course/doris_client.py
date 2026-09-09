@@ -692,7 +692,7 @@ class DorisLab:
             replicas = f"{replica_count} {label} per tablet · {replica_parts[0].strip()}"
 
         frame = pd.DataFrame([
-            {"design choice": "Table model", "resolved value": f"{key_match.group(1).title()} Key"},
+            {"design choice": "Table model", "resolved value": f"{key_match.group(1).title()} Key model"},
             {"design choice": "Sort key", "resolved value": key_columns},
             {"design choice": "Partitioning", "resolved value": partitioning},
             {"design choice": "Distribution", "resolved value": distribution},
@@ -943,13 +943,13 @@ class DorisLab:
                 if "used SQL Cache" in str(exc):
                     raise
             time.sleep(0.4)
-        raise RuntimeError(f"The runtime profile was not ready: {last_error or 'timed out'}")
+        raise RuntimeError(f"The Query Profile was not ready: {last_error or 'timed out'}")
 
     def compare_profiles(
         self,
         cases: Sequence[tuple[str, str]],
         *,
-        title: str = "Runtime scan evidence",
+        title: str = "Query Profile scan evidence",
     ) -> pd.DataFrame:
         """Run comparable queries and summarize only their OLAP scan evidence."""
         connection = self._require_connection()
@@ -1050,7 +1050,7 @@ class DorisLab:
         return result
 
     def load_method_quiz(self) -> None:
-        """Match visible ingestion contracts to methods by drag, click, or keyboard."""
+        """Match visible workload requirements to load methods."""
         scenarios = [
             {
                 "id": "A",
@@ -1092,7 +1092,7 @@ class DorisLab:
                     ("Transform", "Extract JSON paths and map target columns"),
                     ("Retry", "Resume from offsets committed with successful loads"),
                 ],
-                "reason": "Correct. Routine Load manages a continuing Kafka subscription and commits consumed offsets together with each successful micro-batch.",
+                "reason": "Correct. A Routine Load job continuously consumes a Kafka topic and commits consumed offsets together with each successful micro-batch transaction.",
             },
             {
                 "id": "D",
@@ -1138,7 +1138,7 @@ class DorisLab:
         markup = (
             f'<div id="{widget_id}" class="doris-match">'
             '<div class="doris-match-head"><div>'
-            '<div class="doris-match-title">Choose a load method from the complete workload contract</div>'
+            '<div class="doris-match-title">Match workload requirements to a load method</div>'
             '<p class="doris-match-help">Drag each method onto one workload. If dragging is unavailable, '
             'select a method and then click a workload card. An incorrect match explains which requirement conflicts; '
             'a correct match locks in place.</p></div>'
@@ -1154,7 +1154,7 @@ class DorisLab:
             "A": "This is a bounded client push that needs a synchronous quality response and stable-label retry.",
             "B": "This is a fixed object-storage batch that needs SQL transformation before an atomic permanent copy.",
             "C": "This is an unbounded Kafka source that needs a managed subscription and committed offsets.",
-            "D": "This workload already has a write path; it needs small-write batching rather than a new source connector.",
+            "D": "This workload already has a write interface; it needs small-write batching rather than a new source connector.",
         }
         script = f"""
         (() => {{
@@ -1618,7 +1618,7 @@ class DorisLab:
         batch_pause_seconds: float = 2.0,
         timeout_seconds: int = 90,
     ) -> pd.DataFrame:
-        """Publish real Kafka batches and render the producer/consumer timeline."""
+        """Publish real Kafka batches and render the producer/Routine Load timeline."""
         if not re.fullmatch(r"[A-Za-z0-9._-]+", topic):
             raise ValueError(f"Unsafe Kafka topic name: {topic!r}")
         job_name = self._safe_table_name(job_name)
@@ -1666,8 +1666,8 @@ class DorisLab:
             return {
                 "actor / action": stage,
                 "Kafka published": kafka_messages,
-                "waiting for Doris": max(0, kafka_messages - routine_loaded),
-                "Doris committed": routine_loaded,
+                "waiting for Routine Load": max(0, kafka_messages - routine_loaded),
+                "Routine Load committed": routine_loaded,
                 "events_routine rows": int(target[0]["row_count"]),
                 "errors": int(statistic.get("errorRows", 0)),
                 "Routine Load state": str(job.get("State", "not shown")),
@@ -1691,10 +1691,10 @@ class DorisLab:
                 f'{int(latest["Kafka published"]):,} of {expected_messages:,} messages published</div>'
                 '<div class="doris-flow-arrow">→</div>'
                 '<div class="doris-flow-step"><strong>Kafka topic</strong>'
-                f'{int(latest["waiting for Doris"]):,} published messages awaiting Doris commit</div>'
+                f'{int(latest["waiting for Routine Load"]):,} published messages awaiting a Routine Load commit</div>'
                 '<div class="doris-flow-arrow">→</div>'
-                '<div class="doris-flow-step"><strong>Doris Routine Load</strong>'
-                f'{int(latest["Doris committed"]):,} committed · '
+                '<div class="doris-flow-step"><strong>Routine Load job</strong>'
+                f'{int(latest["Routine Load committed"]):,} committed · '
                 f'{html.escape(str(latest["Routine Load state"]))}</div>'
                 '<div class="doris-flow-arrow">→</div>'
                 '<div class="doris-flow-step"><strong>events_routine</strong>'
@@ -1703,9 +1703,9 @@ class DorisLab:
             )
             return HTML(
                 '<div class="doris-result">'
-                '<div class="doris-result-title">Live producer-to-consumer pipeline</div>'
+                '<div class="doris-result-title">Live producer-to-Routine-Load pipeline</div>'
                 f'{pipeline}'
-                '<div class="doris-result-title">Producer and consumer timeline '
+                '<div class="doris-result-title">Producer and Routine Load timeline '
                 f'<span class="doris-result-count">{len(frame)} snapshot(s)</span></div>'
                 '<div class="doris-result-table-wrap"><table class="doris-table">'
                 f'<thead><tr>{headings}</tr></thead><tbody>{"".join(rows)}</tbody>'
@@ -1735,10 +1735,10 @@ class DorisLab:
             target_count = -1
             while time.monotonic() < deadline:
                 time.sleep(poll_interval_seconds)
-                observed = snapshot(f"Doris consumer · waiting for {expected}", started_at)
+                observed = snapshot(f"Routine Load job · waiting for {expected}", started_at)
                 target_count = int(observed["events_routine rows"])
                 if target_count >= expected:
-                    observed["actor / action"] = f"Doris consumer · committed {expected}"
+                    observed["actor / action"] = f"Routine Load job · committed {expected}"
                     snapshots.append(observed)
                     handle.update(progress_html(pd.DataFrame(snapshots)))
                     return

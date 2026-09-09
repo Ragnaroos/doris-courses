@@ -22,7 +22,8 @@ doris-course/
     │   ├── doris_client.py
     │   ├── s3.py
     │   ├── profiles.py
-    │   └── kafka.py
+    │   ├── kafka.py
+    │   └── quiz.py
     ├── datasets/
     │   ├── events.yaml
     │   ├── dimensions.yaml
@@ -33,16 +34,22 @@ doris-course/
     ├── level1/
     │   ├── README.md
     │   ├── module01-introduction/
-    │   │   ├── course.md
+    │   │   ├── course1_introduction_to_apache_doris.md
     │   │   ├── lab1_start_doris_and_build_baseline.ipynb
-    │   │   └── optional_metabase_dashboard.ipynb
+    │   │   ├── optional_metabase_dashboard.ipynb
+    │   │   ├── quiz1_doris_fundamentals.ipynb
+    │   │   └── quiz1_doris_fundamentals.yaml
     │   ├── module02-architecture/
-    │   │   ├── course.md
-    │   │   └── lab2_scan_less_data.ipynb
+    │   │   ├── course2_deep_dive_into_apache_doris_architecture.md
+    │   │   ├── lab2_scan_less_data.ipynb
+    │   │   ├── quiz2_doris_architecture_and_physical_design.ipynb
+    │   │   └── quiz2_doris_architecture_and_physical_design.yaml
     │   └── module03-loading-data/
-    │       ├── course.md
+    │       ├── course3_loading_data_into_apache_doris.md
     │       ├── lab3_load_data.ipynb
-    │       └── compose.kafka.yml
+    │       ├── compose.kafka.yml
+    │       ├── quiz3_load_methods_and_retry_safety.ipynb
+    │       └── quiz3_load_methods_and_retry_safety.yaml
     ├── level2/
     │   ├── README.md
     │   ├── module04-modeling/
@@ -71,10 +78,11 @@ doris-course/
             └── lab10_manage_data.ipynb                  planned
 ```
 
-`course.md` and a lab belong to the module that teaches them. A Compose file,
-driver, or fixture used by only one module stays with that module. Python
-dependencies, notebook presentation, Docker/Doris access, S3 access, dataset
-contracts, and expected results are shared at the course root.
+Course notes, labs, and knowledge checks belong to the module that teaches
+them. A Compose file, driver, or fixture used by only one module stays with
+that module. Python dependencies, notebook presentation, Docker/Doris access,
+S3 access, dataset contracts, and expected results are shared at the course
+root.
 
 Generated content is not committed: `.venv/`, `course_secrets.env`, notebook
 checkpoints, downloaded fixtures, and local JAR files remain local runtime
@@ -134,7 +142,7 @@ independent names:
 | --- | --- | --- |
 | Level 1, Module 1 | `events` | Persistent baseline shared with later modules |
 | Level 1, Module 2 | `events_v2`, `events_v3`, `model_dup`, `model_uniq`, `model_agg` | Physical-layout and table-model comparisons |
-| Level 1, Module 3 | `events_stream`, `events_s3`, `events_routine` | Independent targets for each ingestion path |
+| Level 1, Module 3 | `events_stream`, `events_s3`, `events_routine` | Independent targets for each load method |
 
 Later modules treat `doris_course.events` as read-only and create their own
 descriptively named derived tables. Rerunnable notebooks may `DROP`, `TRUNCATE`,
@@ -160,6 +168,14 @@ The optional Metabase lab is:
 
 ```text
 level1/module01-introduction/optional_metabase_dashboard.ipynb
+```
+
+The Level 1 knowledge checks are independent of Docker, Doris, Kafka, and S3:
+
+```text
+level1/module01-introduction/quiz1_doris_fundamentals.ipynb
+level1/module02-architecture/quiz2_doris_architecture_and_physical_design.ipynb
+level1/module03-loading-data/quiz3_load_methods_and_retry_safety.ipynb
 ```
 
 Lab 1 loads 10,158,080 ecommerce event rows from the read-only course S3

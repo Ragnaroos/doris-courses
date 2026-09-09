@@ -1,4 +1,4 @@
-"""Kafka and Routine Load entry points used by continuous-ingestion labs."""
+"""Kafka and Routine Load entry points used by continuous-loading labs."""
 
 from typing import Any
 

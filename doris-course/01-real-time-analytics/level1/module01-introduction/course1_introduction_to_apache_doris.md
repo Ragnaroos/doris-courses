@@ -5,7 +5,7 @@
 | Course | Real-time Analytics with Apache Doris — Level 1 |
 | Product baseline | Apache Doris 4.x |
 | Lab version | Apache Doris 4.1.3 |
-| Estimated time | Approximately 60 minutes, including the guided lab |
+| Estimated time | Approximately 60 minutes, including the guided lab and quiz |
 
 ## Module goal
 
@@ -21,16 +21,17 @@ event dataset.
 
 After completing this module, you will be able to:
 
-1. Define Apache Doris as an open-source, real-time analytical database.
+1. Define Apache Doris as an open-source, real-time analytics and search
+   database built on an MPP architecture.
 2. Distinguish OLAP and OLTP by workload characteristics rather than by product
    labels alone.
 3. Recognize workloads suited to Doris, including real-time dashboards,
    customer-facing analytics, observability, lakehouse analytics, and
-   CDC-driven reporting.
+   change data capture (CDC)-driven reporting.
 4. Summarize the responsibilities of Frontend (FE) and Backend (BE) nodes.
 5. Distinguish the integrated storage-compute architecture from the decoupled
    storage-compute architecture.
-6. Connect to Doris through the MySQL protocol, create a basic table, load
+6. Connect to Doris through the MySQL-compatible protocol, create a basic table, load
    sample data, and execute an aggregation query.
 
 ## Module structure
@@ -41,8 +42,8 @@ After completing this module, you will be able to:
 | 1.2 OLAP and OLTP Workloads | Reading/visual | 8 min | Classify workloads using query and write characteristics |
 | 1.3 Where Doris Fits | Scenario walkthrough | 7 min | Identify suitable Doris use cases and system boundaries |
 | 1.4 A First Look at Doris Architecture | Reading/visual | 9 min | Explain FE, BE, and the two deployment architectures |
-| 1.5 Your First Doris Workflow | Guided walkthrough | 5 min | Follow the path from a client connection to an analytical result |
 | Lab 1 | Hands-on | 25 min | Start Doris and build the persistent baseline dataset |
+| Quiz 1 | Interactive knowledge check | 5 min | Check the Module 1 workload and architecture mental models |
 
 ---
 
@@ -102,12 +103,12 @@ different from looking up one order by its primary key.
 
 Analytical queries often read a few columns from many rows. Doris stores
 internal-table data by column, so a query can avoid reading unrelated columns.
-Its vectorized engine processes batches of column values rather than moving one
+Its vectorized execution engine processes batches of column values rather than moving one
 row at a time through every operator. Together with MPP execution, this design
 supports large scans, filtering, joins, and aggregations.
 
 > **Mental model:** Doris is not “a faster MySQL.” It presents a familiar SQL
-> and MySQL-protocol interface, but its storage and execution engine are built
+> and MySQL-compatible protocol, but its storage and execution engine are built
 > for analytical workloads.
 
 The [Apache Doris project README](https://github.com/apache/doris) and
@@ -157,7 +158,10 @@ Imagine an ecommerce checkout:
 1. A customer confirms an order.
 2. The application validates inventory and payment.
 3. The operational database commits the order and updates its status.
-4. The change is delivered to Doris through a stream or CDC pipeline.
+4. The change is delivered to Doris through a stream or change data capture
+   (CDC) pipeline. CDC continuously copies committed changes from the
+   operational database to downstream systems without moving analytical reads
+   onto the transactional database.
 5. A dashboard recalculates revenue, conversion, and regional demand.
 
 The order commit is OLTP. The dashboard queries are OLAP. They are connected,
@@ -167,7 +171,7 @@ but they optimize for different units of work.
 Customer request
       |
       v
-OLTP database ---- change stream / CDC ----> Apache Doris
+OLTP database ---- change stream / CDC pipeline ----> Apache Doris
       |                                         |
 operational truth                         analytical serving
                                                 |
@@ -260,7 +264,7 @@ transactional database.
 
 **Fit signal:** the source system must remain optimized for transactions, but
 the business needs near-real-time analysis of its changing data. Doris supports
-CDC-oriented integrations such as Flink CDC; the available ingestion choices
+CDC-oriented integrations such as Flink CDC; the available load methods
 are introduced in Module 3 and summarized in the official
 [load overview](https://doris.apache.org/docs/4.x/data-operate/import/load-manual/).
 
@@ -292,7 +296,8 @@ include:
 - accepting MySQL-compatible client connections;
 - authenticating users and checking privileges;
 - parsing and analyzing SQL;
-- creating and optimizing query plans;
+- creating and optimizing a distributed query plan, then assigning its plan
+  fragments to BE nodes for execution;
 - managing SQL-layer metadata such as databases, tables, and schemas;
 - coordinating distributed execution and node management.
 
@@ -301,10 +306,10 @@ to the FE. “Frontend” does not mean a graphical web interface.
 
 ### Backend (BE)
 
-The BE executes query-plan fragments using the vectorized execution engine. In
-the integrated architecture, it also stores internal-table data on local
-storage. Across a production cluster, multiple BEs can scan and aggregate
-different pieces of a table in parallel.
+The BE executes the assigned plan fragments using the vectorized execution
+engine. In the integrated storage-compute architecture, it also stores
+internal-table data on local storage. Across a production cluster, multiple
+BEs can scan and aggregate different pieces of a table in parallel.
 
 ```text
 MySQL-compatible client
@@ -314,7 +319,7 @@ MySQL-compatible client
 Frontend (FE)
   parse -> analyze -> optimize -> coordinate
           |
-          | distributed plan fragments
+          | assigned plan fragments
           v
 Backend (BE)
   scan -> filter -> aggregate -> return partial results
@@ -325,9 +330,9 @@ provides the complete FE and BE responsibility model.
 
 ### Integrated storage-compute architecture
 
-In the integrated architecture, a BE is stateful: it executes queries and
-stores internal-table data on local disks. Storage capacity and compute
-capacity therefore scale together as BE nodes are added.
+In the integrated storage-compute architecture, a BE is stateful: it executes
+queries and stores internal-table data on local disks. Storage capacity and
+compute capacity therefore scale together as BE nodes are added.
 
 This architecture is a strong fit when:
 
@@ -341,13 +346,14 @@ production-ready cluster.
 
 ### Decoupled storage-compute architecture
 
-In the decoupled architecture, persistent table data lives in shared storage
-such as object storage or HDFS. BE nodes act as stateless compute nodes and use
-local storage as a cache. Compute Groups can scale and isolate workloads
-without creating a full independent copy of the persistent data.
+In the decoupled storage-compute architecture, persistent table data lives in
+shared storage such as object storage or HDFS. BE nodes act as stateless
+compute nodes and use local storage as a cache. Compute Groups can scale and
+isolate workloads without creating a full independent copy of the persistent
+data.
 
 The architecture also introduces a Meta Service for data-layer metadata such
-as tablets, Rowsets, and ingestion transactions. FE remains the SQL entry,
+as tablets, Rowsets, and load transactions. FE remains the SQL entry,
 planning, and SQL-metadata layer.
 
 This architecture is a strong fit when:
@@ -358,7 +364,7 @@ This architecture is a strong fit when:
 
 ### Compare the two architectures
 
-| Question | Integrated storage-compute | Decoupled storage-compute |
+| Question | Integrated storage-compute architecture | Decoupled storage-compute architecture |
 | --- | --- | --- |
 | Where is persistent table data stored? | BE local storage | Shared storage layer |
 | What does a BE do? | Stores data and executes queries | Executes queries and caches hot data |
@@ -369,116 +375,6 @@ This architecture is a strong fit when:
 Neither architecture changes the SQL goal of this module. The choice changes
 where data is stored and how resources are scaled—not whether learners can
 connect with SQL and query a table.
-
----
-
-## 1.5 Your First Doris Workflow
-
-A minimal Doris workflow has six stages:
-
-```text
-Connect -> inspect -> create database -> create table -> load -> query
-```
-
-### 1. Connect to FE
-
-Doris supports the MySQL protocol, so many MySQL-compatible clients and drivers
-can connect to it. In the course sandbox:
-
-```bash
-mysql -h 127.0.0.1 -P 9030 -u root
-```
-
-MySQL protocol compatibility does not mean every MySQL feature or storage
-behavior is identical. It means existing client libraries and tools can use a
-familiar connection protocol and SQL interface.
-
-### 2. Inspect the environment
-
-```sql
-SELECT VERSION();
-SHOW FRONTENDS;
-SHOW BACKENDS;
-```
-
-These statements answer three different questions:
-
-- Which Doris build accepted the connection?
-- Is an FE available to plan and coordinate SQL?
-- Is a BE available to execute queries and, in this sandbox, store data?
-
-### 3. Create a database and table
-
-The following small example mirrors the schema used in the lab:
-
-```sql
-CREATE DATABASE IF NOT EXISTS doris_course;
-USE doris_course;
-
-CREATE TABLE IF NOT EXISTS events_demo (
-    event_time DATETIME NOT NULL,
-    event_id BIGINT NOT NULL,
-    user_id BIGINT NOT NULL,
-    event_type VARCHAR(32) NOT NULL,
-    region VARCHAR(16) NOT NULL,
-    product_id BIGINT NOT NULL,
-    revenue DECIMAL(12, 2) NOT NULL DEFAULT "0.00"
-)
-PROPERTIES (
-    "replication_num" = "1"
-);
-```
-
-The one-replica setting is specific to the single-BE teaching sandbox. Table
-models, sort keys, partitions, buckets, and production replica design belong to
-Module 2.
-
-### 4. Load a few rows
-
-```sql
-INSERT INTO events_demo VALUES
-    ('2026-01-01 09:00:00', 1, 101, 'view',     'region_01', 7001,  0.00),
-    ('2026-01-01 09:02:00', 2, 101, 'cart',     'region_01', 7001,  0.00),
-    ('2026-01-01 09:05:00', 3, 101, 'purchase', 'region_01', 7001, 29.95);
-```
-
-This is enough to demonstrate the workflow. It is not a recommendation to send
-millions of individual SQL statements. Module 3 compares Doris loading methods
-for local files, object storage, applications, and Kafka.
-
-### 5. Run an analytical query
-
-```sql
-SELECT
-    event_type,
-    COUNT(*) AS event_count,
-    SUM(revenue) AS total_revenue
-FROM events_demo
-GROUP BY event_type
-ORDER BY event_count DESC;
-```
-
-The result contains one row for each event type. The query reads detail events
-but returns a grouped summary—the fundamental shape of an analytical query.
-
-### 6. Read the workflow as a system
-
-```text
-Client sends SQL
-      |
-      v
-FE parses and plans
-      |
-      v
-BE stores/scans data and executes aggregation
-      |
-      v
-Client receives the grouped result
-```
-
-The SQL interface is intentionally simple. The distributed planning, storage,
-and vectorized execution behind it are what allow the same workflow to scale to
-larger analytical datasets.
 
 ---
 
@@ -528,14 +424,23 @@ regions are teaching data and do not represent real user locations.
 - Doris is suited to fresh, interactive analytical workloads such as
   dashboards, customer-facing analytics, observability, lakehouse analytics,
   and CDC-driven reporting.
-- FE accepts requests, manages SQL metadata, and plans and coordinates queries.
-- BE executes queries; in the integrated architecture it also stores internal
-  table data.
+- FE accepts and analyzes SQL, creates and optimizes a distributed query plan,
+  and assigns its plan fragments to BE nodes.
+- BE nodes execute the assigned plan fragments; in the integrated
+  storage-compute architecture they also store internal-table data.
 - Integrated storage-compute favors a simple stateful FE/BE deployment, while
   decoupled storage-compute enables shared persistent storage and independently
   scalable compute.
 - A first Doris workflow is straightforward: connect, inspect, create, load,
   query, and validate.
+
+## Quiz 1: Apache Doris Fundamentals
+
+Complete the five-question interactive knowledge check after finishing the
+course and Lab 1. Each question covers a different learning objective; the
+quiz does not require a running Doris sandbox.
+
+[Open Quiz 1 — Apache Doris Fundamentals](quiz1_doris_fundamentals.ipynb)
 
 ## Official references
 
