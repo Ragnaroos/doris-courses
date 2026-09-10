@@ -1,0 +1,102 @@
+title: "Module 1 Quiz: Apache Doris Fundamentals"
+description: >-
+  Five questions check the core workload and architecture decisions introduced
+  in Module 1. Each question assesses a different learning objective.
+questions:
+  - id: define_doris
+    objective: "Define Apache Doris"
+    prompt: "Which statement best describes Apache Doris?"
+    options:
+      - id: dashboard
+        text: "A dashboard application that stores chart definitions"
+      - id: object_store
+        text: "An object-storage service designed primarily to hold Parquet files"
+      - id: realtime_analytics
+        text: "An open-source, real-time analytics and search database built on an MPP architecture"
+      - id: oltp_plugin
+        text: "A row-oriented OLTP database with an analytical plug-in"
+    answer: realtime_analytics
+    explanation: >-
+      Doris is an open-source, real-time analytics and search database built
+      on an MPP architecture. BI tools and object storage can connect to Doris,
+      but neither one defines what Doris is.
+
+  - id: identify_olap
+    objective: "Distinguish OLAP from OLTP"
+    prompt: "Which request is the clearest example of an OLAP workload?"
+    options:
+      - id: update_address
+        text: "Update the delivery address for one order"
+      - id: revenue_by_region
+        text: "Scan 100 million events and calculate revenue by region and hour"
+      - id: payment_token
+        text: "Look up the current payment token for one checkout"
+      - id: reserve_inventory
+        text: "Reserve one product unit and commit the transaction"
+    answer: revenue_by_region
+    explanation: >-
+      The revenue request scans and aggregates many records. The other requests
+      are small operational lookups or state-changing transactions, which are
+      characteristic of OLTP.
+
+  - id: choose_cdc_reporting
+    objective: "Recognize a suitable Doris use case"
+    prompt: >-
+      An ecommerce company must keep its OLTP database as the system of record,
+      but dashboards need committed order changes within seconds without
+      running large scans on that database. Which design is the best fit?
+    options:
+      - id: dashboard_on_oltp
+        text: "Run every dashboard aggregation directly on the OLTP database"
+      - id: nightly_export
+        text: "Export a full snapshot once each night"
+      - id: object_storage_only
+        text: "Copy files to object storage without adding a query engine"
+      - id: cdc_to_doris
+        text: "Use change data capture to deliver committed changes to Doris for analytics"
+    answer: cdc_to_doris
+    explanation: >-
+      Change data capture keeps the operational database responsible for
+      transactions while continuously delivering committed changes to Doris,
+      where dashboards can run analytical queries.
+
+  - id: fe_be_responsibilities
+    objective: "Distinguish FE and BE responsibilities"
+    prompt: "Which description correctly follows a query through Doris?"
+    options:
+      - id: be_plans_fe_executes
+        text: "BE creates the distributed query plan; FE executes every plan fragment"
+      - id: both_store_only
+        text: "FE and BE only store replicas; the MySQL client executes the query"
+      - id: fe_plans_be_executes
+        text: "FE creates and optimizes a distributed query plan, then assigns its plan fragments; BE executes the assigned plan fragments"
+      - id: fe_is_dashboard
+        text: "FE renders charts; BE translates those charts into SQL"
+    answer: fe_plans_be_executes
+    explanation: >-
+      FE accepts and analyzes SQL, creates and optimizes a distributed query
+      plan, then assigns its plan fragments. BE nodes execute the assigned plan
+      fragments; in the integrated storage-compute architecture they also
+      store internal-table data.
+
+  - id: choose_architecture
+    objective: "Compare Doris deployment architectures"
+    prompt: >-
+      A team wants persistent data in shared object storage and separate compute
+      groups that can scale independently and isolate workloads. Which
+      architecture matches those requirements?
+    options:
+      - id: decoupled
+        text: "Decoupled storage-compute architecture"
+      - id: integrated
+        text: "Integrated storage-compute architecture"
+      - id: oltp_replica
+        text: "A read replica of the OLTP database"
+      - id: single_file
+        text: "A standalone Parquet file without Doris"
+    answer: decoupled
+    explanation: >-
+      In the decoupled storage-compute architecture, persistent data lives in
+      shared storage, and compute groups can scale and isolate workloads
+      independently. In the integrated storage-compute architecture, stateful
+      BE nodes store data locally and scale storage and compute together.

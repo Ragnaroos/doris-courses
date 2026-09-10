@@ -1,0 +1,120 @@
+title: "Module 3 Quiz: Load Methods and Retry Safety"
+description: >-
+  Five questions check the load-method selection, quality, persistence,
+  continuous-consumption, and retry decisions introduced in Module 3. Each
+  question assesses a different learning objective.
+questions:
+  - id: choose_group_commit_mode
+    objective: "Reduce high-frequency small-write pressure"
+    prompt: >-
+      An application has 30 workers sending frequent tiny Stream Load requests
+      to the same table. FE transaction overhead and Tablet version pressure
+      are increasing. Each request must return only after its rows are visible.
+      What is the best starting point?
+    options:
+      - id: s3_tvf
+        text: "Replace Stream Load with an S3 TVF so the application writes each small batch to object storage first"
+      - id: async_group_commit
+        text: "Enable Group Commit in async_mode and treat the response as proof that the rows are already visible"
+      - id: routine_load
+        text: "Create a Routine Load job without Kafka and use it to combine the existing HTTP requests"
+      - id: sync_group_commit
+        text: "Keep Stream Load and enable Group Commit in sync_mode so compatible small writes share fewer load transactions and each request returns after the grouped transaction commits"
+    answer: sync_group_commit
+    explanation: >-
+      Group Commit is a server-side optimization layered on compatible Stream
+      Load or INSERT INTO VALUES writes. It reduces repeated FE transaction
+      work and Tablet version pressure by grouping small writes into fewer load
+      transactions. sync_mode waits for the grouped transaction to commit and
+      become visible; async_mode returns after the data is durable in the BE
+      write-ahead log and visibility follows later.
+
+  - id: interpret_quality_rejection
+    objective: "Interpret Stream Load quality evidence"
+    prompt: >-
+      A ten-row Stream Load request uses strict type conversion and
+      max_filter_ratio:0. One revenue value is not-a-number, and no where
+      condition is used. Which outcome should you expect?
+    options:
+      - id: partial_commit
+        text: "Nine rows commit, one row is unselected, and the transaction succeeds because most rows are valid"
+      - id: reject_transaction
+        text: "One row is filtered, the complete load transaction is rejected, no row from this request becomes visible, and ErrorURL can identify the bad row when provided"
+      - id: cast_to_zero
+        text: "Doris silently converts not-a-number to 0.00, so all ten rows commit without a quality warning"
+      - id: where_rejection
+        text: "All ten rows are unselected because max_filter_ratio is a where condition"
+    answer: reject_transaction
+    explanation: >-
+      The invalid DECIMAL conversion creates a filtered row. With zero
+      tolerance, that row makes the complete load transaction fail, so the
+      other valid rows do not commit. Unselected rows are valid rows excluded
+      by a where condition. ErrorURL is a temporary diagnostic for sample
+      error rows when Doris returns it.
+
+  - id: retry_stream_load
+    objective: "Retry an uncertain Stream Load safely"
+    prompt: >-
+      A client sends 1,024 rows with a Stream Load label, but loses the HTTP
+      response and cannot tell whether Doris committed. What should it do?
+    options:
+      - id: new_label
+        text: "Send the same bytes with a new label so Doris recognizes the request as the same transaction"
+      - id: insert_select
+        text: "Convert the retry to INSERT INTO SELECT because SQL automatically reuses the Stream Load transaction"
+      - id: publish_kafka
+        text: "Publish the rows to Kafka because Routine Load deduplicates any identical business values"
+      - id: same_label
+        text: "Send the same bytes with the same label, inspect Label Already Exists and ExistingJobStatus when returned, and verify that the target count did not increase"
+    answer: same_label
+    explanation: >-
+      The same batch should retain the same Stream Load label. A finished
+      existing label prevents a second commit and provides label-based
+      At-Most-Once duplicate protection. A different label identifies a new
+      load transaction and can append the rows again to a Duplicate Key model
+      table.
+
+  - id: distinguish_s3_tvf_insert
+    objective: "Separate remote access from persistence"
+    prompt: >-
+      Which statement correctly describes an S3 TVF followed by INSERT INTO
+      SELECT?
+    options:
+      - id: correct_s3_boundary
+        text: "The S3 TVF exposes remote files as a temporary relation; SELECT can transform those rows; INSERT INTO SELECT commits the query result to an internal table, and blindly rerunning it is a new load transaction"
+      - id: tvf_persists
+        text: "Selecting from the S3 TVF automatically stores every remote row in BE local storage, so INSERT INTO SELECT only renames the result"
+      - id: tvf_tracks_offsets
+        text: "The S3 TVF continuously tracks object offsets and provides the same managed consumer state as a Routine Load job"
+      - id: insert_reuses_label
+        text: "INSERT INTO SELECT automatically reuses a stable Stream Load label, so every rerun is duplicate-safe"
+    answer: correct_s3_boundary
+    explanation: >-
+      An S3 TVF reads and parses remote objects for the current query but does
+      not persist them. INSERT INTO SELECT creates the load transaction that
+      saves the query result. Its statement does not expose a learner-supplied
+      Stream Load label, so a production workflow needs external batch state
+      and an idempotent target design.
+
+  - id: reason_about_routine_load
+    objective: "Reason about continuous Kafka loading"
+    prompt: >-
+      A Kafka topic receives nested JSON continuously. Which design and
+      recovery statement are correct?
+    options:
+      - id: s3_jsonpaths
+        text: "Use an S3 TVF with jsonpaths; pausing it stores the current S3 byte position in Kafka"
+      - id: stream_label_offsets
+        text: "Use one permanent Stream Load label; every new Kafka message reuses that label and is automatically appended"
+      - id: routine_mapping_offsets
+        text: "Use a Routine Load job with jsonpaths and COLUMNS mapping; its micro-batch transactions commit target rows and Kafka offset progress together, so pause and resume continue from committed offsets"
+      - id: group_commit_consumer
+        text: "Use Group Commit as the Kafka consumer; async_mode parses nested JSON and deletes committed messages from the topic"
+    answer: routine_mapping_offsets
+    explanation: >-
+      A Routine Load job is the Doris-managed, long-running Kafka consumer
+      job. jsonpaths extracts nested values and COLUMNS maps or transforms them
+      for the target schema. Doris commits each task's target data and Kafka
+      offset progress together. Pause and resume preserve that progress;
+      publishing the same JSON again creates new Kafka messages rather than a
+      retry.

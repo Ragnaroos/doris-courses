@@ -1,0 +1,114 @@
+title: "Module 2 Quiz: Doris Architecture and Physical Design"
+description: >-
+  Five questions check the query-execution, storage, table-model, physical-design,
+  and diagnostic decisions introduced in Module 2. Each question assesses a
+  different learning objective.
+questions:
+  - id: trace_query_execution
+    objective: "Trace distributed query execution"
+    prompt: "Which statement correctly traces an analytical query through Doris?"
+    options:
+      - id: client_fragments
+        text: "The MySQL-compatible client creates plan fragments and sends them directly to Tablets"
+      - id: be_plans_fe_scans
+        text: "BE creates the distributed query plan, while FE scans Segments and returns partial results"
+      - id: fe_plans_be_executes
+        text: "FE creates and optimizes a distributed query plan and assigns its plan fragments; BE nodes execute the assigned plan fragments with physical operators"
+      - id: fe_executes_all
+        text: "FE executes every scan and aggregation, while BE stores only SQL-layer metadata"
+    answer: fe_plans_be_executes
+    explanation: >-
+      FE accepts and analyzes SQL, creates and optimizes a distributed query
+      plan, and assigns its plan fragments. BE nodes execute the assigned plan
+      fragments. A physical operator, represented as a PlanNode, performs work
+      such as a scan, filter, Exchange, join, or aggregation inside a plan
+      fragment.
+
+  - id: storage_hierarchy_compaction
+    objective: "Relate the storage hierarchy to loading and Compaction"
+    prompt: >-
+      Which description correctly connects Doris's physical storage hierarchy,
+      a load transaction, and Compaction?
+    options:
+      - id: segment_contains_tablet
+        text: "A Segment contains Tablets, and Compaction combines Partitions into one Table"
+      - id: correct_hierarchy
+        text: "A Partition contains Buckets represented by Tablets; a load transaction can create Rowsets containing immutable Segments, and Compaction rewrites Rowsets within a Tablet"
+      - id: rowset_global
+        text: "Each load transaction creates one global Rowset shared by every Table and every Tablet"
+      - id: compaction_changes_result
+        text: "Compaction moves rows between unrelated Tablets and intentionally changes the logical query result"
+    answer: correct_hierarchy
+    explanation: >-
+      The physical hierarchy is Partition, Bucket/Tablet, Rowset, and Segment.
+      A load transaction can create a Rowset in each affected Tablet, and each
+      Rowset contains immutable columnar Segments. Background Compaction merges
+      or rewrites Rowsets within one Tablet to reduce read amplification without
+      changing the logical query result.
+
+  - id: choose_table_model
+    objective: "Choose repeated-key semantics"
+    prompt: >-
+      Three tables receive another row with the same key values. Which mapping
+      of requirement to table model is correct?
+    options:
+      - id: correct_models
+        text: "Retain every event: Duplicate Key model; expose the latest entity state: Unique Key model; combine declared measures: Aggregate Key model"
+      - id: duplicate_unique
+        text: "Retain every event: Unique Key model; expose the latest entity state: Duplicate Key model; combine measures: Aggregate Key model"
+      - id: aggregate_detail
+        text: "Retain every event: Aggregate Key model; expose the latest entity state: Unique Key model; combine measures: Duplicate Key model"
+      - id: all_primary_keys
+        text: "All three models reject repeated key values because every Doris key is equivalent to a MySQL PRIMARY KEY"
+    answer: correct_models
+    explanation: >-
+      The Duplicate Key model retains every input row. The Unique Key model
+      exposes one logical row per key and supports upsert behavior. The Aggregate
+      Key model combines value columns with the aggregation functions declared
+      in the DDL. In the Duplicate Key model, key columns define the sort key;
+      they are not a uniqueness constraint.
+
+  - id: choose_physical_design
+    objective: "Distinguish physical-design responsibilities"
+    prompt: >-
+      An event table is queried by a one-day time range and an exact user_id.
+      Which design gives each physical-design tool its correct responsibility?
+    options:
+      - id: all_prefix
+        text: "Use only a longer Prefix Index because it can replace partitioning, bucketing, and the sort key"
+      - id: random_user_pruning
+        text: "Use Random bucketing to guarantee bucket (tablet) pruning for user_id, and partition by event_id"
+      - id: correct_design
+        text: "Partition by event time for coarse partition pruning, Hash bucket by user_id for bucket (tablet) pruning, and place common selective filters early in the sort key so the Prefix Index can narrow row ranges"
+      - id: partition_uniqueness
+        text: "Partition by user_id to enforce uniqueness, then use the Prefix Index to remove entire Partitions"
+    answer: correct_design
+    explanation: >-
+      Partitioning defines logical range and lifecycle boundaries. Hash bucketing
+      distributes rows within each Partition and can enable bucket (tablet)
+      pruning for compatible equality predicates. The sort key orders rows
+      within Tablets, and the Prefix Index is the sparse index over its leading
+      prefix. The four tools are complementary rather than interchangeable.
+
+  - id: interpret_explain_profile
+    objective: "Interpret planned and runtime evidence"
+    prompt: >-
+      EXPLAIN reports partitions=1/26, tablets=1/260, and a scan predicate. The
+      executed query's Query Profile also reports fewer scan rows and bytes.
+      Which conclusion is justified?
+    options:
+      - id: result_changed
+        text: "Doris discarded matching rows, so the optimized query should return a different result"
+      - id: compaction_proved
+        text: "The evidence proves that Compaction ran during this query and created exactly one Rowset"
+      - id: pushdown_only
+        text: "The scan predicate alone proves that every Partition and Tablet was scanned"
+      - id: pruning_and_runtime
+        text: "FE planned partition pruning and bucket (tablet) pruning, while Query Profile shows that BE nodes performed less scan work when executing the assigned plan fragments"
+    answer: pruning_and_runtime
+    explanation: >-
+      EXPLAIN describes the distributed query plan: 1/26 and 1/260 show that FE
+      excluded Partitions and Tablets. A scan predicate shows predicate pushdown,
+      which is related but not identical to pruning. Query Profile supplies
+      runtime evidence from BE execution, such as scan rows and bytes. Reduced
+      work must still produce the same logical query result.
