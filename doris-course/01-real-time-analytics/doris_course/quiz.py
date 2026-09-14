@@ -44,6 +44,7 @@ _QUIZ_STYLES = """
   line-height: 1.5;
   font-weight: 700;
   margin: 8px 0 14px;
+  white-space: pre-wrap;
 }
 .doris-quiz-objective {
   display: inline-block;
@@ -118,24 +119,27 @@ _QUIZ_STYLES = """
 .doris-quiz-shell .widget-radio-box label input[type="radio"],
 .doris-quiz-shell .jupyter-widget-radio-box label input[type="radio"] {
   position: absolute;
-  top: 1px;
+  top: calc(0.725em - 8px);
+  font-size: inherit;
   left: 0;
   float: none !important;
   width: 16px;
   height: 16px !important;
   margin: 0 !important;
 }
-.doris-quiz-shell .jupyter-button {
+.doris-quiz-root .jupyter-button {
   display: inline-flex;
   align-items: center;
   justify-content: center;
   gap: 8px;
 }
-.doris-quiz-shell .jupyter-button i,
-.doris-quiz-shell .jupyter-button .fa {
+.doris-quiz-root .jupyter-button i,
+.doris-quiz-root .jupyter-button .fa {
   margin: 0;
   line-height: 1;
 }
+.doris-quiz-controls { gap: 8px; flex-wrap: wrap; }
+.doris-quiz-controls .jupyter-button { width: 170px; flex: 0 0 170px; }
 </style>
 """
 
@@ -276,7 +280,7 @@ class CourseQuiz:
             description="Previous question",
             icon="arrow-left",
             layout=widgets.Layout(
-                display="none" if self._current == 0 else "inline-flex"
+                visibility="hidden" if self._current == 0 else "visible"
             ),
         )
         submit = widgets.Button(
@@ -290,7 +294,7 @@ class CourseQuiz:
         next_button = widgets.Button(
             description=next_label,
             icon="arrow-right",
-            layout=widgets.Layout(display="none"),
+            layout=widgets.Layout(visibility="hidden"),
         )
 
         def show_feedback(selected: str) -> None:
@@ -310,9 +314,8 @@ class CourseQuiz:
                 )
 
         if saved_answer is not None:
-            choices.disabled = True
             submit.disabled = True
-            next_button.layout.display = "inline-flex"
+            next_button.layout.visibility = "visible"
             show_feedback(saved_answer)
 
         def submit_answer(_: widgets.Button) -> None:
@@ -326,10 +329,19 @@ class CourseQuiz:
 
             self._answers[question.question_id] = str(selected)
             self._drafts.pop(question.question_id, None)
-            choices.disabled = True
             submit.disabled = True
-            next_button.layout.display = "inline-flex"
+            next_button.layout.visibility = "visible"
             show_feedback(str(selected))
+
+        def change_selection(change: dict) -> None:
+            self._answers.pop(question.question_id, None)
+            if change["new"] is not None:
+                self._drafts[question.question_id] = str(change["new"])
+            submit.disabled = False
+            next_button.layout.visibility = "hidden"
+            feedback.value = ""
+
+        choices.observe(change_selection, names="value")
 
         def go_back(_: widgets.Button) -> None:
             if question.question_id not in self._answers and choices.value is not None:
@@ -347,7 +359,14 @@ class CourseQuiz:
         submit.on_click(submit_answer)
         next_button.on_click(advance)
         previous_button.on_click(go_back)
-        controls = widgets.HBox([previous_button, submit, next_button])
+        for button in (previous_button, submit, next_button):
+            button.layout.width = "170px"
+            button.layout.flex = "0 0 170px"
+        controls = widgets.HBox(
+            [previous_button, submit, next_button],
+            layout=widgets.Layout(flex_flow="row wrap"),
+        )
+        controls.add_class("doris-quiz-controls")
         content = widgets.VBox([header, choices, feedback, controls])
         content.add_class("doris-quiz-shell")
         content.layout = widgets.Layout(max_width="920px")
@@ -415,6 +434,7 @@ class CourseQuiz:
         retry.on_click(restart)
         previous_button.on_click(review_last_question)
         controls = widgets.HBox([previous_button, retry])
+        controls.add_class("doris-quiz-controls")
         content = widgets.VBox([result, controls])
         content.layout = widgets.Layout(max_width="920px")
         self._root.children = (content,)

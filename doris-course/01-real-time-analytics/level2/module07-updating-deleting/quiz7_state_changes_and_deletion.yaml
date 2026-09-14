@@ -1,0 +1,148 @@
+title: State Changes and Deletion
+description: Apply Module 7 concepts to small, independent business scenarios. Read the explanation
+  and revise any answer before continuing.
+questions:
+- objective: Choose a predicate correction
+  prompt: A Unique Key customer-state table has an incorrect category for a small set selected by
+    a SQL predicate. This is a one-time correction to a value column; no incoming replacement records
+    exist. Which path directly fits?
+  options:
+  - id: a
+    text: A full-row upsert reconstructed from only the corrected category.
+  - id: b
+    text: SQL UPDATE with the selection predicate and category in SET.
+  - id: c
+    text: Delete Sign for the matching customers.
+  - id: d
+    text: TRUNCATE the containing Partition and reload only the corrected rows.
+  answer: b
+  explanation: SQL UPDATE scans the selected rows and changes the named value column. Full-row upsert
+    fits incoming complete states, while partial column update fits incoming key-based patches. Delete
+    Sign removes customers, and truncating a Partition removes unrelated rows as well.
+  alignment:
+    course: 7.1; 7.4
+    lab: '3'
+    course_review_required: false
+  id: m7_q1
+- objective: Order states by the source sequence
+  prompt: 'A Doris Unique Key table named package_status stores one current row per delivery
+    package, using package_id as its Key. The table configures source_version as its Sequence
+    column. For package_id = 41, three complete status records arrive in this order: in_transit
+    at version 8; delivered at version 10; then in_transit at version 9 (an older update that
+    arrived late). After all three loads finish, what does an ordinary query show for package 41?'
+  options:
+  - id: a
+    text: One current row with in_transit at version 9, because that record arrived last.
+  - id: b
+    text: Three rows, one for each received status record.
+  - id: c
+    text: One current row with in_transit at version 8, because the first record wins.
+  - id: d
+    text: One current row with delivered at version 10, because the highest Sequence wins.
+  answer: d
+  explanation: Sequence resolves competing states for the same Unique Key using source ordering.
+    The later-arriving version 9 cannot supersede version 10. Unique Key exposes one current logical
+    row, not a history of all accepted writes. Simply having a version column would not configure
+    this rule.
+  alignment:
+    course: '7.2'
+    lab: '1'
+    course_review_required: false
+  id: m7_q2
+- objective: Predict omitted value columns
+  prompt: Two independent copies of an existing Unique Key row have balance = 75.00 and note = 'verified'.
+    The schema declares balance DEFAULT '0.00' and nullable note with no explicit default. An accepted
+    full-row upsert in one copy and a supported partial column update in the other supply the Key
+    and status but omit balance and note. No Sequence column is configured. What happens?
+  options:
+  - id: a
+    text: Both retain 75.00 and verified.
+  - id: b
+    text: Both use 0.00 and NULL.
+  - id: c
+    text: Full-row uses 0.00 and NULL; partial update retains 75.00 and verified.
+  - id: d
+    text: Full-row retains the old values; partial update uses 0.00 and NULL.
+  answer: c
+  explanation: For an existing Key, a full-row upsert constructs the replacement using supplied values
+    and schema defaults or permitted NULL. A partial column update preserves omitted existing values.
+    Explicitly sending NULL differs from omission, and a new Key needs separate missing-column and
+    insertion-policy handling.
+  alignment:
+    course: '7.3'
+    lab: '2'
+    course_review_required: false
+  id: m7_q3
+- objective: Match deletion to its source
+  prompt: A Change Data Capture (CDC) batch contains deleted customer Keys for a Unique Key table
+    without a Sequence column. Separately, a maintenance job must remove rows whose category is test.
+    Which pairing directly represents these two sources?
+  options:
+  - id: a
+    text: Load Delete Sign for incoming deleted Keys; use predicate DELETE for category = test.
+  - id: b
+    text: Use TRUNCATE PARTITION for both because each operation removes rows.
+  - id: c
+    text: Use partial column update to omit every value column for incoming Keys; use UPDATE to set
+      category to NULL for test rows.
+  - id: d
+    text: Use a normal full-row upsert for incoming Keys; use INSERT OVERWRITE containing only the
+      test rows.
+  answer: a
+  explanation: Delete Sign represents key-based deletion arriving as data. Predicate DELETE identifies
+    rows through a condition. Omission and NULL assignment do not delete a logical row; normal upsert
+    writes state; overwrite containing test rows would retain the wrong population. Entire-partition
+    removal requires a different scope contract.
+  alignment:
+    course: '7.5'
+    lab: '4'
+    course_review_required: false
+  id: m7_q4
+- objective: Replace a complete Partition
+  prompt: A daily Partition must be rebuilt from a complete corrected dataset. Readers must have
+    the old contents until the replacement becomes visible, with no truncate-then-reload empty interval.
+    Which operation matches?
+  options:
+  - id: a
+    text: TRUNCATE TABLE ... PARTITION (...) followed by INSERT INTO.
+  - id: b
+    text: INSERT INTO the existing Duplicate Key Partition.
+  - id: c
+    text: DELETE every old row, then load the replacements in another statement.
+  - id: d
+    text: INSERT OVERWRITE targeting only that Partition with its complete replacement data.
+  answer: d
+  explanation: INSERT OVERWRITE builds replacement contents and switches the selected scope atomically.
+    Truncate-then-insert and delete-then-load introduce an interval between operations. Ordinary
+    INSERT INTO a Duplicate Key table appends rather than replacing omitted old rows. Atomic switching
+    is documented behavior; before/after Lab queries alone do not test concurrent readers.
+  alignment:
+    course: '7.6'
+    lab: '5: before/after results only'
+    course_review_required: true
+  id: m7_q5
+- objective: Separate visibility from cleanup
+  prompt: A deletion on a Unique Key Merge-on-Write (MoW) table has been published and is visible.
+    A new ordinary SELECT no longer returns the Key, but disk usage has not fallen. Which interpretation
+    is justified?
+  options:
+  - id: a
+    text: The deletion failed because disk usage must fall before a query can hide the row.
+  - id: b
+    text: Logical deletion is visible; obsolete physical data can remain until later Compaction,
+      and these observations do not expose the internal delete bitmap.
+  - id: c
+    text: The query must have executed Compaction to hide the row.
+  - id: d
+    text: The unchanged disk usage proves that the input Delete Sign column and internal delete bitmap
+      are the same object.
+  answer: b
+  explanation: Query visibility and physical reclamation are different stages. A new query after
+    publication can exclude the deleted Key while obsolete storage remains for later Compaction.
+    Neither a row count nor disk usage directly displays a delete bitmap. Delete Sign is an input-facing
+    marker, not that internal structure.
+  alignment:
+    course: '7.7'
+    lab: '4: visibility and metadata, not physical reclamation'
+    course_review_required: true
+  id: m7_q6

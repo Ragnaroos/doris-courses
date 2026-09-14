@@ -1030,6 +1030,87 @@ class DorisLab:
             time.sleep(0.4)
         raise RuntimeError(f"The Query Profile was not ready: {last_error or 'timed out'}")
 
+    def show_join_runtime_filter_profile(
+        self,
+        statement: str,
+        *,
+        probe_table: str,
+        title: str = "Probe-side Runtime Filter Profile",
+    ) -> str:
+        """Run a Join query and display the relevant raw MergedProfile counters."""
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", probe_table):
+            raise ValueError("probe_table must be an unqualified table name.")
+        query = statement.strip().rstrip(";")
+        if not query.upper().startswith("SELECT "):
+            raise ValueError("A SELECT statement is required.")
+
+        connection = self._require_connection()
+        settings = {
+            "enable_profile": "true",
+            "profile_level": "2",
+            "enable_condition_cache": "false",
+            "enable_query_cache": "false",
+            "enable_sql_cache": "false",
+        }
+        originals: dict[str, str] = {}
+        try:
+            with connection.cursor() as cursor:
+                for name, value in settings.items():
+                    cursor.execute(f"SHOW VARIABLES LIKE '{name}'")
+                    row = cursor.fetchone()
+                    if row is None:
+                        raise RuntimeError(f"Doris did not expose the session variable {name}.")
+                    originals[name] = str(row["Value"])
+                    cursor.execute(f"SET {name} = {value}")
+
+            existing_ids = {str(row["Profile ID"]) for row in self._query_profiles()}
+            with connection.cursor() as cursor:
+                cursor.execute(query)
+                result = cursor.fetchone()
+
+            profile_id = self._latest_profile_id(query, exclude=existing_ids)
+            profile = self._profile_text(profile_id)
+            merged = profile.split("MergedProfile:", 1)[-1].split("DetailProfile", 1)[0]
+            scan_header = re.search(
+                rf"(?m)^\s*OLAP_SCAN_OPERATOR\([^\n]*table_name={re.escape(probe_table)}\(",
+                merged,
+            )
+            if scan_header is None:
+                raise RuntimeError(f"The Profile has no merged Scan for {probe_table}.")
+
+            join_header = merged.rfind("HASH_JOIN_OPERATOR(", 0, scan_header.start())
+            join_block = merged[join_header:scan_header.start()] if join_header >= 0 else ""
+            next_operator = re.search(
+                r"(?m)^\s*[A-Z][A-Z_]+_OPERATOR\(",
+                merged[scan_header.end():],
+            )
+            scan_end = (
+                scan_header.end() + next_operator.start()
+                if next_operator else len(merged)
+            )
+            scan_block = merged[scan_header.start():scan_end]
+            join_lines = [
+                line for line in join_block.splitlines()
+                if "HASH_JOIN_OPERATOR(" in line or re.search(r"- ProbeRows:", line)
+            ]
+            scan_lines = [
+                line for line in scan_block.splitlines()
+                if "OLAP_SCAN_OPERATOR(" in line
+                or re.search(r"- (?:RowsProduced|ScanRows):", line)
+                or re.search(r"- RF\d+ (?:InputRows|FilterRows):", line)
+            ]
+            if not any(re.search(r"- RF\d+ FilterRows:", line) for line in scan_lines):
+                raise RuntimeError("The probe Scan Profile has no Runtime Filter row counters.")
+            excerpt = "\n".join(join_lines + scan_lines)
+            result_text = ", ".join(f"{name}={value}" for name, value in (result or {}).items())
+            print(f"Query result: {result_text}")
+            show_log(title, excerpt, opened=True)
+            return excerpt
+        finally:
+            with connection.cursor() as cursor:
+                for name, value in originals.items():
+                    cursor.execute(f"SET {name} = {value}")
+
     def compare_profiles(
         self,
         cases: Sequence[tuple[str, str]],

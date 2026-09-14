@@ -1,0 +1,138 @@
+title: Analytical Query Semantics
+description: Apply Module 5 concepts to small, independent business scenarios. Read the explanation
+  and revise any answer before continuing.
+questions:
+- objective: Choose by result shape
+  prompt: One operation converts each email to lowercase; another exposes a source as rows and columns
+    in FROM. Which function categories match these two contracts, in order?
+  options:
+  - id: a
+    text: Aggregate function; window function.
+  - id: b
+    text: Scalar function; table-valued function (TVF).
+  - id: c
+    text: Window function; scalar function.
+  - id: d
+    text: Table-valued function (TVF); aggregate function.
+  answer: b
+  explanation: A scalar function transforms a value for each input row. A TVF supplies a relation
+    that a query can read. Aggregates combine input rows, while window functions add calculations
+    over related rows without supplying a new FROM relation.
+  alignment:
+    course: '5.1'
+    lab: '1'
+    course_review_required: false
+  id: m5_q1
+- objective: Filter rows before groups
+  prompt: 'Rows are (store, status, amount): (A, paid, 60), (A, pending, 70), (B, paid, 110). A query
+    uses WHERE status = ''paid'', GROUP BY store, and HAVING SUM(amount) > 100. Which result remains?'
+  options:
+  - id: a
+    text: A with 130 and B with 110.
+  - id: b
+    text: A with 60 and B with 110.
+  - id: c
+    text: A with 130 only.
+  - id: d
+    text: B with 110 only.
+  answer: d
+  explanation: WHERE removes the pending row before aggregation. A therefore totals 60 and fails
+    HAVING; B totals 110 and passes. HAVING filters grouped totals, not individual purchases, and
+    the pending amount cannot enter the paid population.
+  alignment:
+    course: 5.3; 5.4
+    lab: 3; 4
+    course_review_required: false
+  id: m5_q2
+- objective: Preserve rows with a window
+  prompt: 'A filtered relation contains six payments: four for store A and two for store B. Query
+    G groups by store and selects SUM(amount). Query W selects each payment plus SUM(amount) OVER
+    (PARTITION BY store), with no DISTINCT or further filter. How many rows do G and W return?'
+  options:
+  - id: a
+    text: G returns 2; W returns 6.
+  - id: b
+    text: G returns 2; W returns 2.
+  - id: c
+    text: G returns 6; W returns 6.
+  - id: d
+    text: G returns 6; W returns 2.
+  answer: a
+  explanation: GROUP BY folds the six payments into two store groups. The window calculation annotates
+    all six payment rows with their store total. PARTITION BY defines a window grouping, but does
+    not collapse the output into one row per store.
+  alignment:
+    course: '5.6'
+    lab: 6; 7
+    course_review_required: false
+  id: m5_q3
+- objective: Give representative values a meaning
+  prompt: A report groups sales by store across several days. It selects ANY_VALUE(sale_date) and
+    labels that column latest_sale_date. Each store may have several distinct non-NULL dates. Is
+    that label justified?
+  options:
+  - id: a
+    text: Yes, because Doris takes the last date inserted into each group.
+  - id: b
+    text: Yes, because the group total determines its latest date.
+  - id: c
+    text: No. Use MAX(sale_date) for the latest date; ANY_VALUE does not promise that choice.
+  - id: d
+    text: No. Every date must be added to GROUP BY even when the required grain is one store.
+  answer: c
+  explanation: ANY_VALUE can choose an arbitrary non-NULL value; it does not mean latest. MAX matches
+    the requested representative date while retaining one row per store. Adding date to GROUP BY
+    changes the report grain. ANY_VALUE is meaningful when any representative really is acceptable
+    or all eligible values are equivalent.
+  alignment:
+    course: '5.4'
+    lab: '5'
+    course_review_required: false
+  id: m5_q4
+- objective: Reason about analytical stages
+  prompt: A Common Table Expression (CTE) named daily groups observed sales by date. It produces
+    July 1 and July 3, with no row for July 2. The outer query adds LAG(revenue) OVER (ORDER BY day).
+    What does July 3 compare with?
+  options:
+  - id: a
+    text: An automatically generated zero-revenue row for July 2.
+  - id: b
+    text: July 1, the previous available row; calendar-day comparison requires an explicit calendar
+      stage.
+  - id: c
+    text: NULL, because LAG only matches exactly one calendar day earlier.
+  - id: d
+    text: July 2, because naming the CTE daily fills missing dates.
+  answer: b
+  explanation: The CTE names a query stage; it does not generate absent dates. LAG moves by rows
+    in the specified ordering, so the previous available row is July 1. A calendar relation and an
+    explicit missing-value policy are needed before a previous-calendar-day comparison.
+  alignment:
+    course: 5.5; 5.6
+    lab: '6; 7: no missing-date gap demonstration'
+    course_review_required: true
+  id: m5_q5
+- objective: Choose the scope of reusable logic
+  prompt: A team wants to double each element of an array in one query, and separately reuse a named
+    expression composed entirely of existing SQL functions. A third requirement needs an external
+    Java algorithm. Which distinction is sound?
+  options:
+  - id: a
+    text: All three require deploying a Java user-defined function (UDF).
+  - id: b
+    text: An array Lambda automatically registers a reusable database function for all queries.
+  - id: c
+    text: A CTE registers the SQL expression permanently, and a Lambda deploys the Java algorithm.
+  - id: d
+    text: Use an array higher-order function with a Lambda; consider an SQL Alias Function for the
+      named expression; deploy a Java UDF for the external algorithm.
+  answer: d
+  explanation: A Lambda supplies local element logic to a higher-order function. An Alias Function
+    can give an existing SQL expression a reusable signature. A Java UDF needs an external implementation
+    and deployment. A CTE exists within its statement, and neither a CTE nor a Lambda deploys external
+    code.
+  alignment:
+    course: '5.7'
+    lab: '8; 10: Java template is not executed'
+    course_review_required: true
+  id: m5_q6

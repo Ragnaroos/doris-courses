@@ -1,0 +1,140 @@
+title: Join Semantics and Execution
+description: Apply Module 6 concepts to small, independent business scenarios. Read the explanation
+  and revise any answer before continuing.
+questions:
+- objective: Return only missing relationships
+  prompt: Support needs every shipment whose non-NULL customer_id has no match in customers. It needs
+    only shipment columns. The customer table may repeat an identifier. Which direct join expression
+    fits?
+  options:
+  - id: a
+    text: Shipments LEFT SEMI JOIN customers on customer_id equality.
+  - id: b
+    text: Shipments INNER JOIN customers on customer_id equality.
+  - id: c
+    text: Shipments LEFT ANTI JOIN customers on customer_id equality.
+  - id: d
+    text: Shipments LEFT OUTER JOIN customers on customer_id equality, without a subsequent filter.
+  answer: c
+  explanation: LEFT ANTI JOIN returns left rows without a match and does not multiply them for right-side
+    duplicates. SEMI returns rows with a match; INNER returns matching pairs; unfiltered LEFT OUTER
+    retains matched shipments too. A filtered outer join can express absence, but the unfiltered
+    option does not.
+  alignment:
+    course: '6.2'
+    lab: '2'
+    course_review_required: false
+  id: m6_q1
+- objective: Predict metric multiplication
+  prompt: 'Two sales are (sale_id, product_id, amount): (1, 7, 30) and (2, 8, 50). The product dimension
+    contains two rows for product 7 and one for product 8. An INNER JOIN uses only product_id equality
+    and then sums sale amount. What is the sum?'
+  options:
+  - id: a
+    text: 80, because each sale identifier appears only once in the fact table.
+  - id: b
+    text: 110, because the 30-unit sale matches two dimension rows.
+  - id: c
+    text: 160, because any duplicate doubles the entire fact relation.
+  - id: d
+    text: 50, because Doris discards sales with ambiguous dimension matches.
+  answer: b
+  explanation: The joined amounts are 30, 30, and 50. A unique sale identifier does not prevent two
+    matches on product_id. Establish one dimension row per intended key, or specify the required
+    historical version, before summing enriched facts. Doris does not arbitrarily discard ambiguous
+    matches.
+  alignment:
+    course: '6.1'
+    lab: '4'
+    course_review_required: false
+  id: m6_q2
+- objective: Define NULL matching deliberately
+  prompt: The left table has two rows with join key values 9 and NULL. The right table also has
+    two rows with join key values 9 and NULL. Each table has only one join key column. How many
+    row pairs does an INNER JOIN return with left.join_key = right.join_key, and how many with
+    left.join_key <=> right.join_key?
+  options:
+  - id: a
+    text: One with =; two with <=>.
+  - id: b
+    text: Two with =; two with <=>.
+  - id: c
+    text: One with =; one with <=>.
+  - id: d
+    text: Two with =; one with <=>.
+  answer: a
+  explanation: Ordinary equality matches 9 to 9 but does not make two NULL values equal. NULL-safe
+    equality also matches NULL to NULL. Use that extra match only when the business contract treats
+    those missing keys as belonging together.
+  alignment:
+    course: '6.3'
+    lab: '5'
+    course_review_required: false
+  id: m6_q3
+- objective: Separate hash keys from residual conditions
+  prompt: A join condition is a.account_id = b.account_id AND a.event_time > b.start_time. A second
+    join uses only a.event_time > b.start_time. Which interpretation fits Doris execution?
+  options:
+  - id: a
+    text: Both necessarily require Nested Loop Join because both contain >.
+  - id: b
+    text: Both have hash keys because timestamps can be hashed.
+  - id: c
+    text: The first can use a Hash Join on account_id plus a residual time condition; the second
+      has no equi-key and can require Nested Loop Join.
+  - id: d
+    text: The first must ignore the time condition when it uses Hash Join.
+  answer: c
+  explanation: The equality provides a hash key; the remaining time predicate must still be evaluated
+    for candidate matches. A pure inequality has no equality key to organize those matches and can
+    use Nested Loop Join. The presence of a range predicate alone does not disqualify a Hash Join.
+  alignment:
+    course: '6.5'
+    lab: '6: separate equality and pure inequality plans'
+    course_review_required: true
+  id: m6_q4
+- objective: Read planned data movement
+  prompt: A simplified EXPLAIN excerpt shows HASH JOIN, INNER JOIN (BROADCAST), with the product
+    dimension on the build side. What does BROADCAST describe in a multi-Backend (BE) execution?
+  options:
+  - id: a
+    text: The entire fact table is replicated to every dimension row.
+  - id: b
+    text: Both inputs must already share the same Bucket layout.
+  - id: c
+    text: Both sides are necessarily repartitioned by join key.
+  - id: d
+    text: The build-side data is sent to the participating probe-side execution instances; a partition
+      shuffle would instead redistribute rows by join key.
+  answer: d
+  explanation: Broadcast copies the build input to the participating probe-side instances. Partition
+    Shuffle routes rows by join key so matching keys meet. Existing compatible Bucket layouts relate
+    to other strategies. This plan description alone does not establish that Broadcast is faster.
+  alignment:
+    course: '6.6'
+    lab: '7'
+    course_review_required: true
+  id: m6_q5
+- objective: Interpret a Runtime Filter plan
+  prompt: A simplified EXPLAIN shows RF000 produced at an inner Hash Join and consumed at the fact
+    Scan. The quiz provides no runtime counters. What can you conclude?
+  options:
+  - id: a
+    text: The plan connects a build-derived Runtime Filter to the probe Scan; the actual reduction
+      needs runtime evidence.
+  - id: b
+    text: The Scan is guaranteed to read no nonmatching storage pages.
+  - id: c
+    text: The filter proves that this strategy is faster than Shuffle.
+  - id: d
+    text: The filter replaces the join equality check entirely.
+  answer: a
+  explanation: The producer and consumer show planned filter propagation. A Runtime Filter can reduce
+    candidate probe work, but selectivity and actual savings require runtime evidence. It does not
+    replace join correctness checks or prove a strategy wins, especially from a single-node timing
+    alone.
+  alignment:
+    course: '6.7'
+    lab: '7'
+    course_review_required: true
+  id: m6_q6

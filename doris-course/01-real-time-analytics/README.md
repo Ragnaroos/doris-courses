@@ -1,9 +1,9 @@
 # Real-time Analytics with Apache Doris
 
 This directory contains the course notes, executable Jupyter labs, shared
-datasets, and reusable runtime support for the three course levels. Level 1 is
-implemented; the Level 2 and Level 3 paths reserve the agreed module boundaries
-for later development.
+datasets, and reusable runtime support for the three course levels. Levels 1
+and 2 are implemented; Level 3 reserves its module boundaries for later
+development.
 
 ## Repository structure
 
@@ -53,17 +53,25 @@ doris-course/
     ├── level2/
     │   ├── README.md
     │   ├── module04-modeling/
-    │   │   ├── course.md
-    │   │   └── lab4_model_data.ipynb            planned
+    │   │   ├── course4_modeling_data_in_apache_doris.md
+    │   │   ├── lab4_model_data.ipynb
+    │   │   ├── quiz4_schema_and_modeling_choices.ipynb
+    │   │   └── quiz4_schema_and_modeling_choices.yaml
     │   ├── module05-analyzing/
-    │   │   ├── course.md
-    │   │   └── lab5_analyze_data.ipynb          planned
+    │   │   ├── course5_analyzing_data_in_apache_doris.md
+    │   │   ├── lab5_analyze_data.ipynb
+    │   │   ├── quiz5_analytical_query_semantics.ipynb
+    │   │   └── quiz5_analytical_query_semantics.yaml
     │   ├── module06-joining/
-    │   │   ├── course.md
-    │   │   └── lab6_join_data.ipynb             planned
+    │   │   ├── course6_joining_data_in_apache_doris.md
+    │   │   ├── lab6_join_data.ipynb
+    │   │   ├── quiz6_join_semantics_and_execution.ipynb
+    │   │   └── quiz6_join_semantics_and_execution.yaml
     │   └── module07-updating-deleting/
-    │       ├── course.md
-    │       └── lab7_update_delete_data.ipynb        planned
+    │       ├── course7_updating_and_deleting_data_in_apache_doris.md
+    │       ├── lab7_update_delete_data.ipynb
+    │       ├── quiz7_state_changes_and_deletion.ipynb
+    │       └── quiz7_state_changes_and_deletion.yaml
     └── level3/
         ├── README.md
         ├── module08-query-acceleration/

@@ -1,0 +1,144 @@
+title: Schema and Modeling Choices
+description: Apply Module 4 concepts to small, independent business scenarios. Read the explanation
+  and revise any answer before continuing.
+questions:
+- objective: Keep a consistent grain
+  prompt: One sales table mixes three rows in its amount column. Two rows are individual purchase
+    events worth 12.00 and 18.00. The third row is a daily summary of those same two purchases,
+    worth 30.00; it is not another purchase. A dashboard runs SUM(amount) over all three rows in
+    this one table. What should change?
+  options:
+  - id: a
+    text: Use DECIMAL so the sum becomes 30.00.
+  - id: b
+    text: Keep event detail and daily summaries in separate tables, each with an explicit grain.
+  - id: c
+    text: Use one Unique Key per customer to preserve the events and the daily total.
+  - id: d
+    text: Add the row type to the sort key so SUM ignores the summary.
+  answer: b
+  explanation: 'The dashboard sums 12.00 + 18.00 + 30.00 = 60.00 in the one mixed-grain table.
+    The 30.00 summary already includes the two purchases, whose actual total is 30.00. Store
+    individual purchases and daily summaries in separate tables, then query the appropriate grain.
+    DECIMAL preserves precision, and sorting does not remove summary rows. One current row per
+    customer would lose event history.'
+  alignment:
+    course: 4.1; 4.6
+    lab: 1; 5
+    course_review_required: false
+  id: m4_q1
+- objective: Interpret Duplicate Key columns
+  prompt: A sensor-history table uses DUPLICATE KEY(observed_at, sensor_id). Two accepted readings
+    have the same timestamp and sensor identifier but values 21 and 22. Both readings must remain
+    available. What does this definition do?
+  options:
+  - id: a
+    text: It retains both readings; these Key columns specify sorting rather than uniqueness.
+  - id: b
+    text: It retains only 22 because the later write replaces the earlier reading.
+  - id: c
+    text: It adds the values and stores a reading of 43.
+  - id: d
+    text: It rejects the second reading because the complete Key repeats.
+  answer: a
+  explanation: Duplicate Key retains both accepted rows, even when every Key column repeats. Unique
+    Key expresses replacement of current state; Aggregate Key combines declared measures. The sort
+    key is not a uniqueness constraint.
+  alignment:
+    course: '4.2'
+    lab: '4'
+    course_review_required: false
+  id: m4_q2
+- objective: Represent money and identifiers
+  prompt: A supplier sends amounts with exactly two decimal places, bounded below one million, and
+    product codes such as 00127 and 127 that identify different products. Reports repeatedly CAST
+    text amounts before summing. Which typed contract fits?
+  options:
+  - id: a
+    text: DOUBLE for amounts and BIGINT for product codes.
+  - id: b
+    text: VARCHAR for both fields, with CAST in every report.
+  - id: c
+    text: DECIMAL(12,2) for amounts and VARCHAR for product codes.
+  - id: d
+    text: BIGINT for amounts in the original decimal units and INT for product codes.
+  answer: c
+  explanation: DECIMAL(12,2) covers the stated range and preserves decimal amounts. VARCHAR preserves
+    meaningful leading zeros. DOUBLE is approximate, integer codes collapse distinct identifiers,
+    and repeated report-time conversions defer validation instead of establishing a typed ingestion
+    boundary.
+  alignment:
+    course: 4.3; 4.4
+    lab: 2; 3
+    course_review_required: false
+  id: m4_q3
+- objective: Distinguish omission from NULL
+  prompt: An optional delivery note uses VARCHAR(100) NULL DEFAULT 'not provided'. An INSERT for
+    parcel A omits this column; an INSERT for parcel B explicitly supplies NULL. Both inserts succeed.
+    What values are stored?
+  options:
+  - id: a
+    text: Both store NULL because the column is nullable.
+  - id: b
+    text: Both store not provided because a default replaces missing values and explicit NULL.
+  - id: c
+    text: A stores NULL; B stores not provided.
+  - id: d
+    text: A stores not provided; B stores NULL.
+  answer: d
+  explanation: Omission uses the declared default; an explicit NULL remains NULL in a nullable column.
+    NULL permits an unknown or absent value, while DEFAULT specifies what to use when the field is
+    omitted. NOT NULL would prohibit NULL rather than invent a meaningful note.
+  alignment:
+    course: '4.4'
+    lab: '3'
+    course_review_required: false
+  id: m4_q4
+- objective: Design for lifecycle and workload
+  prompt: A table stores temperature readings sent by devices. Each new reading is appended as a new
+    row. Data is retained in complete calendar months. Most queries read recent time ranges across
+    devices. Device IDs are numerous and evenly distributed; region has only three
+    values with heavy skew. Which starting layout matches these facts?
+  options:
+  - id: a
+    text: Monthly time Partitions, HASH(device_id) Buckets, and a sort key beginning with observation
+      time.
+  - id: b
+    text: Region Partitions, HASH(region) Buckets, and a sort key beginning with device ID.
+  - id: c
+    text: One Partition per device, HASH(region) Buckets, and a sort key beginning with region.
+  - id: d
+    text: Monthly time Partitions, HASH(region) Buckets, and a sort key beginning with region.
+  answer: a
+  explanation: Monthly Partitions align retention with whole-month maintenance. Device hashing is
+    a reasonable distribution choice under the stated balance assumption; three skewed regions are
+    not. A time-leading sort key matches the dominant range filters. Bucket count still depends on
+    data volume and resources; this is a workload-based starting design, not a timing claim.
+  alignment:
+    course: '4.5'
+    lab: '4'
+    course_review_required: true
+  id: m4_q5
+- objective: Combine additive summary batches
+  prompt: A daily summary must retain one row per (day, store). Two disjoint batches contribute revenue
+    of 40.00 and 25.00 for the same day and store. Which definition produces a logical total of 65.00
+    without replacing either contribution?
+  options:
+  - id: a
+    text: UNIQUE KEY(day, store), with revenue as a value column.
+  - id: b
+    text: AGGREGATE KEY(day), with store as a REPLACE value and revenue as SUM.
+  - id: c
+    text: AGGREGATE KEY(day, store), with revenue declared SUM.
+  - id: d
+    text: AGGREGATE KEY(day, store, revenue), with no revenue SUM value column.
+  answer: c
+  explanation: The reporting dimensions belong in Aggregate Key and revenue is an additive SUM value,
+    so disjoint contributions combine to 65.00. Unique Key replaces state; omitting store merges
+    stores; making revenue a Key splits groups by amount. This summary cannot recover individual
+    sales or customers.
+  alignment:
+    course: 4.2; 4.6
+    lab: '5: single pre-grouped batch only'
+    course_review_required: true
+  id: m4_q6
