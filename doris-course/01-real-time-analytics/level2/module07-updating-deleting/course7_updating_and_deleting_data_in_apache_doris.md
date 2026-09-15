@@ -5,434 +5,313 @@
 | Course | Real-time Analytics with Apache Doris — Level 2 |
 | Product baseline | Apache Doris 4.x |
 | Lab version | Apache Doris 4.1.3 |
-| Estimated time | Approximately 65 minutes, including the guided lab |
+| Estimated time | Approximately 75 minutes, including the guided lab |
 
 ## Module goal
 
-This module explains how to maintain current state and remove data with an
-operation that matches the change. You will distinguish complete replacement
-rows from partial changes, order incoming states, and choose between deleting
-selected rows and replacing an entire reporting scope.
+This module explains how to keep analytical current state synchronized as
+business entities change, correct existing data, remove selected records, and
+replace complete lifecycle ranges. Begin with the change contract: what
+identifies a row, whether the source supplies a complete state or a patch, how
+source order is established, and how much data the operation affects.
 
-Earlier modules preserved and analyzed event history. This module uses separate
-tables in the `doris_course` Database: `order_state`, `order_deletions`, and
-`order_lifecycle`. The persistent `events` baseline, `events_modelled`, and
-`dim_products` remain available for analytical work.
+Module 4 selected a Table Model from repeated-Key semantics. This module focuses
+on current-state workloads, so most examples use Unique Key. It also identifies
+operations available to other Table Models and explains why appending another
+row to a Duplicate Key table does not update current state.
 
 ## Learning objectives
 
 After completing this module, you will be able to:
 
-1. Define a current-state grain and choose a Unique Key table for incoming
-   states identified by a business key.
-2. Use a Sequence column to distinguish source ordering from arrival order.
-3. Explain how full-row upserts and partial column updates treat omitted
-   columns, and distinguish omission from an explicit value.
-4. Choose SQL `UPDATE` for a predicate-based correction and recognize its
-   model and Key-column restrictions.
-5. Select predicate `DELETE` or load-based Delete Sign from how deleted rows
-   are identified.
-6. Choose `TRUNCATE` or atomic overwrite for whole-table or whole-Partition
-   maintenance, with an explicit replacement scope.
-7. Distinguish visible rows, hidden delete markers, Tablet metadata, and
-   documented Merge-on-Write storage behavior.
+1. Separate append-only history from current state and define the final visible
+   state expected after a sequence of changes.
+2. Choose full-row upsert, partial column update, or SQL `UPDATE` from the form,
+   frequency, and ownership of incoming changes.
+3. Predict whether a Unique Key write inserts a new logical row or replaces an
+   existing visible state.
+4. Use a Sequence column so source order, rather than arrival order, decides
+   which state wins.
+5. Distinguish omitted columns in full-row and partial writes from an explicitly
+   supplied `NULL`.
+6. Use `MERGE INTO` for conditional matched updates/deletes and not-matched
+   inserts from a source relation.
+7. Choose predicate `DELETE` or Delete Sign from how deleted rows are identified.
+8. Choose `TRUNCATE TABLE/PARTITION` or `INSERT OVERWRITE` for complete scopes.
+9. Distinguish logical visibility from later physical cleanup by Compaction.
+10. Explain why ambiguous source order and repeated single-row transactions are
+    operational design problems.
 
-## Module structure
+## Scenario-led content outline
 
-| Section | Format | Time | Outcome |
-| --- | --- | ---: | --- |
-| 7.1 Define the State You Want to Keep | Contract walkthrough | 4 min | Separate current state from event history |
-| 7.2 Let Source Order Decide Which State Wins | Timeline walkthrough | 6 min | Interpret upsert and Sequence behavior |
-| 7.3 Decide What an Omitted Column Means | Write comparison | 7 min | Choose full-row or partial column semantics |
-| 7.4 Correct Selected Rows with SQL UPDATE | Operation walkthrough | 4 min | Apply predicate corrections within their boundaries |
-| 7.5 Choose How to Identify Deleted Rows | Delete comparison | 6 min | Distinguish predicates and incoming delete keys |
-| 7.6 Match Replacement Scope to Data Lifecycle | Partition walkthrough | 7 min | Separate clearing, patching, and atomic replacement |
-| 7.7 Explain Visibility Without Assuming Physical Cleanup | Evidence walkthrough | 6 min | Interpret query and storage observations accurately |
-| Lab 7 | Hands-on | 25 min | Maintain controlled order states and compare deletion paths |
+An order platform sends complete images, logistics patches, corrections, and
+deletion records to Doris. A daily Partition can also expire or require a full
+backfill. Each section derives an operation from one need.
+
+| Section | Requirement scenario | Decision developed | Lab 7 evidence |
+| --- | --- | --- | --- |
+| **7.1 Define the state contract** | History must remain, while reports need one current row per order. | Separate history from state and locate each Table Model's boundary. | Use independent Module 7 tables without changing event data. |
+| **7.2 Synchronize complete states** | Full order images may arrive out of order. | Use Unique Key upsert and an explicit Sequence column. | Update `1001`, insert `1004`, and reject an older delayed state. |
+| **7.3 Apply field-owned patches** | Logistics owns status but must preserve amount and region. | Use partial update; distinguish omission, defaults, and `NULL`. | Compare full-row and partial writes with omitted columns. |
+| **7.4 Correct selected rows** | A small incorrect set is described by a predicate. | Use SQL `UPDATE` for an occasional Value-column correction. | Correct one shipping region. |
+| **7.5 Merge staged changes** | One relation contains inserts, updates, and deletes. | Use `MERGE INTO` with deterministic source matching. | Update `4001`, delete `4002`, and insert `4004`. |
+| **7.6 Remove selected rows** | A rule selects bad rows; CDC supplies deleted Keys. | Choose predicate `DELETE` or Delete Sign. | Delete `2003` by predicate and `2002` by Key. |
+| **7.7 Replace a lifecycle scope** | One date expires; another has a complete correction. | Use `TRUNCATE PARTITION` or `INSERT OVERWRITE`. | Remove `p20260910` and replace `p20260911`. |
+| **7.8 Separate visibility from cleanup** | Queries show new state while storage versions remain. | Bound conclusions from queries, hidden markers, and metadata. | Compare visible rows and Tablet versions. |
+
+Lab 7 supplies bounded Doris 4.1.3 evidence. It does not connect to an external
+Change Data Capture (CDC) system, benchmark writes, inspect Rowsets or Segments,
+display an internal delete bitmap, or wait for Compaction.
 
 ---
 
-## 7.1 Define the State You Want to Keep
+## 7.1 Define the State Contract Before Choosing an Operation
 
-An event-history table answers “What happened?” A current-state table answers
-“What is true for this entity now?” An order that progresses from `created` to
-`paid` to `shipped` can therefore contribute three history records but only one
-current row.
+An event-history table answers **what happened**. A current-state table answers
+**what is true now**. An order moving from `created` to `paid` to `shipped` can
+produce three history events but one current order row.
 
-In `order_state`, `order_id` identifies the business entity. The other columns
-describe its current customer, status, amount, shipping region, and update time.
-A Unique Key model keeps one visible state per key; Merge-on-Write (MoW) is
-the default implementation in Doris 4.x. See [Unique Key Model](https://doris.apache.org/docs/4.x/table-design/data-model/unique/).
-
-This choice does not create an audit log. A query over the current table cannot
-reconstruct every earlier order status merely because Doris may still retain
-some older storage versions. Keep history separately when the business needs
-transitions, historical attributes, or replay.
-
-Before choosing a command, describe the incoming change:
-
-| Question | Why it matters |
-| --- | --- |
-| Which business key identifies the entity? | Determines which state can be replaced |
-| Does the producer send a complete row or selected columns? | Determines what omitted fields mean |
-| Which source value orders changes? | Prevents an older state from winning through late arrival |
-| Are rows selected by an incoming key or a SQL predicate? | Distinguishes load-based changes from conditional corrections |
-| Does the operation affect some rows or a complete Partition? | Determines whether row maintenance or scope replacement fits |
-
-The lab uses small tables to make each answer visible. The same decisions
-apply when a production pipeline batches many changes.
-
-## 7.2 Let Source Order Decide Which State Wins
-
-An **upsert** combines insert and update semantics. A new key creates a logical
-row; a write for an existing key can replace that row's state. `INSERT INTO`
-and ingestion methods such as Stream Load can supply those states to a Unique
-Key table. The producer does not need a separate lookup followed by an
-application-side decision to insert or update. See [Load-Based Updates](https://doris.apache.org/docs/4.x/data-operate/update/update-of-unique-model/).
-
-Uniqueness alone does not define business recency. Network delays and parallel
-loaders can make an older change arrive after a newer one. The lab maps the
-Sequence column to `updated_at` through
-`"function_column.sequence_col" = "updated_at"`.
-
-For writes sharing the same Key, a larger Sequence value wins over a smaller
-one. The lab's order `1001` illustrates why arrival and source order differ:
-
-| Arrival | Incoming status | Source `updated_at` | Visible status afterward |
-| --- | --- | --- | --- |
-| Initial row | `created` | 09:00 | `created` |
-| Newer state | `shipped` | 10:10 | `shipped` |
-| Delayed older state | `paid` | 10:05 | `shipped` |
-
-The delayed row can be accepted by the loading operation without becoming the
-visible winner. A successful write response alone therefore does not prove
-that a particular incoming value is now current. Query the selected key when
-verifying the state transition.
-
-### Choose a source ordering contract
-
-Use a source revision or update time that orders changes for the same entity.
-Do not replace it with the loader's receipt time: that would make a delayed
-old event appear new. A timestamp also needs sufficient precision and
-consistent source clocks. Equal timestamps do not express which of two
-conflicting business states is newer; resolve that ambiguity in the source
-contract rather than assuming it is covered by the lab's larger-value example.
-
-A Sequence column is separate from a load Label. Module 3 used Labels for
-transaction identity and retry handling. Sequence values choose among states
-for one key across writes. Neither mechanism replaces the other. See
-[Sequence Column and Update Ordering](https://doris.apache.org/docs/4.x/data-operate/update/unique-update-concurrent-control/).
-
-The lab demonstrates a delayed lower Sequence value, not arbitrary concurrent
-producers or conflicting equal values. Its separate `order_deletions` table
-has an `updated_at` field but does not configure it as a Sequence column. A
-column's name alone does not enable ordering.
-
-## 7.3 Decide What an Omitted Column Means
-
-A column list tells Doris which values the statement supplies. It does not,
-by itself, request partial-update semantics.
-
-Under the default full-row upsert behavior, unspecified value columns are
-filled according to the schema, rather than copied from the old row. Under
-partial column update, omitted values are retained from an existing matching
-row. Lab 7 contrasts these meanings using two orders:
-
-| Write | Supplied changes | Effect on omitted values |
+| Table Model | Another row with the same Key means | Change-processing role |
 | --- | --- | --- |
-| Full-row upsert for `1002` | Customer, status, and update time | Amount becomes its default `0.00`; region becomes `UNASSIGNED` |
-| Partial column update for `1003` | Status and update time | Amount remains `88.00`; region remains `CN-WEST` |
+| Duplicate Key | Preserve another accepted row | History and audit data; another insert does not hide the old row |
+| Unique Key | Replace the visible state for that business Key | Current state and primary-key synchronization |
+| Aggregate Key | Combine Value columns through declared aggregate functions | Metric contributions or specialized replacement aggregates |
 
-These are different operations even though both change a status to `shipped`.
-Select full-row upsert when the producer owns the complete state. Select
-partial column update when it owns only selected fields and intends to preserve
-the rest.
+Unique Key is central because full-row upsert, Sequence ordering, SQL `UPDATE`,
+Delete Sign, and `MERGE INTO` serve primary-key state maintenance. This does not
+make every deletion Unique-only. Predicate `DELETE` can apply across models with
+model-specific restrictions, while whole-Partition operations have a different
+scope. Aggregate Key can use specialized patterns such as
+`REPLACE_IF_NOT_NULL`; that is aggregate-model behavior, not the order-state
+contract used here.
 
-For the lab's `INSERT INTO` statements, the switch is the session variable
-`enable_unique_key_partial_update`. The Notebook enables it for the partial
-write and restores `false` afterward. Load paths such as Stream Load use their
-corresponding partial-column settings. All Key columns must be supplied.
-See [Column Update](https://doris.apache.org/docs/4.x/data-operate/update/partial-column-update/).
+Before writing, ask:
 
-### Separate omission, NULL, and a default
+1. Which business Key identifies the target state?
+2. Does the source carry a full row, selected fields, a predicate, or a complete
+   replacement dataset?
+3. Which source value establishes order?
+4. Can several source rows target the same Key in one batch?
+5. Is the scope one Key, a selected set, one Partition, or the table?
 
-For a nullable value column in another current-state model, these instructions
-would have different meanings:
+## 7.2 Synchronize Complete States with Unique Key Upsert
 
-| Producer intent | Required representation |
-| --- | --- |
-| Leave the value unchanged | Omit it from an enabled partial column update |
-| Clear it to unknown | Supply an explicit `NULL`, if the schema allows it |
-| Replace it with a known value | Supply that value |
+When a source emits a complete current image, loading into a Unique Key table
+provides upsert behavior:
 
-An explicit `NULL` is not an instruction to retain an existing value. Nor does
-declaring a default mean that every explicit `NULL` is replaced with that
-default. The schema's nullability and the chosen ingestion behavior still apply.
-The lab's order columns are non-nullable, so it demonstrates omission rather
-than clearing a nullable field.
+```text
+new Key       -> insert a current row
+existing Key  -> replace its visible current state
+```
 
-### Handle new keys separately from existing keys
+This fits batched full images from CDC or a producer that owns every target
+Value column. It does not preserve every historical version in ordinary query
+results.
 
-For a new key there is no previous row from which to preserve omitted values.
-Doris 4.1.3 exposes `partial_update_new_key_behavior`: `ERROR` requires existing
-keys, while `APPEND` permits new ones. In the latter case, omitted fields need
-defaults or permitted `NULL` values; a required field without either cannot be
-recovered from a nonexistent row.
+### Make source order explicit
 
-For example, `order_state.customer_id` is required and has no default. The lab
-can omit it when partially updating existing order `1003`, because the old row
-supplies it. That does not establish a valid way to create a brand-new order
-using only an ID and status.
+Arrival order is unreliable. A delayed `paid` message can arrive after a newer
+`shipped` message. A Sequence column makes source version, timestamp, or offset
+part of the table contract:
 
-The lab uses a fixed set of updated columns per statement. Doris also has a
-flexible column-update mode for supported load paths, but that is a separate
-configuration and is not enabled here. Do not infer that the session switch
-used in this lab enables every form of partial ingestion.
+```text
+09:00 created
+10:10 shipped  -> visible winner
+10:05 paid     -> arrives last but has a smaller Sequence
+```
 
-Partial updates reduce what the producer must send. In MoW, Doris still needs
-to fill missing values from existing data when constructing the replacement
-row. They are not a promise of zero reads or an in-place edit to a Segment.
+Lab 7 declares `"function_column.sequence_col" = "updated_at"`. Merely naming a
+column `updated_at` would not create ordering semantics. Choose a value monotonic
+for each business Key and supplied by the authoritative source. Equal Sequence
+values need an additional source policy; do not assume arrival order is a safe
+tie-breaker.
 
-## 7.4 Correct Selected Rows with SQL UPDATE
+Continuous changes should normally be batched. A tight loop of individual
+writes creates many transactions and storage versions. Freshness, batch size,
+failure recovery, and retry safety remain part of the ingestion contract.
 
-Use SQL `UPDATE` when a condition describes a correction: for example, change
-the shipping region of a selected order while retaining its other values.
-`WHERE` selects the rows and `SET` names the changed columns.
+## 7.3 Preserve Unowned Fields with Partial Column Update
 
-The lab corrects `order_state` for `order_id = 1001`, changing `CN-EAST` to
-`CN-NORTH`. Its status, amount, and `updated_at` remain unchanged. This last
-detail matters: Doris does not automatically turn a timestamp named
-`updated_at` into the time of every SQL correction.
+A logistics feed may own `status` and `updated_at` but not `amount` or
+`shipping_region`. Reconstructing a complete row could overwrite other systems'
+values.
 
-If the same table also receives a Change Data Capture (CDC) stream, decide how
-manual corrections relate to the authoritative source. A later qualifying
-full state from that source can overwrite a correction. Updating a local
-field is not a policy for reconciling two writers.
-
-SQL `UPDATE` supports Unique Key target tables and changes value columns, not
-Key columns. Changing `order_id` changes the entity's identity and requires a
-workflow that removes the old key and writes the new one. Those two actions
-need an explicit consistency plan; they are not an ordinary single-column
-update. See [UPDATE](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-modification/DML/UPDATE/).
-
-### Match the selection method to the workload
-
-| Incoming requirement | Suitable starting point |
-| --- | --- |
-| Many complete states already identified by key | Batched load-based full-row upserts |
-| Many key-based changes to selected fields | Partial column updates |
-| An occasional correction selected through SQL | `UPDATE` |
-
-Doris must identify the rows for a predicate correction and write replacement
-versions. A tight loop of individual `UPDATE` statements repeats that work
-and transaction overhead. Grouping source changes into appropriate batches
-also reduces the number of tiny writes the storage system must maintain.
-
-Batching is a throughput and freshness tradeoff: larger batches amortize work
-but delay when an individual source change becomes visible. Choose it from
-the latency requirement and observed workload rather than a universal batch
-size. The lab does not measure that tradeoff.
-
-## 7.5 Choose How to Identify Deleted Rows
-
-Two requirements can remove the same logical row while starting from different
-information. A SQL predicate says which currently stored rows should disappear.
-A CDC record or deletion file already supplies the keys that were deleted at
-the source.
-
-### Use a predicate when the condition defines the target
-
-Predicate `DELETE` is available for Duplicate Key, Unique Key, and Aggregate
-Key tables, with model-specific restrictions. Aggregate Key tables restrict
-delete conditions to Key columns; do not assume that a predicate on an
-aggregated measure is supported. Non-Unique tables also have a more restricted
-predicate syntax than general analytical `SELECT`. See [Delete Operation](https://doris.apache.org/docs/4.x/data-operate/delete/delete-manual/).
-
-Lab 7 removes test order `2003` from the Unique Key table `order_deletions`
-using a key predicate. A predicate can also express a business condition, but
-its selection must match the intended meaning. For example, deleting a
-cancelled order removes it from a current-state report; retaining it with
-status `cancelled` keeps cancellation part of the report. Decide whether the
-entity should be absent before choosing deletion.
-
-### Use Delete Sign when deleted keys arrive as data
-
-Unique Key tables have the hidden column `__DORIS_DELETE_SIGN__`. A value of
-`1` represents a delete marker for the key. Lab 7 supplies that marker for
-order `2002` through a small `INSERT INTO` example. In a pipeline, the load
-method or connector carries the corresponding deletion information in batches.
-See [Load-Based Batch Delete](https://doris.apache.org/docs/4.x/data-operate/delete/batch-delete-manual/).
-
-The ordinary query then excludes the deleted key. You do not need to turn a
-large incoming list of deleted IDs into thousands of separate SQL statements.
-The marker shares the ingestion workflow with other key-based changes.
-
-Deletion is also an ordered change in a CDC system. When the target uses a
-Sequence column, deletes and live states need a consistent source-ordering
-contract. The lab's non-sequenced deletion table does not test late updates
-against a newer delete, and a delete marker is not an indefinite ban on
-reinserting a key. Design replay and source retention accordingly.
-
-### Do not confuse the marker with the delete bitmap
-
-Delete Sign is a row-level hidden column supplied or generated through a write
-path. The internal **delete bitmap** identifies superseded physical row
-versions for MoW reads. They serve related but different purposes: one
-represents a deleted state for a key; the other helps exclude obsolete row
-versions. Displaying Delete Sign does not display the bitmap.
-
-The lab temporarily enables `show_hidden_columns` for inspection and restores
-it afterward. Deleted records may contain default values rather than their
-previous business attributes. Hidden rows are not a recovery interface or a
-historical record of the original state, and markers may disappear after
-background cleanup.
-
-## 7.6 Match Replacement Scope to Data Lifecycle
-
-Row-level predicates are useful when only some rows should change. A complete
-Partition has a different contract: remove all of its contents, or replace
-those contents with a corrected dataset.
-
-| Requirement | Operation | Intended contents afterward |
+| Mode | Existing Key receives only status and time | Omitted Value columns |
 | --- | --- | --- |
-| Remove selected rows | Predicate `DELETE` | Rows outside the predicate remain |
-| Empty a table or named Partitions | `TRUNCATE TABLE` with the appropriate scope | The selected scope is empty; its definition remains |
-| Rebuild a table or named Partitions | `INSERT OVERWRITE` | The selected scope contains the replacement dataset |
-| Prepare and inspect a replacement before a separate swap | Temporary Partition workflow | Validated staged data replaces the selected formal scope |
+| Full-row upsert | Construct a complete replacement | Use schema defaults or permitted `NULL` |
+| Partial column update | Patch the existing state | Preserve visible values |
 
-### Clear a complete scope with TRUNCATE
+Lab 7 shows a full-row write changing omitted amount and region to `0.00` and
+`UNASSIGNED`, while a partial update preserves `88.00` and `CN-WEST`.
 
-The lab's command `TRUNCATE TABLE order_lifecycle PARTITION(p20260910)` clears
-one named Partition. Omitting the Partition clause would instead select the
-whole table. `TRUNCATE` has no row-level `WHERE` condition.
+Omission is different from explicitly supplying `NULL`. An explicit `NULL` is
+a requested value for a nullable column and is invalid for a `NOT NULL` column
+unless transformed before the write. A default is not a universal repair for a
+supplied invalid value.
 
-The operation retains the table and Partition definition while replacing its
-data-bearing storage structures. It avoids representing the cleanup as an
-individual logical deletion for every old row. This behavior is documented in
-[Truncate Operation](https://doris.apache.org/docs/4.x/data-operate/delete/truncate-manual/)
-and implemented by Partition replacement in the release's
-[InternalCatalog](https://github.com/apache/doris/blob/4.1.3/fe/fe-core/src/main/java/org/apache/doris/datasource/InternalCatalog.java).
+All Key columns must be available so Doris can locate the row. Also define what
+happens when a partial record carries a new Key: there is no old row from which
+to preserve missing values. Current behavior depends on update mode, defaults,
+nullability, and settings. Consult the current [Column Update](https://doris.apache.org/docs/4.x/data-operate/update/partial-column-update/)
+contract for production loading and flexible column sets.
 
-Use the actual Partition range to identify the scope. In the lab,
-`p20260910 VALUES LESS THAN ('2026-09-11')` is the first Range Partition, so
-it also permits earlier dates. Its name does not impose a lower bound. The
-controlled data happens to contain only September 10 rows there.
+## 7.4 Correct a Small Selected Set with SQL UPDATE
 
-### Replace complete contents with INSERT OVERWRITE
+When no replacement records exist and a SQL predicate identifies the problem,
+use a direct correction:
 
-`INSERT OVERWRITE` is replacement of the selected scope, not a patch for the
-keys that happen to appear in the input. The lab replaces `p20260911` with
-orders `3003` and `3005`. Old order `3004` disappears because it is absent from
-the replacement, even though no delete predicate names it.
+```sql
+UPDATE order_state
+SET shipping_region = 'CN-NORTH'
+WHERE order_id = 1001;
+```
 
-For a Partition overwrite, Doris prepares replacement data and atomically
-replaces the target Partition. Readers need not pass through an intentionally
-empty state between separate clearing and loading commands. This is the
-documented behavior; the lab shows the before/after contents rather than
-running a concurrent reader to observe the switch. See [INSERT OVERWRITE](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-modification/DML/INSERT-OVERWRITE/).
+`WHERE` selects target rows; `SET` names changed Value columns. SQL `UPDATE`
+targets a Unique Key table and cannot modify Key columns. A business-Key change
+should delete the old Key and insert the new one.
 
-Atomic replacement does not establish that the replacement is complete or
-correct. An accidentally narrow source filter can successfully replace a
-Partition with an incomplete result. Verify the target range, source coverage,
-grain, and required totals before using the replacement as the published
-dataset. Coordinate overlapping source writes so the replacement includes the
-intended cutoff of changes.
+This path fits occasional corrections. It is a poor shape for a high-frequency
+application loop because each statement finds rows and publishes a transaction.
+When incoming records already identify Keys, use batched full-row or partial
+loads.
 
-A [Temporary Partition](https://doris.apache.org/docs/4.x/data-operate/delete/table-temp-partition/)
-provides a separate staging scope when loading, checking, and publishing must
-be distinct steps. It is an extension beyond the lab's single overwrite
-statement. Recovery also needs an explicit source or retention plan: clearing
-data, replacing a scope, and retaining a backup are different operations. The
-lab does not perform recovery or establish a general undo guarantee.
+## 7.5 Apply Conditional Actions with MERGE INTO
 
-## 7.7 Explain Visibility Without Assuming Physical Cleanup
+A staging relation may contain mixed change types:
 
-Module 2 introduced immutable Segments and Rowsets within Tablets. An update
-does not require rewriting a value inside an existing Segment file. In MoW,
-Doris writes new versions and tracks which older versions should no longer
-participate in a current read. Affected Tablets maintain their own Rowsets;
-one transaction does not create a single global Rowset for the table.
+| `order_id` | `change_type` | Required action |
+| ---: | --- | --- |
+| 4001 | UPSERT | Update an existing order |
+| 4002 | DELETE | Delete an existing order |
+| 4004 | UPSERT | Insert a new order |
 
-Once the write is successfully published and visible, a subsequent ordinary
-query sees the winning live state or the absence of a deleted key. It does not
-need to wait for Compaction to establish that logical result. Compaction later
-consolidates storage and can remove obsolete versions and delete records.
-See [Merge-on-Write](https://doris.apache.org/docs/4.x/table-design/data-model/merge-on-write/).
+`MERGE INTO` joins that relation to a Unique Key target:
 
-Visibility is relative to the query snapshot. A query already running can
-continue using its earlier snapshot; a later statement can see newly published
-changes. This follows the statement-level visibility discussed in Module 5,
-not a requirement to restart the client or manually merge data. See
-[Transactions](https://doris.apache.org/docs/4.x/data-operate/transaction/).
+```sql
+MERGE INTO order_merge_target AS t
+USING order_merge_changes AS s
+ON t.order_id = s.order_id
+WHEN MATCHED AND s.change_type = 'DELETE' THEN DELETE
+WHEN MATCHED AND s.change_type = 'UPSERT' THEN UPDATE SET
+    status = s.status,
+    amount = s.amount,
+    shipping_region = s.shipping_region,
+    updated_at = s.updated_at
+WHEN NOT MATCHED AND s.change_type = 'UPSERT' THEN INSERT
+    (order_id, status, amount, shipping_region, updated_at)
+VALUES
+    (s.order_id, s.status, s.amount, s.shipping_region, s.updated_at);
+```
 
-### Read each observation at the level it measures
+This fits a set-based batch already represented as a table or subquery. It adds
+conditional matched and not-matched actions that a simple upsert cannot express.
+It is a Data Manipulation Language statement, not a substitute for a continuous
+high-throughput streaming load.
 
-| Observation in Lab 7 | What it establishes | What it does not establish |
+### Require deterministic source matching
+
+Doris 4.x does not detect duplicate Join rows for `MERGE INTO`; multiple source
+rows driving one target row can yield undefined behavior. Deduplicate by an
+authoritative sequence or reject the batch first. Lab 7 compares total source
+rows with distinct source Keys before executing the merge.
+
+## 7.6 Choose How Deleted Rows Are Identified
+
+Use predicate `DELETE` when SQL defines the target set, such as
+`status = 'test'`. It can apply to Duplicate, Unique, and Aggregate Key tables,
+although Aggregate Key delete conditions are restricted to Key columns.
+
+Use Delete Sign when a batch or CDC record already carries a deleted Unique
+Key. Setting hidden `__DORIS_DELETE_SIGN__ = 1` lets deleted Keys use a load
+path. Writing `NULL`, omitting Value columns, or sending an ordinary upsert does
+not mean delete.
+
+Delete Sign is an input-facing hidden column, not the internal per-Rowset delete
+bitmap described by Merge-on-Write. Lab 7 deletes `2003` by predicate and
+`2002` by Delete Sign, after which an ordinary query returns only `2001`.
+
+## 7.7 Match the Operation to a Complete Lifecycle Scope
+
+| Requirement | Starting operation |
+| --- | --- |
+| A complete table or Partition is obsolete | `TRUNCATE TABLE/PARTITION` |
+| A complete corrected dataset replaces a scope | `INSERT OVERWRITE` |
+| Only a bounded predicate-selected set disappears | Predicate `DELETE` |
+
+`TRUNCATE PARTITION` fits retention of complete calendar ranges.
+`INSERT OVERWRITE` fits a backfill containing the complete desired contents;
+rows absent from the replacement do not remain. Ordinary `INSERT INTO` on a
+Duplicate Key table would append and can duplicate the old scope.
+
+Doris documents overwrite as atomic replacement. Lab 7 observes the final
+contents but does not run concurrent readers, so it does not claim to observe
+the switch itself. Always verify the target scope: a complete dataset written
+to the wrong Partition is still a complete replacement of the wrong data.
+
+## 7.8 Separate Logical Visibility from Physical Cleanup
+
+After publication, new ordinary queries see the winning Unique Key state and
+exclude logically deleted rows. They need not wait for Compaction. Superseded
+physical versions can remain until background Compaction reclaims them.
+
+```text
+transaction publishes
+        +-- new queries see the new logical state
+        +-- old physical versions may remain
+                    +-- later Compaction can reclaim them
+```
+
+| Evidence | Supported conclusion | Unsupported conclusion |
 | --- | --- | --- |
-| Ordinary rows before and after deletion | Which order keys and values the query can see | Which old Segment bytes remain |
-| `COUNT(*) OVER()` in the result | Number of visible rows in that result | Number of physical row versions |
-| A later Tablet `Version` | A later storage version has been published | How many rows were deleted or how much disk was reclaimed |
-| Tablet `VersionCount` | Reported retained version count at inspection time | A fixed count of business updates |
-| Tablet `RowCount` | Reported storage metadata | An exact substitute for ordinary `COUNT(*)` |
-| Hidden `__DORIS_DELETE_SIGN__` | A retained record's delete marker | The delete bitmap or the original deleted business row |
+| Ordinary `SELECT` | Current visible rows and values | Whether old bytes were reclaimed |
+| Hidden Delete Sign | Current hidden delete markers | Internal delete-bitmap contents |
+| `SHOW TABLETS` versions | A later Tablet version was published | Exact visible row count or future version count |
+| Official documentation | Designed MoW and Compaction behavior | Direct Notebook observation of internals |
 
-Background Compaction can change retained-version counts between inspections.
-Do not infer a Compaction duration or bytes reclaimed from the lab's two
-Tablet snapshots. A delete marker visible immediately after the exercise may
-no longer be available in a later inspection; that does not make the earlier
-logical deletion unsuccessful.
-
-This distinction also explains the workload guidance. Many tiny transactions
-can increase version and Rowset maintenance work. Batching changes and choosing
-whole-scope operations for lifecycle tasks address different sources of work.
-Their performance effects require measurements; the lab demonstrates behavior,
-not comparative throughput or physical cleanup timing.
+`VersionCount` can change during the lab because background work is independent.
+Tablet `RowCount` is not `COUNT(*)`. Frequent tiny writes can also create
+transaction, version, and Rowset pressure, so batch continuous changes and use
+Partition-level operations for whole ranges.
 
 ---
 
 ## Lab 7: Maintain Current State and Remove Data Safely
 
 Open [Lab 7 — Maintain Current State and Remove Data Safely](lab7_update_delete_data.ipynb).
-Its five main sections use controlled starting states:
+It creates only Module 7 tables:
 
-| Lab section | Table | Result to explain |
-| --- | --- | --- |
-| 1. Current state and upserts | `order_state` | A newer state wins; a delayed older state does not replace it; a new key is inserted |
-| 2. Omitted columns | `order_state` | Full-row defaults differ from partial-update preservation |
-| 3. SQL correction | `order_state` | Only the selected order's shipping region changes |
-| 4. Deletion and inspection | `order_deletions` | Predicate deletion and an incoming Delete Sign leave only order `2001` visible |
-| 5. Partition lifecycle | `order_lifecycle` | The expired scope is cleared; the active scope is replaced with `3003` and `3005` |
+- `order_state` for upsert, Sequence, partial update, and SQL correction;
+- `order_merge_target` and `order_merge_changes` for local `MERGE INTO`;
+- `order_deletions` for predicate DELETE and Delete Sign;
+- `order_lifecycle` for Partition truncate and overwrite.
 
-Sections 2 and 3 reset `order_state` before their own comparisons. Consequently,
-the four logical orders after Section 1 are not the table's final lab count.
-The two orders restored in Section 3 remain for the optional restart check.
-Run the setup before dependent sections and read each result against that
-section's starting state.
+| Step | Observation |
+| --- | --- |
+| 1 | New and existing Keys follow upsert; the larger Sequence wins |
+| 2 | Full-row omission uses defaults; partial update preserves values |
+| 3 | SQL `UPDATE` changes only the selected Value column |
+| 4 | One merge performs matched update, matched delete, and not-matched insert |
+| 5 | Predicate and incoming-Key deletes produce the intended visible state |
+| 6 | Truncate removes an expired range and overwrite replaces a backfill scope |
 
-The lab provides executable SQL. Use this course to explain why each command
-fits its change contract, rather than treating every example as an interchangeable
-way to modify a row. New-key partial-update policies, nullable-field clearing,
-equal-Sequence conflicts, concurrent reader behavior, temporary Partition
-replacement, and recovery are not executed cases in the Notebook.
+No external CDC system, object store, or downloaded dataset is involved.
 
 ## Module summary
 
-Current-state maintenance starts with a key, a source-ordering rule, and a
-definition of omitted values. Complete states fit full-row upsert; selected
-fields fit partial column update; occasional SQL corrections fit `UPDATE`.
-Choose predicates or Delete Sign from how deleted rows are identified, and
-use scope-level clearing or replacement when the whole Partition is the unit
-of change.
+Choose a change path from the source contract. Full-row upsert fits complete
+primary-key images; Sequence protects source order. Partial update fits
+field-owned patches; SQL `UPDATE` fits predicate corrections; `MERGE INTO` fits
+a staged relation requiring conditional actions.
 
-Across Level 2, the same principle connects modeling, analysis, joining, and
-maintenance: define what a row represents and what the operation must preserve.
-Logical results tell you whether that contract holds; storage and runtime
-evidence answer separate questions about how Doris carries it out.
+Predicate DELETE fits a SQL-defined set, Delete Sign fits incoming Unique Keys,
+and `TRUNCATE` or `INSERT OVERWRITE` fits complete lifecycle scopes. Published
+changes affect query visibility before Compaction necessarily reclaims storage.
 
 ## Official references
 
-- Model and storage: [Unique Key Model](https://doris.apache.org/docs/4.x/table-design/data-model/unique/) and [Merge-on-Write](https://doris.apache.org/docs/4.x/table-design/data-model/merge-on-write/).
-- Update paths: [Load-Based Updates](https://doris.apache.org/docs/4.x/data-operate/update/update-of-unique-model/), [Column Update](https://doris.apache.org/docs/4.x/data-operate/update/partial-column-update/), [Sequence Column](https://doris.apache.org/docs/4.x/data-operate/update/unique-update-concurrent-control/), and [UPDATE](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-modification/DML/UPDATE/).
-- Deletion: [Delete Operation](https://doris.apache.org/docs/4.x/data-operate/delete/delete-manual/) and [Load-Based Batch Delete](https://doris.apache.org/docs/4.x/data-operate/delete/batch-delete-manual/).
-- Lifecycle: [Truncate Operation](https://doris.apache.org/docs/4.x/data-operate/delete/truncate-manual/), [INSERT OVERWRITE](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-modification/DML/INSERT-OVERWRITE/), and [Temporary Partition](https://doris.apache.org/docs/4.x/data-operate/delete/table-temp-partition/).
-- Release implementation: [Apache Doris 4.1.3 InternalCatalog.java](https://github.com/apache/doris/blob/4.1.3/fe/fe-core/src/main/java/org/apache/doris/datasource/InternalCatalog.java), including `truncateTable` and `truncateTableInternal`.
+- [Data Update and Delete](https://doris.apache.org/docs/4.x/key-features/data-update-delete/) and [Unique Key](https://doris.apache.org/docs/4.x/key-features/unique-key/)
+- [Load-Based Updates for the Unique Model](https://doris.apache.org/docs/4.x/data-operate/update/update-of-unique-model/) and [Column Update](https://doris.apache.org/docs/4.x/data-operate/update/partial-column-update/)
+- [`UPDATE`](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-modification/DML/UPDATE/) and [`MERGE INTO`](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-modification/DML/MERGE-INTO/)
+- [Delete Operation](https://doris.apache.org/docs/4.x/data-operate/delete/delete-manual/) and [Load-Based Batch Delete](https://doris.apache.org/docs/4.x/data-operate/delete/batch-delete-manual/)
+- [Truncate Operation](https://doris.apache.org/docs/4.x/data-operate/delete/truncate-manual/) and [`INSERT OVERWRITE`](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-modification/DML/INSERT-OVERWRITE/)
+- Doris 4.1.3 terminology: [`OlapTable.java`](https://github.com/apache/doris/blob/4.1.3/fe/fe-core/src/main/java/org/apache/doris/catalog/OlapTable.java) and [`InternalCatalog.java`](https://github.com/apache/doris/blob/4.1.3/fe/fe-core/src/main/java/org/apache/doris/datasource/InternalCatalog.java)
