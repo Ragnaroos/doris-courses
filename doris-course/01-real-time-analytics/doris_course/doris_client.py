@@ -537,6 +537,83 @@ class DorisLab:
             columns=columns,
         )
 
+    def query(self, statement: str):
+        """Execute a SQL query and return all rows without displaying them."""
+        connection = self._require_connection()
+        executable, _visible = self._expand_sql(statement.strip())
+        with connection.cursor() as cursor:
+            cursor.execute(executable)
+            if cursor.description is None:
+                raise ValueError("query() requires a statement that returns rows.")
+            rows = cursor.fetchall()
+            columns = [column[0] for column in cursor.description]
+        return pd.DataFrame(rows, columns=columns)
+
+    def compare_queries(
+        self,
+        left_sql: str,
+        right_sql: str,
+        *,
+        left_label: str,
+        right_label: str,
+        title: str = "Query-result comparison",
+    ):
+        """Run two SQL statements, summarize their full row comparison, and return both results."""
+        from collections import Counter
+
+        left = self.query(left_sql)
+        right = self.query(right_sql)
+        differing_rows = None
+        if list(left.columns) == list(right.columns):
+            left_rows = Counter(left.itertuples(index=False, name=None))
+            right_rows = Counter(right.itertuples(index=False, name=None))
+            differing_rows = sum((left_rows - right_rows).values())
+            differing_rows += sum((right_rows - left_rows).values())
+        show_frame(title, pd.DataFrame([{
+            "left_result": left_label,
+            "left_rows": len(left.index),
+            "right_result": right_label,
+            "right_rows": len(right.index),
+            "differing_rows": differing_rows if differing_rows is not None else "column mismatch",
+        }]))
+        self.assert_same_rows(left, right)
+        return left, right
+
+    def summarize_query_focus(
+        self,
+        left_sql: str,
+        right_sql: str,
+        *,
+        left_label: str,
+        right_label: str,
+        match: Mapping[str, object],
+        metrics: Sequence[str],
+        title: str,
+    ):
+        """Run two SQL statements and display totals plus one focused slice."""
+        left = self.query(left_sql)
+        right = self.query(right_sql)
+        rows = []
+        for label, frame in ((left_label, left), (right_label, right)):
+            focused = frame
+            for column, value in match.items():
+                if column not in focused.columns:
+                    raise ValueError(f"Match column {column!r} is missing from the result.")
+                focused = focused.loc[focused[column] == value]
+            row = {
+                "result": label,
+                "all_groups": len(frame.index),
+                "focused_groups": len(focused.index),
+            }
+            for metric in metrics:
+                if metric not in frame.columns:
+                    raise ValueError(f"Metric {metric!r} is missing from the result.")
+                row[f"focused_{metric}"] = focused[metric].sum()
+                row[f"all_{metric}"] = frame[metric].sum()
+            rows.append(row)
+        show_frame(title, pd.DataFrame(rows))
+        return left, right
+
     def execute(self, statement: str) -> int:
         connection = self._require_connection()
         executable, _visible = self._expand_sql(statement.strip())
@@ -950,6 +1027,20 @@ class DorisLab:
             records = cursor.fetchall()
         plan = "\n".join(str(next(iter(record.values()))) for record in records)
         show_log(title, plan, opened=True)
+        return plan
+
+    def explain_selected_scans(self, statement: str, *, title: str = "Selected scans") -> str:
+        """Execute an EXPLAIN SQL statement and display only selected TABLE lines."""
+        normalized = statement.strip()
+        if not normalized.upper().startswith("EXPLAIN"):
+            raise ValueError("An EXPLAIN statement is required.")
+        connection = self._require_connection()
+        with connection.cursor() as cursor:
+            cursor.execute(normalized)
+            records = cursor.fetchall()
+        plan = "\n".join(str(next(iter(record.values()))) for record in records)
+        scans = [line for line in plan.splitlines() if re.match(r"\s*TABLE:", line)]
+        show_log(title, "\n".join(scans) or "Selected TABLE lines are not shown.", opened=True)
         return plan
 
     @staticmethod
@@ -1885,6 +1976,115 @@ LIMIT 10
 
         show_sql("Content returned by ErrorURL", error_log)
         return error_log
+
+    def sync_mv_jobs(self, table, view, *, database="doris_course"):
+        """Return build jobs for one synchronous materialized view."""
+        table = self._safe_table_name(table)
+        view = self._safe_table_name(view)
+        database = self._safe_table_name(database)
+        return [row for row in self._metadata_rows(
+            f"SHOW ALTER TABLE MATERIALIZED VIEW FROM `{database}`"
+        ) if row["TableName"] == table and row["RollupIndexName"] == view]
+
+    def async_mv_tasks(self, view, *, database="doris_course"):
+        """Return refresh tasks for one asynchronous materialized view."""
+        view = self._safe_table_name(view)
+        database = self._safe_table_name(database)
+        return self._metadata_rows(f"""SELECT * FROM tasks("type"="mv")
+            WHERE MvDatabaseName = '{database}' AND MvName = '{view}'""")
+
+    def capture_query(self, statement, *, settings=None):
+        """Capture the result, plan and fresh runtime Profile on this lab session."""
+        from .profiles import capture_query
+        return capture_query(self, statement, settings=settings)
+
+    def session_settings(self, settings):
+        """Temporarily apply session settings and restore them on context exit."""
+        from .profiles import session_settings
+        return session_settings(self, settings)
+
+    @staticmethod
+    def _wait_mv_job(fetch, matches, id_key, state_key, before, success, failures, timeout):
+        deadline = time.monotonic() + timeout
+        last = []
+        while time.monotonic() < deadline:
+            last = [row for row in fetch() if matches(row) and str(row[id_key]) not in before]
+            if len(last) > 1:
+                raise RuntimeError(f"Multiple new jobs found; avoid concurrent operations on the same materialized view: {last}")
+            if last:
+                row = last[0]
+                state = str(row[state_key]).upper()
+                if state == success:
+                    return row
+                if state in failures:
+                    raise RuntimeError(f"Background job failed: {row}")
+            time.sleep(0.5)
+        raise TimeoutError(f"Background job did not finish within {timeout}s. Last matching rows: {last}")
+
+    def wait_for_sync_mv(self, table, view, before, *, database="doris_course", timeout=120):
+        row = self._wait_mv_job(
+            lambda: self.sync_mv_jobs(table, view, database=database),
+            lambda r: True,
+            "JobId", "State", {str(x) for x in before}, "FINISHED", {"CANCELLED", "FAILED"}, timeout,
+        )
+        show_frame("Synchronous materialized-view build", pd.DataFrame([{
+            "Base table": row["TableName"],
+            "Materialized view": row["RollupIndexName"],
+            "Build state": row["State"],
+        }]))
+        show_log("Complete synchronous build task", json.dumps(row, indent=2, default=str))
+        return row
+
+    def wait_for_async_refresh(self, view, before, *, database="doris_course", timeout=120):
+        row = self._wait_mv_job(
+            lambda: self.async_mv_tasks(view, database=database), lambda r: True, "TaskId", "Status",
+            {str(x) for x in before}, "SUCCESS", {"FAILED", "FAIL", "CANCELED", "CANCELLED"}, timeout,
+        )
+        show_frame("Completed manual refresh task", pd.DataFrame([{
+            "TaskId": row.get("TaskId"),
+            "MvName": row.get("MvName"),
+            "Status": row.get("Status"),
+            "RefreshMode": row.get("RefreshMode"),
+            "Progress": row.get("Progress"),
+        }]))
+        return row
+
+    def wait_for_mv_jobs(self, table, sync_view, async_view, *, database="doris_course", timeout=120):
+        """Wait for earlier jobs on the explicitly named objects before resetting them."""
+        deadline = time.monotonic() + timeout
+        last = []
+        while time.monotonic() < deadline:
+            last = [r for r in self.sync_mv_jobs(table, sync_view, database=database)
+                    if str(r["State"]).upper() not in {"FINISHED", "CANCELLED", "FAILED"}]
+            last += [r for r in self.async_mv_tasks(async_view, database=database)
+                     if str(r["Status"]).upper() not in {"SUCCESS", "FAILED", "FAIL", "CANCELED", "CANCELLED"}]
+            if not last:
+                return
+            time.sleep(0.5)
+        raise TimeoutError(f"Earlier materialized-view jobs are still active; objects were not reset: {last}")
+
+    @staticmethod
+    def assert_scan(evidence, table, index=None):
+        """Check the chosen scan line, not an optimizer candidate/rewrite summary."""
+        DorisLab._safe_table_name(table)
+        index = DorisLab._safe_table_name(index or table)
+        pattern = rf"TABLE:\s*(?:[\w`]+\.)?`?{table}`?\s*\(\s*{index}\s*\)"
+        if not re.search(pattern, evidence.plan):
+            raise AssertionError(
+                f"Expected selected scan {table}({index}) was not found. "
+                "Inspect the displayed EXPLAIN and current build/statistics before claiming a rewrite."
+            )
+
+    @staticmethod
+    def assert_same_rows(left, right):
+        """Compare complete result multisets, including duplicate multiplicities."""
+        from collections import Counter
+
+        if list(left.columns) != list(right.columns):
+            raise AssertionError(f"Different result columns: {list(left.columns)} vs {list(right.columns)}")
+        if Counter(left.itertuples(index=False, name=None)) != Counter(right.itertuples(index=False, name=None)):
+            raise AssertionError("The complete grouped results differ; inspect both results before continuing.")
+
 
     def wait_for_table_rows(
         self,

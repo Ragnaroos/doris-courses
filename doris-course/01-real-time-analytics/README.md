@@ -2,8 +2,8 @@
 
 This directory contains the course notes, executable Jupyter labs, shared
 datasets, and reusable runtime support for the three course levels. Levels 1
-and 2 are implemented; Level 3 reserves its module boundaries for later
-development.
+and 2 are implemented. Level 3 includes the executable Lab 8; its course notes,
+quizzes, and remaining labs are still planned.
 
 ## Repository structure
 
@@ -76,7 +76,7 @@ doris-course/
         ├── README.md
         ├── module08-query-acceleration/
         │   ├── course.md
-        │   └── lab8_accelerate_queries.ipynb        planned
+        │   └── lab8_accelerate_queries.ipynb
         ├── module09-sharding-replication/
         │   ├── course.md
         │   ├── lab9_sharding_replication.ipynb      planned
