@@ -1422,10 +1422,10 @@ class DorisLab:
             },
             {
                 "id": "C",
-                "title": "Expose an external object set as rows",
-                "detail": "Read Parquet objects in S3 as a temporary relation used in FROM.",
-                "answer": "S3(...) TVF",
-                "reason": "S3 is a table-valued function: it returns a relation that SELECT can query.",
+                "title": "Adapt an aggregate for ARRAY positions",
+                "detail": "Sum the first elements together, the second elements together, and so on.",
+                "answer": "SUM_FOREACH(metric_array)",
+                "reason": "SUM_FOREACH is an aggregate combinator: it applies SUM independently at each ARRAY position across rows.",
             },
             {
                 "id": "D",
@@ -1434,11 +1434,35 @@ class DorisLab:
                 "answer": "ROW_NUMBER() OVER (...) ",
                 "reason": "ROW_NUMBER is a window function: it adds a value to each row in its window.",
             },
+            {
+                "id": "E",
+                "title": "Expand a collection stored in one row",
+                "detail": "Turn every tag in an event's ARRAY into a separate result row.",
+                "answer": "EXPLODE(tags)",
+                "reason": "EXPLODE is a table function: with LATERAL VIEW, it can produce zero to many rows for each input row.",
+            },
+            {
+                "id": "F",
+                "title": "Create a relation without an input table",
+                "detail": "Generate four numbered rows that SELECT can use directly in FROM.",
+                "answer": "NUMBERS(...) TVF",
+                "reason": "NUMBERS is a table-valued function: the function itself supplies a temporary relation for FROM.",
+            },
+            {
+                "id": "G",
+                "title": "Classify text with an external model",
+                "detail": "Send text through a configured Doris AI Resource and return a sentiment label.",
+                "answer": "AI_SENTIMENT(resource, text)",
+                "reason": "AI_SENTIMENT is an AI function. It has scalar row shape, but also depends on an external model configured through an AI Resource.",
+            },
         ]
         methods = [
-            "S3(...) TVF",
+            "NUMBERS(...) TVF",
             "ROW_NUMBER() OVER (...) ",
+            "EXPLODE(tags)",
             "LOWER(event_type)",
+            "AI_SENTIMENT(resource, text)",
+            "SUM_FOREACH(metric_array)",
             "SUM(revenue)",
         ]
         widget_id = "doris-function-match-" + uuid.uuid4().hex
@@ -1464,7 +1488,7 @@ class DorisLab:
             'Match each requirement to a Doris function category</div>'
             '<p class="doris-match-help">Drag each expression onto one requirement. If dragging is unavailable, '
             'select an expression and then click a requirement card. A correct match explains the row-shape behavior.</p></div>'
-            '<div class="doris-match-score"><span data-score>0</span>/4 matched</div></div>'
+            '<div class="doris-match-score"><span data-score>0</span>/7 matched</div></div>'
             f'<div class="doris-method-bank">{method_html}</div>'
             f'<div class="doris-scenario-grid">{"".join(cards)}</div>'
             '<div class="doris-match-actions"><button type="button" class="doris-match-reset">Reset matches</button></div>'
@@ -1498,7 +1522,7 @@ class DorisLab:
               root.querySelector('[data-score]').textContent = String(cards.filter(item => item.dataset.solved === 'true').length);
             }} else {{
               card.classList.add('wrong');
-              feedback.textContent = 'Not this expression. Compare whether the requirement needs one value per row, one value per group, a relation, or one value per window row.';
+              feedback.textContent = 'Not this expression. Compare the input, output row shape, and whether the operation depends on an existing input row or an external service.';
             }}
           }};
           methods.forEach(button => {{
