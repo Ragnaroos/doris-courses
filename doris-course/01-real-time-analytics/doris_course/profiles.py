@@ -89,6 +89,45 @@ def scan_profile_excerpt(profile: str, *, detail: bool = False) -> str:
     return "\n".join(selected).strip("\n") or "No OLAP scan counters are present in this section."
 
 
+def show_result_change(
+    current: pd.DataFrame,
+    title: str,
+    baseline: pd.DataFrame,
+    *,
+    match: Mapping[str, object],
+    metrics: tuple[str, ...],
+    expected_changes: Optional[Mapping[str, object]] = None,
+) -> None:
+    """Display and optionally verify changes for one matched result row."""
+    before = baseline
+    after = current
+    for column, value in match.items():
+        if column not in before.columns or column not in after.columns:
+            raise ValueError(f"Match column {column!r} is missing from the result.")
+        before = before.loc[before[column] == value]
+        after = after.loc[after[column] == value]
+    if len(before.index) != 1 or len(after.index) != 1:
+        raise ValueError("The match must identify exactly one row before and after.")
+
+    row = dict(match)
+    for metric in metrics:
+        if metric not in before.columns or metric not in after.columns:
+            raise ValueError(f"Metric {metric!r} is missing from the result.")
+        before_value = before.iloc[0][metric]
+        after_value = after.iloc[0][metric]
+        change = after_value - before_value
+        row[f"{metric}_before"] = before_value
+        row[f"{metric}_after"] = after_value
+        row[f"{metric}_change"] = change
+        if expected_changes is not None and metric in expected_changes:
+            expected = expected_changes[metric]
+            if change != expected:
+                raise AssertionError(
+                    f"Expected {metric!r} to change by {expected!r}, got {change!r}."
+                )
+    show_frame(title, pd.DataFrame([row]))
+
+
 @dataclass
 class QueryEvidence:
     """One fully fetched query, its plan, and its own runtime Profile."""
@@ -112,33 +151,14 @@ class QueryEvidence:
         expected_changes: Optional[Mapping[str, object]] = None,
     ) -> None:
         """Display and optionally verify changes for one matched result row."""
-        before = baseline
-        after = self.rows
-        for column, value in match.items():
-            if column not in before.columns or column not in after.columns:
-                raise ValueError(f"Match column {column!r} is missing from the result.")
-            before = before.loc[before[column] == value]
-            after = after.loc[after[column] == value]
-        if len(before.index) != 1 or len(after.index) != 1:
-            raise ValueError("The match must identify exactly one row before and after.")
-
-        row = dict(match)
-        for metric in metrics:
-            if metric not in before.columns or metric not in after.columns:
-                raise ValueError(f"Metric {metric!r} is missing from the result.")
-            before_value = before.iloc[0][metric]
-            after_value = after.iloc[0][metric]
-            change = after_value - before_value
-            row[f"{metric}_before"] = before_value
-            row[f"{metric}_after"] = after_value
-            row[f"{metric}_change"] = change
-            if expected_changes is not None and metric in expected_changes:
-                expected = expected_changes[metric]
-                if change != expected:
-                    raise AssertionError(
-                        f"Expected {metric!r} to change by {expected!r}, got {change!r}."
-                    )
-        show_frame(title, pd.DataFrame([row]))
+        show_result_change(
+            self.rows,
+            title,
+            baseline,
+            match=match,
+            metrics=metrics,
+            expected_changes=expected_changes,
+        )
 
     def show_scan_plan(self, title: str, *, include_complete: bool = True) -> None:
         """Highlight selected scan lines and optionally retain the complete plan folded."""
@@ -147,7 +167,7 @@ class QueryEvidence:
         if include_complete:
             show_log(f"{title}: complete EXPLAIN", self.plan)
 
-    def show_scan_rows(self, title: str) -> None:
+    def show_profile_scan_rows(self, title: str) -> None:
         """Show raw merged scan row counters with their operator context."""
         excerpt = scan_profile_excerpt(self.profile)
         lines = [line for line in excerpt.splitlines()
@@ -156,9 +176,18 @@ class QueryEvidence:
         show_log(f"{title} · MergedProfile", "\n".join(lines), opened=True)
         show_log(f"{title}: complete raw Query Profile · {self.profile_id}", self.profile)
 
+    def show_scan_rows(self, title: str) -> None:
+        """Backward-compatible alias for show_profile_scan_rows()."""
+        self.show_profile_scan_rows(title)
+
     def show(self, title: str, *, detail: bool = False) -> None:
         show_frame(f"{title}: query result", self.rows)
-        show_log(f"{title}: EXPLAIN (plan)", self.plan, opened=True)
+        scans = [line for line in self.plan.splitlines() if re.match(r"\s*TABLE:", line)]
+        show_log(
+            f"{title}: EXPLAIN selected scans",
+            "\n".join(scans) or "Selected TABLE lines are not shown.",
+            opened=True,
+        )
         show_log(
             f"{title}: MergedProfile scan counters · {self.profile_id}",
             scan_profile_excerpt(self.profile), opened=True,
@@ -201,4 +230,7 @@ def capture_query(lab: Any, statement: str, *, settings=None) -> QueryEvidence:
         return QueryEvidence(pd.DataFrame(records, columns=columns), plan, profile_id, profile)
 
 
-__all__ = ["compare_profiles", "capture_query", "session_settings", "QueryEvidence", "scan_profile_excerpt"]
+__all__ = [
+    "compare_profiles", "capture_query", "session_settings", "QueryEvidence",
+    "scan_profile_excerpt", "show_result_change",
+]

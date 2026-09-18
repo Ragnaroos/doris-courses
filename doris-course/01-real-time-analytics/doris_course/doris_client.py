@@ -579,38 +579,37 @@ class DorisLab:
         self.assert_same_rows(left, right)
         return left, right
 
-    def summarize_query_focus(
+    def summarize_query_values(
         self,
         left_sql: str,
         right_sql: str,
         *,
         left_label: str,
         right_label: str,
-        match: Mapping[str, object],
+        value_column: str,
+        values: Sequence[object],
         metrics: Sequence[str],
         title: str,
     ):
-        """Run two SQL statements and display totals plus one focused slice."""
+        """Run two SQL statements and summarize selected values from each result."""
         left = self.query(left_sql)
         right = self.query(right_sql)
         rows = []
         for label, frame in ((left_label, left), (right_label, right)):
-            focused = frame
-            for column, value in match.items():
-                if column not in focused.columns:
-                    raise ValueError(f"Match column {column!r} is missing from the result.")
-                focused = focused.loc[focused[column] == value]
-            row = {
-                "result": label,
-                "all_groups": len(frame.index),
-                "focused_groups": len(focused.index),
-            }
-            for metric in metrics:
-                if metric not in frame.columns:
-                    raise ValueError(f"Metric {metric!r} is missing from the result.")
-                row[f"focused_{metric}"] = focused[metric].sum()
-                row[f"all_{metric}"] = frame[metric].sum()
-            rows.append(row)
+            if value_column not in frame.columns:
+                raise ValueError(f"Value column {value_column!r} is missing from the result.")
+            for value in values:
+                focused = frame.loc[frame[value_column] == value]
+                row = {
+                    "result": label,
+                    value_column: value,
+                    "groups": len(focused.index),
+                }
+                for metric in metrics:
+                    if metric not in frame.columns:
+                        raise ValueError(f"Metric {metric!r} is missing from the result.")
+                    row[metric] = focused[metric].sum()
+                rows.append(row)
         show_frame(title, pd.DataFrame(rows))
         return left, right
 
@@ -1029,8 +1028,15 @@ class DorisLab:
         show_log(title, plan, opened=True)
         return plan
 
-    def explain_selected_scans(self, statement: str, *, title: str = "Selected scans") -> str:
-        """Execute an EXPLAIN SQL statement and display only selected TABLE lines."""
+    def explain_selected_scans(
+        self,
+        statement: str,
+        *,
+        title: str = "Selected scans",
+        expected_table: str | None = None,
+        expected_index: str | None = None,
+    ) -> str:
+        """Execute EXPLAIN, verify an optional scan, and display selected TABLE lines."""
         normalized = statement.strip()
         if not normalized.upper().startswith("EXPLAIN"):
             raise ValueError("An EXPLAIN statement is required.")
@@ -1039,6 +1045,12 @@ class DorisLab:
             cursor.execute(normalized)
             records = cursor.fetchall()
         plan = "\n".join(str(next(iter(record.values()))) for record in records)
+        if expected_table is not None:
+            table = self._safe_table_name(expected_table)
+            index = self._safe_table_name(expected_index or expected_table)
+            pattern = rf"TABLE:\s*(?:[\w`]+\.)?`?{table}`?\s*\(\s*{index}\s*\)"
+            if not re.search(pattern, plan):
+                raise AssertionError(f"Expected selected scan {table}({index}) was not found.")
         scans = [line for line in plan.splitlines() if re.match(r"\s*TABLE:", line)]
         show_log(title, "\n".join(scans) or "Selected TABLE lines are not shown.", opened=True)
         return plan
@@ -1998,6 +2010,29 @@ LIMIT 10
         from .profiles import capture_query
         return capture_query(self, statement, settings=settings)
 
+    def verify_query_change(
+        self,
+        statement: str,
+        baseline: pd.DataFrame,
+        *,
+        match: Mapping[str, object],
+        expected_changes: Mapping[str, object],
+        title: str = "Observed result change",
+    ):
+        """Run SQL and display only one matched row's verified changes."""
+        from .profiles import show_result_change
+
+        rows = self.query(statement)
+        show_result_change(
+            rows,
+            title,
+            baseline,
+            match=match,
+            metrics=tuple(expected_changes),
+            expected_changes=expected_changes,
+        )
+        return rows
+
     def session_settings(self, settings):
         """Temporarily apply session settings and restore them on context exit."""
         from .profiles import session_settings
@@ -2510,6 +2545,80 @@ LIMIT 10
         if output:
             show_log("View full command log", output)
         return result
+
+    def ensure_docker_ready(self, *, timeout_seconds: int = 180) -> None:
+        """Ensure the Docker daemon is reachable, starting Docker Desktop on macOS."""
+        if shutil.which("docker") is None:
+            raise RuntimeError("Docker CLI was not found in PATH.")
+
+        ready, output = docker_preflight()
+        if ready:
+            card("Docker daemon is already running", "ok")
+            return
+
+        if platform.system() != "Darwin":
+            raise RuntimeError(
+                "Docker Engine is not running. Start it on this host, then rerun this cell. "
+                f"Docker reported: {output or 'no diagnostic output'}"
+            )
+
+        launched = run(["open", "-a", "Docker"], check=False)
+        if launched.returncode != 0:
+            raise RuntimeError(
+                "Docker Desktop could not be opened. Start it manually, then rerun this cell."
+            )
+
+        deadline = time.monotonic() + timeout_seconds
+        last_output = output
+        while time.monotonic() < deadline:
+            ready, last_output = docker_preflight()
+            if ready:
+                card("Docker Desktop is running", "ok")
+                return
+            time.sleep(2)
+        raise TimeoutError(
+            f"Docker Desktop did not become ready within {timeout_seconds} seconds. "
+            f"Last diagnostic: {last_output or 'no diagnostic output'}"
+        )
+
+    def start_container(
+        self,
+        container: str,
+        *,
+        wait_for_healthy: bool = True,
+        timeout_seconds: int = 300,
+    ) -> dict:
+        """Idempotently make an existing course container available again."""
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.-]*", container):
+            raise ValueError("container must be a simple Docker container name.")
+
+        self.ensure_docker_ready()
+        state = container_inspect(container)
+        if state is None:
+            raise RuntimeError(
+                f"Container {container!r} does not exist. Run that module's environment "
+                "preparation before using its restart cell."
+            )
+
+        status = str(state.get("State", {}).get("Status", "unknown"))
+        if status == "paused":
+            run(["docker", "unpause", container], show=True)
+        elif status not in {"running", "restarting"}:
+            run(["docker", "start", container], show=True)
+        else:
+            card(f"Reusing {status} container {container}", "ok")
+
+        if wait_for_healthy:
+            wait_for_health(container, timeout_seconds=timeout_seconds)
+        state = container_inspect(container)
+        assert state is not None
+        container_state = state.get("State", {})
+        show_frame("Sandbox container", pd.DataFrame([{
+            "container": container,
+            "status": container_state.get("Status", "unknown"),
+            "health": container_state.get("Health", {}).get("Status", "not configured"),
+        }]))
+        return state
 
     def connect(
         self,
