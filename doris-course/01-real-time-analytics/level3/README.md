@@ -10,7 +10,7 @@ Level 3 延续 Level 1–2 已建立的电商分析流程：
     → 随时间演进、保留和恢复数据
 ```
 
-**当前状态：实验 8 已实现并通过本地验证。** [Lab 8 Notebook](module08-query-acceleration/lab8_accelerate_queries.ipynb) 使用英文；模块 8–10 的课程文件仍是占位内容，测验及实验 9–10 尚未实现。本文件继续保留中文开发大纲，实验 8 的验证记录见后文。
+**当前状态：实验 8–9 已实现并通过关键路径验证；实验 10 暂不包含在本次更新中。** [Lab 8](module08-query-acceleration/lab8_accelerate_queries.ipynb) 与 [Lab 9](module09-sharding-replication/lab9_observe_sharding_and_replication.ipynb) 使用英文；模块 8–10 的 Course 仍是占位内容，Quiz 尚未实现。本文件保留中文开发大纲，并以实际 Lab 顺序记录 Module 8–9 的目的、预期结果和证据边界。
 
 技术基线为 Apache Doris 4.x，实验目标版本为 4.1.3。所有版本敏感行为必须通过后文列出的验证，才能写成实验的预期结果。
 
@@ -141,18 +141,102 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
 
 ### 模块 8 实验：验证查询加速方案
 
-复用单节点环境，只读访问 `events_modelled` 和 `dim_products`，仅创建模块 8 自有对象。明确限定本地事件子集的范围，其指标总量不必等于完整基线。
+实验文件：[Lab 8 Notebook](module08-query-acceleration/lab8_accelerate_queries.ipynb)。实验复用 Level 1–8 的单节点 `doris` 容器和 `doris_course` Database；只读取 `events_modelled` 与 `dim_products`，所有可变对象均使用 `m08_*` 名称。以下编号严格对应 Notebook 的执行顺序。
 
-已按以下六个主体步骤实现，并在本地 Doris 4.1.3 构建中验证：
+0. **Initialize the Lab。**
+   - **目的与数据环境：** 从课程根目录或模块目录定位 `doris_course/`，加载共享 `DorisLab` 并创建 `lab`；该单元格不启动 Docker、不连接 Doris、也不修改任何表。内核重启后只需先重跑这里。
+   - **期望结果：** Python 初始化完成且没有 Doris 查询输出。
+   - **说明：** Notebook 的路径解析与共享 helper 可从课程根目录启动 Jupyter，也可从 VS Code 直接打开模块 Notebook。
 
-1. **准备事件与产品表**：检查指定左闭右开日期区间的事件数量及产品表非空，创建本模块副本，说明未匹配产品事件的来源与后续报表覆盖范围。
-2. **演示普通视图的逻辑复用**：独立创建普通视图，分别比较完整报表结果、计划选中的扫描对象及实际扫描行数。每项比较单独展示并解释结论，完整计划和 Profile 默认折叠；说明本次普通视图复用了筛选逻辑，但没有减少观察到的扫描工作，并由此引出物化视图。
-3. **构建同步物化视图并检查写入后的结果**：在本模块表上创建受支持的同步物化视图，等待构建完成，检查查询计划实际选中的扫描索引。追加自有数据后重新核对基表查询结果，区分构建完成、计划选用和数据一致性，不推断任意查询形态都能使用该视图。
-4. **观察异步物化视图的刷新与新鲜度**：基于自有事实表和维度表创建异步物化视图，执行手动刷新并检查任务状态。改变自有源数据，比较变化后、再次刷新前后的视图结果，并在刷新后对账；不假定所有基表变化都会立即反映到视图。
-5. **比较满足与不满足改写条件的查询**：选择一组符合视图粒度和指标范围的查询，以及一组刻意超出范围的查询。检查计划选中的对象，核对完整分组结果，再读取对应算子的运行计数；`EXPLAIN` 只说明计划选择，实际工作量变化必须由 Query Profile 支持。
-6. **隔离二级索引的作用**：在行、结构、分布和排序均相同的自有表上，对照有无不分词倒排索引的查询。核对结果，并保留名称、单位和算子范围明确的原始扫描及索引计数；不承诺固定耗时提升，也不由无关计数推断磁盘输入输出节省。
+1. **Section 1A：检查上游事件和产品数据。**
+   - **目的与数据环境：** 连接已有的单节点 `doris`，要求 Lab 4 已创建 `events_modelled`、Lab 6 已创建且填充 `dim_products`；只检查 `[2020-03-01, 2020-03-02)` 左闭右开范围和产品表非空，不下载数据。
+   - **期望结果：** `events_modelled` 在该范围内为 **75,259** 行，`dim_products` 行数大于零；不满足时立即提示先完成对应前置 Lab。
+   - **说明：** 这一步只确认后续实验所需的最小数据环境，不把行数检查说成逐字段完整性验证。
 
-优先执行候选为：一个同步物化视图、一个手动刷新的异步物化视图，以及一组不分词倒排索引对照。只有 BloomFilter 实验能够增加独立且可复现的证据时，才作为扩展加入。不需要展开完整索引目录、向量搜索或外部数据源。
+2. **Section 1B：清理并重建 Module 8 自有表。**
+   - **目的与数据环境：** 等待旧物化视图任务结束，删除旧的 `m08_async_category_metrics`、`m08_purchase_view`、同步索引所属基表及四张 `m08_*` 表；从前置表复制一天事件到 Duplicate Key 表 `m08_events`，复制被事件引用的产品到 Unique Key 表 `m08_products`，再同步采集统计信息。上游 `events_modelled` 和 `dim_products` 保持不变。
+   - **期望结果：** 两张自有表创建并装载成功；Left Anti Join 返回 **501** 条没有产品匹配的 purchase 事件。
+   - **说明：** 501 条事件都来自 Lab 6 刻意排除的产品 `1005115`，不是复制失败。地区报表直接读事件表会包含它们；后续类别报表使用 Inner Join 会排除它们，因此两类报表总量不必相等。
+
+3. **Section 2A：用普通 View 复用 purchase 定义并比较答案。**
+   - **目的与数据环境：** 在已准备的 `m08_events` 上创建 `m08_purchase_view`，分别执行直接带 `event_type='purchase'` 的地区报表和通过 View 的同义报表；Profile 捕获期间临时关闭 SQL Cache、Query Cache 和 Condition Cache，并在结束或失败后恢复会话设置。
+   - **期望结果：** 两个结果都包含八个地区且逐行完全一致；固定数据中 `region_01` 为 2,319 条 purchase、收入 732,977.08。
+   - **说明：** 普通 View 成功复用了筛选逻辑并保持语义，但结果相等本身不能说明扫描工作减少。
+
+4. **Section 2B：检查普通 View 的计划扫描对象。**
+   - **目的与数据环境：** 复用 2A 已捕获的两个 `EXPLAIN`，只显示选中的 `TABLE:` 行，不重新执行查询。
+   - **期望结果：** 直接查询和 View 查询都选择 `m08_events(m08_events)`。
+   - **说明：** 普通 View 保存的是查询定义，计划仍扫描底层事件表；`EXPLAIN` 只能证明计划选择，不能证明实际扫描了多少行。
+
+5. **Section 2C：比较普通 View 的实际扫描工作。**
+   - **目的与数据环境：** 读取 2A 已保存的 Query Profile，在对应 `OLAP_SCAN_OPERATOR` 下保留 `ScanRows` 与 `RowsProduced`，不重新执行 SQL。
+   - **期望结果：** 经验证的运行中，两条路径都记录 `ScanRows=75,259`、`RowsProduced=18,298`，最终再聚合为八个地区。
+   - **说明：** 该普通 View 没有减少本次运行观察到的扫描工作；运行计数、计划和业务答案是三类不同证据，不能用单次耗时替代。
+
+6. **Section 3A：创建同步物化视图并等待初始构建。**
+   - **目的与数据环境：** 在 Module 自有 Duplicate Key 表 `m08_events` 上创建按 `(region,event_type)` 汇总 count 与 revenue 的 `m08_sync_metrics`；记录旧 Job ID，只等待这次新建任务，并重新采集基表统计信息。
+   - **期望结果：** 新任务明确对应 `m08_events` / `m08_sync_metrics` 且状态为 `FINISHED`；等待有超时，失败任务不能被旧成功记录掩盖。
+   - **说明：** 构建完成只证明物化结构可用，不证明原报表一定会选择它；`ANALYZE ... WITH SYNC` 的 SYNC 表示同步等待统计信息采集，并非物化视图写入语义。
+
+7. **Section 3B：运行不改写 SQL 的原地区报表并核对答案。**
+   - **目的与数据环境：** 继续执行 Section 2 的 `regional_query`，SQL 仍引用 `m08_events`，并将完整八组结果与物化前 baseline 对账。
+   - **期望结果：** 八个地区的 count 和 revenue 全部一致；`region_01` 仍为 2,319 和 732,977.08。
+   - **说明：** 物化结构不应改变查询语义；结果一致仍不能回答实际用了哪个索引。
+
+8. **Section 3C：确认计划选择同步物化索引。**
+   - **目的与数据环境：** 比较物化前后的已捕获 `EXPLAIN` 扫描行，不重复执行报表。
+   - **期望结果：** 扫描从 `m08_events(m08_events)` 变为 `m08_events(m08_sync_metrics)`。
+   - **说明：** SQL 仍写基表名，优化器可以选择同步物化索引；这证明访问路径选择，不是扫描行数证据。
+
+9. **Section 3D：比较基表路径与物化索引路径的 Profile。**
+   - **目的与数据环境：** 从两个已保存的 Query Profile 中提取同一报表的扫描算子计数，并保留表/索引身份。
+   - **期望结果：** baseline 扫描 75,259 条事件并输出 18,298 条 purchase；验证运行中的物化索引扫描约 64 条汇总记录并输出约 32 条 purchase 汇总记录，最终答案仍是八组。物理汇总行数允许随存储状态变化。
+   - **说明：** 原始事件和预计算汇总具有不同粒度；更少的 `ScanRows` 支持“本次执行减少扫描行”的结论，但不能据此承诺固定延迟收益或忽略维护成本。
+
+10. **Section 3E：验证一次提交写入后的同步维护。**
+    - **目的与数据环境：** 以 `event_id=-8001` 的 `NOT EXISTS` 条件幂等追加一条 `region_01`、收入 19.95 的 purchase；不执行任何 refresh，再运行完整地区报表并单独执行 `EXPLAIN`。
+    - **期望结果：** 只展示并验证 `region_01` 的 `event_count +1`、`total_revenue +19.95`；计划仍选择 `m08_sync_metrics`。
+    - **说明：** 业务结果证明已提交写入进入报表，计划证明仍使用同步物化索引；两种证据共同支持“该受支持定义被同步维护”，但不外推到任意物化定义。
+
+11. **Section 4A：创建异步多表物化视图、手动完整刷新并建立新鲜 baseline。**
+    - **目的与数据环境：** 使用已含幂等 purchase 的 `m08_events` 和 `m08_products` 创建 `BUILD DEFERRED REFRESH COMPLETE ON MANUAL` 的 `m08_async_category_metrics`，提交一次新 COMPLETE refresh；关闭透明改写后比较源表 Join 与直接读取存储视图的完整结果。
+    - **期望结果：** 新 Task ID 状态 `SUCCESS`、进度 100%；`mv_infos` 显示对象和刷新状态；源查询与存储视图均为 64 个 category/region 组且 `differing_rows=0`。
+    - **说明：** 异步视图可以保存多表计算，但直接读取存储结果、刷新任务成功和透明改写是不同问题；禁用改写避免把视图与自身比较。
+
+12. **Section 4B：修改维度并观察刷新前的陈旧结果。**
+    - **目的与数据环境：** 选择 purchase 数最多且尚未改名的产品，把 Module 自有维度中的 category 更新为 `lab8_reclassified`；不刷新视图，分别查询当前源表与存储视图，并在正常开启 rewrite 时裁剪实际扫描计划。该步骤依赖 Section 1 重建出的原始 category，重复实验应从 Section 1 开始。
+    - **期望结果：** 当前源表把 508 条 purchase、122,846.80 revenue 从 `category_8` 移到 `lab8_reclassified`，总事件数和收入不变；存储视图仍保留刷新前值，`lab8_reclassified` 为零组。
+    - **说明：** 异步视图存在明确刷新滞后；源数据变化不会自动改写已存结果，计划展示也不会触发刷新。
+
+13. **Section 4C：再次完整刷新并对账。**
+    - **目的与数据环境：** 记录旧 Task ID 后提交第二次 COMPLETE refresh，等待新任务成功；在禁用 rewrite 的条件下比较当前源表与刷新后存储视图，并更新产品表和视图统计信息。
+    - **期望结果：** 新任务 `SUCCESS`；两侧完整 72 组完全一致，`category_8` 为 1,814 / 551,991.97，`lab8_reclassified` 为 508 / 122,846.80。
+    - **说明：** 完整刷新使存储结果追上改变后的源答案；实验验证正确性和任务边界，不测量生产刷新资源成本。
+
+14. **Section 5A：验证满足粒度与指标条件的透明改写。**
+    - **目的与数据环境：** 对相同事件—产品 Join、purchase 范围、category 分组及可加 count/sum 指标，分别关闭和开启 `enable_materialized_view_rewrite`；两次都保留 SQL 结果及 Query Profile，计划身份由断言静默检查。
+    - **期望结果：** 两次返回相同九行 category 汇总；关闭时 Profile 扫描 `m08_events` 与 `m08_products`，开启时扫描 `m08_async_category_metrics`。
+    - **说明：** 细粒度 `category,region` 视图可以上卷到 category，且保存的可加指标足以推导答案；Profile 证明本次实际扫描对象，不展示多余的完整 `EXPLAIN`。
+
+15. **Section 5B：验证视图未保存的 distinct-buyer 指标不能被推导。**
+    - **目的与数据环境：** 保持同一 Join、过滤和 category 分组，改为请求 `COUNT(DISTINCT user_id)`；分别关闭和开启 rewrite 并比较结果与 Profile。
+    - **期望结果：** 两次九行 distinct-buyer 结果一致；开启 rewrite 后仍扫描 `m08_events` 与 `m08_products`，不扫描异步视图。
+    - **说明：** 该视图没有保存 `user_id` 或可合并的 distinct 状态，因此不能仅凭相同维度复用；这是当前视图定义的能力边界，不代表所有 distinct 查询都无法加速。
+
+16. **Section 6A：构造只有倒排索引不同的对照表和选择性谓词。**
+    - **目的与数据环境：** 删除并重建结构、Key、Bucket、分布、副本和输入 SQL 相同的 `m08_events_unindexed` 与 `m08_events_indexed`；后者在装载前声明 `INDEX m08_product_idx(product_id) USING INVERTED`。两表都复制当前 `m08_events`，包括 Section 3 的一条自有 purchase，再选择“有正收入且事件数最少”的 product，避免硬编码数据相关 ID。
+    - **期望结果：** 两表装载完成，单行结果给出本次 lookup 的 `product_id` 和 `matching_events`；可见 DDL 的主要实验差异是倒排索引。
+    - **说明：** 这是数值等值倒排索引，不是全文分词、`MATCH` 或 Join Runtime Filter；相同逻辑输入用于隔离索引变量，但独立装载后的 Page、Compaction 和缓存状态不保证相同。
+
+17. **Section 6B：执行相同 product lookup 并读取索引运行证据。**
+    - **目的与数据环境：** 对两张表执行完整且相同的 `product_id = rare_product_id` 查询，核对每行结果，保留计划扫描身份和 DetailProfile 中每个扫描任务的索引计数。
+    - **期望结果：** 两个查询返回完全相同的事件且行数等于 `matching_events`；验证运行中 indexed 路径出现正的 `RowsInvertedIndexFiltered` 并记录更少的 `ScanRows`，具体数值与时间允许变化。
+    - **说明：** `EXPLAIN` 中的基表索引名不能单独证明二级索引过滤；`RowsInvertedIndexFiltered`、索引时间和 cache hit/miss 必须按算子与任务解释，不能把 `ScanBytes` 直接称为避免的物理磁盘 I/O，也不能承诺固定加速倍数。
+
+18. **Stop、Restart 与 Lab complete。**
+    - **目的与数据环境：** 可选停止单节点 `doris` 释放资源，但保留容器、镜像和命名卷；重启单元格可在容器已停止、启动中或已运行时幂等执行，并重新连接检查 `m08_events`。
+    - **期望结果：** 停止后状态为 `exited`；重启后容器回到 `healthy`，完整实验后的 `m08_events` 为 **75,260** 行，且 `event_id=-8001` 恰有一行。
+    - **说明：** 停止/重启不会清空 Module 8 对象；结尾 `Lab complete` 用一段话回顾普通 View、同步/异步物化视图、改写边界与倒排索引证据，不再使用“证明事项”表格。
 
 ### 测验 8 的拟议覆盖范围
 
@@ -164,27 +248,27 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
 
 ### 模块目标
 
-解释分片、数据副本和 FE 元数据副本分别解决什么需求，并在 Apache Doris 官方 3 FE + 3 BE 多容器环境中检查实际行为。把 Partition、Bucket、Tablet、物理副本、分布式执行、BE 可用性和 FE 选举连接起来，同时明确单机 Docker 实验的证据边界。
+解释数据分片、Tablet 副本和 FE 元数据副本分别解决什么需求；在可从 3 FE + 2 BE 扩展至 3 FE + 3 BE 的多容器环境中，观察跨 BE 查询执行、Bucket Shuffle / Colocate Join、FE 查询入口切换、BE 副本再平衡及故障恢复。区分存储放置、计划选择和实际运行证据，并明确单机 Docker 实验的边界。
 
 ### 场景与逻辑主线
 
-事件服务的数据规模与可用性要求已经超出单个 FE + 单个 BE 沙箱。团队先把数据划分到多个 BE，再为每个 Tablet 放置三个副本，然后检查查询实际选择哪些 BE 执行。持续发生的事实与维度连接引出共置布局；受控停止一个 BE 用来观察数据副本可用性，受控停止当前 Master FE 用来观察元数据服务选举。最后区分“多个容器继续工作”和“跨主机生产级高可用”。
+事件服务首先需要一个不会绑定单个 FE 的查询入口。团队先识别当前 Master 并直连它，停止该 FE 后观察原连接失败，再加入带健康检查的统一入口，验证新连接能够避开故障 FE；恢复该 FE 后再继续数据实验。存储侧先在两个 BE 上建立双副本事件表，此时两个 BE 都持有每个 Tablet 的一份副本；加入第三个 BE 后，后台再平衡才使三个 BE 持有不同 Tablet 子集。完成扩容后，用一条地区聚合观察 FE 选择哪些 Tablet 副本并把扫描任务下发到哪些 BE；三台 BE 都保存副本，不代表每次查询都必须使用三台。随后用三副本事件小表观察一个 BE 停机期间的写入与返回节点版本追赶。最后复用事件与用户表，对照 Bucket Shuffle Join 和 Colocate Join，把数据放置与 Join 数据移动连接起来。
 
 ### 官方实验环境基线
 
 Module 9 使用 Apache Doris 官方 [`multi-node.yml`](https://github.com/apache/doris/tree/master/docker/runtime/all-in-one/4.1/compose)，固定镜像为 `apache/doris:all-in-one-4.1.3`。同一镜像通过 `DORIS_ROLE` 分别启动一个进程角色，形成以下拓扑：
 
 ```text
-fe-1 ─┬─ fe-2, fe-3
-      ├─ be-1, be-2, be-3
-      └─ client
+FE：fe-1、fe-2、fe-3（始终保持三个参与选举的 Follower）
+BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行查询与故障实验
+客户端：先直连当前 Master FE → 验证连接失败 → 改用 HAProxy 统一入口
 ```
 
 - `fe-1` 初始引导集群，`fe-2`、`fe-3` 默认作为 Follower 加入；基础实验不把 `fe-3` 改成 Observer，以保留三个参与选举的 FE。
-- 三个 BE 分别运行在独立容器中；默认表副本数为三，因此每个 Tablet 的三个副本可以放置到三个 BE。
-- `client` 容器提供 `mysql` 与 `curl`，并在预期 FE、BE 全部存活后才变为 healthy；初始化使用 `docker compose up --wait`，不使用固定 `sleep` 代替就绪检查。
+- `be-1`、`be-2` 先运行，`be-3` 留给在线扩容实验。`m09_events` 显式使用两个副本；在两个 BE 阶段每个 BE 各存放每个 Tablet 的一个副本，加入第三个 BE 后再观察放置是否变化。三副本事件小表只在三个 BE 就绪后创建。默认副本数不能代替实验中明确的建表配置。
+- 当前 `client` 容器的健康检查期望三个 BE；若沿用此条件，初始阶段只启动三 FE + 两 BE，扩容后再启动 `client`。实际 Lab 需核对官方镜像对新增 BE 的注册方式，使用有界就绪检查，不用固定 `sleep` 代替。
 - Module 9 使用独立 Compose project、私有子网和不与现有单节点沙箱冲突的主机端口。官方 Compose 支持 `FE_PORT`、`FE2_PORT`、`FE3_PORT`、`FE_HTTP_PORT`、`FE2_HTTP_PORT`、`FE3_HTTP_PORT`、`BE_HTTP_PORT` 和 `SUBNET`。课程候选值为 MySQL 端口 `9130`–`9132`、FE HTTP 端口 `8130`–`8132`、BE HTTP 端口 `8140` 和子网前缀 `172.31.91`，采用前必须检查占用。容器内部仍使用 Doris 默认端口。
-- 在 Docker Desktop 上，主机不能直接路由到容器私网地址。需要跟随 FE 重定向到 BE 的操作应从 `client` 容器执行；Notebook 的普通 MySQL 查询使用明确发布的 FE 端口。
+- 在 Docker Desktop 上，主机不能直接路由到容器私网地址。需要跟随 FE 重定向到 BE 的操作应从 `client` 容器执行。当前 Notebook 的 `DorisLab.connect` 固定连接 `127.0.0.1:9130`，即 `fe-1`，停掉 Master 后才手动切换到另一个 FE；这不是 FE 负载均衡。新版实验先识别当前 Master 及其发布端口并明确直连，再停止该 FE，证明原 TCP 连接不会自动迁移；随后按官方方案加入带健康检查的轻量 HAProxy TCP 入口，让新连接避开故障 FE，并用代理统计或等价证据核对连接目标。恢复原 FE 后确认它重新加入，再为后续 Lab 保持完整 FE 拓扑。代理仍位于同一 Docker 宿主机，本身也不是冗余入口。[FE 负载均衡](https://doris.apache.org/docs/4.x/admin-manual/cluster-management/load-balancing/)。
 - 官方 Compose 默认不提供跨 `down` 的持久化。`stop/start`、`kill/start` 或再次 `up` 保留现有容器状态；`down` 删除容器、网络和其中的数据。故障实验不能用 `down` 代替停止单个节点。
 
 官方依据：[All-in-One 镜像与多节点 Compose](https://doris.apache.org/community/developer-guide/all-in-one-image)。
@@ -194,134 +278,197 @@ fe-1 ─┬─ fe-2, fe-3
 完成本模块后，学员应能够：
 
 1. 区分为容量和并行工作服务的分片、为数据冗余服务的 Tablet 副本，以及为元数据服务可用性服务的 FE Follower。
-2. 说明官方 3 FE + 3 BE 环境中 FE、BE 和 `client` 的职责及连接路径。
+2. 说明三个 FE、从两个扩展到三个的 BE、`client` 和负载均衡入口各自的职责及连接路径。
 3. 说明 Partition、Bucket、Tablet 标识和物理副本之间的关系。
-4. 根据数据量、倾斜和查询条件选择分布列与 Bucket 数量。
-5. 区分期望副本配置、实际放置和版本完整的健康副本。
+4. 根据数据量和查询条件选择分布列与 Bucket 数量，并解释低基数分布列可能带来的风险。
+5. 区分期望副本配置、BE 上的实际放置、查询选择的副本，以及版本完整的健康副本。
 6. 沿 FE 计划片段追踪参与执行的 BE，不把每个副本重复计入逻辑查询结果。
-7. 将稳定 Colocation Group 的布局与实际选中的 Colocate Join 计划关联起来。
-8. 根据观察到的节点与副本状态解释一个 BE 停止和返回后的读写结果。
-9. 区分 FE Master 选举、客户端重新连接、BE 数据副本可用性和共享宿主机故障域。
+7. 在相同事件—用户连接场景中解释 Bucket Shuffle Join 与 Colocate Join 的数据移动和适用条件，并以实际计划核对选择。
+8. 解释新增 BE 后的副本再平衡、旧 Bucket 数不变、停机写入门槛及返回节点的版本追赶。
+9. 区分 FE Master 选举、客户端 FE 负载均衡与重连、BE 数据副本可用性和共享宿主机故障域。
 
 ### 课程内容大纲
 
-#### 9.1 从单节点沙箱进入官方多节点拓扑
+#### 9.1 从单节点沙箱进入可扩展的多节点拓扑
 
 **需求场景：** 单个 FE + 单个 BE 可以演示 SQL，但不能证明副本放置、跨 BE 执行或 FE 选举。
 
 - 说明同一 `all-in-one-4.1.3` 镜像如何由 `DORIS_ROLE` 启动 FE、BE 和 `client` 角色。
 - 区分 FE 的查询规划与元数据职责，以及 BE 的数据存储与计划片段执行职责。
-- 解释 `fe-1` 初始引导、Follower 加入、BE 注册和 `client` 健康检查的顺序。
+- 解释 `fe-1` 初始引导、Follower 加入、两个初始 BE 注册、第三个 BE 后续加入和 `client` 健康检查的顺序。
 - 使用 `SHOW FRONTENDS`、`SHOW BACKENDS` 和容器健康状态核对实际拓扑，不仅根据容器数量判断集群可用。
-- **实验衔接：** 启动隔离 Compose project，确认三个参与选举的 FE、三个 BE、版本、角色、地址和当前 Master，并证明连接没有误指向 Level 1–8 的单节点环境。
+- 说明现有 Notebook 固定直连 `fe-1`；FE 选举不等于客户端负载均衡。统一入口需由客户端多地址机制或外部代理提供，并分别验证新连接分配与故障后重连。
+- **实验衔接：** 先启动隔离 Compose project 中的三个 FE 和两个 BE，核对角色、版本、地址、当前 Master 与直连端口，证明连接没有误指向 Level 1–8 的单节点环境。
 
-#### 9.2 区分分片、数据副本和元数据副本
+#### 9.2 分开验证 FE 选举和客户端负载均衡
 
-**需求场景：** 团队同时需要容纳更多事件、保留多个数据副本，并避免单个 FE 成为唯一元数据服务。
+**需求场景：** 三个 FE 均能提供 SQL 入口，但当前 Notebook 只连 `fe-1`；它关闭后，已有连接会断开。
 
-- 沿用模块 2 的存储术语，不用 ClickHouse 部署术语替代 Doris 接口。
-- 说明 Bucket 对应逻辑 Tablet；副本是同一 Tablet 在不同 BE 上的物理拷贝，不会增加 SQL 可见的逻辑行数。
-- 分别统计唯一 Tablet ID 和元数据中的副本记录。
-- 对基表索引，先按分区数与每分区 Bucket 数计算 Tablet 数，再考虑副本配置；额外物化索引有自己的 Tablet 与存储成本。
-- 区分 BE 上的数据副本和 FE Follower 保存的元数据日志，两者不能互相替代。
-- **实验衔接：** 对完整的逐 Tablet 放置进行核对，验证一个逻辑 Tablet 对应三个不同 Backend ID 的健康副本。
+- 三个 Follower 中只有一个当前 Master；它失效后，存活 Follower 可选出新的 Master。选举维护的是 FE 元数据服务，不会自动迁移原有 MySQL TCP 会话，也不提供新连接的均匀分配。
+- 先识别当前 Master FE 及其 localhost 发布端口并直连，记录本次连接的协调 FE；停止这个 FE 后，用该连接再次执行查询，预期得到连接错误，而不是透明切换到另一个 FE。
+- 启动带健康检查的 HAProxy 统一入口，通过多次新建连接观察其分配目标。停止一个目标 FE 后，分别检查新 Master 选举、代理摘除故障目标和通过统一入口重新连接成功；不能仅用三个 FE 端口分别可查询来声称已经负载均衡。
+- 已经建立的 MySQL TCP 会话不会被 HAProxy 搬到另一台 FE；应用仍需要连接池或重试逻辑。恢复被停止的 FE 后确认它重新加入并重新进入代理可用目标，再继续后续数据实验。
+- **实验衔接：** 保留“直连失效”“FE 选举”“代理健康检查与新连接分配”“客户端重连”四类证据，不承诺在途查询零中断，也不把单个 HAProxy 容器描述成冗余入口。
 
-#### 9.3 根据需要分散的行和查询选择分布方式
+官方参考：[FE 负载均衡](https://doris.apache.org/docs/4.x/admin-manual/cluster-management/load-balancing/)。
 
-**需求场景：** 低基数分类字段导致数据集中，客户标识提供另一种分布选择。
+#### 9.3 区分分片、副本和新增 BE 后的自动再平衡
 
-- 在 Table Model 的限制下比较 Hash 和 Random 分布。
-- 区分存储表倾斜、Join Key 倾斜和执行实例倾斜。
-- 权衡过少的大 Tablet 与过多的小 Tablet。
-- 增加 BE 可以引起副本迁移，但不意味着旧数据自动重新哈希并获得新的 Bucket 数。
-- **实验衔接：** 从课程的只读 AWS S3 数据源导入有明确时间边界的小样本，再用相同行分别按高基数 `user_id` 和八值 `region` 分布；按 BE 和 Tablet 汇总实际布局，元数据行数明确标为存储层报告值。
+**需求场景：** 现有两个 BE 的存储或计算余量不足，团队加入第三个 BE，希望确认旧数据是否会被利用新节点承载。
 
-#### 9.4 放置三个副本并验证健康状态
+- 副本数不能超过满足放置约束的可用 BE 数。若 `BE 数量 = replication_num`，每个 BE 都会持有每个逻辑 Tablet 的一份副本；因此 2 BE + 2 副本和原来的 3 BE + 3 副本一样，都不能展示不同 BE 持有不同 Tablet 子集。
+- 实验仍先在两个 BE 上建立两个副本的事件表，用它作为扩容前基线；此时两个 BE 确实都覆盖全表。加入第三个 BE 后变成 `BE 数量 > replication_num`，后台调度器才有条件把已有副本逐步复制到新 BE，再清理旧的多余副本，使三个 BE 分担不同 Tablet 子集。
+- 说明 Bucket 对应逻辑 Tablet；副本是同一 Tablet 在不同 BE 上的物理拷贝，不会增加 SQL 可见的逻辑行数。分别统计唯一 Tablet ID、元数据副本记录和每 BE 副本数，不把三者混为一谈。
+- 比较扩容前后 `SHOW BACKENDS`、`SHOW REPLICA DISTRIBUTION`、少量逐 Tablet 的 `SHOW TABLETS` 和 SQL 逻辑答案；用有界等待观察调度，不把“第三个 BE 已 Alive”误读为“迁移完成”。
+- 旧表仍是原来的 Partition 和 Bucket 数；新增 BE 改变可放置位置，不会自动把已有 6 个 Bucket 改成更多 Bucket。共置表再平衡期间可能暂时不稳定，Join 计划需在稳定后另行核对。
+- **实验衔接：** 只启动预留的 `be-3` 并确认它已注册。比较前后 Tablet–Backend 映射；若小数据样本在有界时间内未触发可见迁移，明确展示调度状态和证据不足，不通过手动移动副本伪装成“自动再平衡”。
 
-**需求场景：** 表期望三个副本，但运维需要确认它们确实位于不同 BE 且版本完整。
+官方参考：[弹性扩容](https://doris.apache.org/docs/4.x/admin-manual/cluster-management/elastic-expansion/)、[副本均衡与修复](https://doris.apache.org/docs/4.x/admin-manual/maint-monitor/tablet-repair-and-balance/)。
 
-- 把副本配置与 BE 数量、放置约束、存储成本和健康状态关联起来。
-- 检查 Tablet ID、Replica ID、Backend ID、版本完整性和节点状态。
-- 区分期望副本数、当前副本记录数和当前健康副本数。
-- 区分物理副本与重复业务事件；三个副本不能使查询结果变成三倍。
-- **实验衔接：** 在停机前保存完整映射，核对每个目标 Tablet 的三个副本分别位于 `be-1`、`be-2`、`be-3` 对应的 Backend ID。
+#### 9.4 追踪一次查询选择的 Tablet 副本和 BE 扫描任务
 
-官方参考：[数据副本管理](https://doris.apache.org/docs/4.x/admin-manual/maint-monitor/tablet-repair-and-balance/)。
+**需求场景：** 扩容后的三个 BE 已持有不同 Tablet 子集，但团队需要知道一条查询实际使用了哪些副本和执行节点。
 
-#### 9.5 追踪一个查询如何跨 BE 执行
+- `m09_events` 仍按 `HASH(user_id)` 分成 12 个逻辑 Tablet，每个 Tablet 有两个物理副本。三台 BE 是可用的放置目标；FE 对每个所需 Tablet 选择一个可用副本，不会把两个副本都扫描一遍。
+- 区分业务行数、逻辑 Tablet、BE 上保存的物理副本和本次查询选中的副本。`SHOW REPLICA DISTRIBUTION` 说明副本放置，不能证明某个 BE 参与了这次查询。
+- 解释 FE 如何形成 Plan Fragment，为选中的 Tablet 副本下发 Fragment Instance；BE 执行扫描与局部聚合，Exchange 传递中间结果。`EXPLAIN` 表示计划，Query Profile 中的 BE host、Tablet ID 和 `ScanRows` 才是本次运行证据。
+- 多个不同的 BE host 出现在扫描 Profile 中，可以证明这次执行跨 BE 并行；没有出现的 BE 即使保存副本，也没有执行本次表扫描。副本选择和调度可能变化，因此不固定断言三台 BE 都参与、具体 Tablet ID 或具体扫描行数。
+- **实验衔接：** 对 `m09_events` 执行一条地区聚合，先核对八个地区和总行数，再对照裁剪后的 `EXPLAIN` 与 DetailProfile。只解释实际出现的 BE 扫描任务，不增加第二张偏斜对照表，也不以同一宿主机耗时声称扩展收益。
 
-**需求场景：** 表已跨节点存储，团队需要分布式执行的实际证据。
-
-- 把 FE 创建并分配的计划片段对应到 BE 执行实例。
-- 区分当前查询为每个 Tablet 选中的一个副本与元数据中的全部存储副本。
-- 使用 Exchange 和逐实例 Query Profile 证据，不重新讲解模块 6 已覆盖的四种分布策略。
-- 确认最终聚合只计算一次逻辑数据，不把副本数乘入结果。
-- **实验衔接：** 同时保留原始计划和包含 FE 协调查询、BE host、实例身份的 Query Profile；单机容器耗时不用于生产性能排名。
-
-#### 9.6 为重复 Join 复用数据放置
-
-**需求场景：** 反复发生的数据丰富查询应利用预先设计的兼容布局。
-
-- 说明分布方式、Bucket 数量、副本布局、组成员关系和稳定性如何共同影响 Colocate 的适用性。
-- 区分兼容的建表定义、已经稳定的共置放置和优化器实际选中的 Colocate Join。
-- Colocate Join 不一定消除整个查询其他位置的所有 Exchange。
-- **实验衔接：** 创建本模块的一对表和 Colocation Group，检查建表定义、组状态、逐 Bucket 副本放置及选中的 Join 计划；不按同一宿主机上的耗时给策略排名。
-
-官方参考：[共置连接](https://doris.apache.org/docs/4.x/query-acceleration/colocation-join/)。
-
-#### 9.7 观察一个 BE 停止和返回
+#### 9.5 在一个 BE 停机时写入，并观察返回节点追赶版本
 
 **需求场景：** 一个 BE 停止，但应用仍尝试读取和追加事件。
 
-- 停机前确认三个 BE、三副本和完整版本均健康，再停止一个明确命名的 BE 容器。
+- 双副本表在默认“多数副本写入”策略下需要两份都成功，停一个持有副本的 BE 不能直接承诺写入成功；三副本表在一个 BE 停止后仍可由另外两个副本形成写入多数。因此在第三个 BE 已加入且稳定后，用独立的 `m09_availability_events` 三副本事件小表承载故障写入，不改动事件聚合的固定样本。
+- 停机前确认三个 BE 和故障写入事件表的每个 Tablet 都有三个健康、版本完整的副本，记录每个 BE 对应的 `Version`；再停止一个明确命名的 BE 容器。
 - 区分 Docker 容器被停止、FE 心跳检测到节点不可用、正在执行的请求失败和后续重试结果。
-- 根据实际可用副本和当前写入策略解释读写结果，不预先承诺所有操作成功或零中断。
+- 在两个 BE 存活时做一次可重跑的写入，确认 SQL 已提交且逻辑结果更新；随后从 `SHOW TABLETS` 分别看到存活副本与停机副本的版本状态。停机副本元数据中的旧版本不能当作已从其容器读取的物理内容。
 - 使用 `kill/start` 或 `stop/start` 保留该容器的数据；不能使用会删除整个集群数据的 `down`。
-- 节点重新存活不等于副本已经完成版本追赶；宣布恢复前同时检查 BE 心跳、Tablet 副本版本和健康状态。
-- **实验衔接：** 保存停机前、停机中和返回后的节点、逐 Tablet 副本与有界读写证据。三个 BE 环境没有额外目标节点，因此不把本实验描述为替代副本迁移或 Decommission。
+- 启动原 BE 后立即读取一次节点与逐 BE 副本版本；若已经追平，如实说明恢复太快，不能保证每次都能捕捉到过渡态。随后有界等待全部副本版本一致且健康，并再次查询同一个业务值。节点 `Alive` 与副本版本追平是不同的完成条件。
+- **实验衔接：** 展示写入前、停机写入后、节点刚返回和完全追平后的简短逐 BE `Version` 对照；不硬编码具体版本号，也不把原节点的追赶误称为向替代节点迁移。
 
-官方参考：[系统架构与可用性](https://doris.apache.org/docs/4.x/features-architecture/system-architecture/)。
+官方参考：[写入高可用](https://doris.apache.org/docs/4.x/data-operate/import/load-best-practices/load-high-availability/)、[系统架构与可用性](https://doris.apache.org/docs/4.x/features-architecture/system-architecture/)。
 
-#### 9.8 观察 FE 选举并说明仍然存在的故障边界
+#### 9.6 最后比较 Bucket Shuffle 与 Colocate Join 的数据移动
 
-**需求场景：** 当前 Master FE 停止后，元数据服务需要重新选举，但已有客户端连接不会自动获得生产级流量路由。
+**需求场景：** 扩容和副本恢复完成后，事件表与用户维度频繁按 `user_id` 连接，团队希望利用已经稳定的数据放置减少 Join 交换。
 
-- 在三个 FE 都是 Follower 角色的前提下，先确定当前 Master，再停止对应容器并观察新 Master。
-- 通过另一个已发布的 FE 端口或 `client` 中的 FE 列表重新连接，执行只读验证；把“集群选出新 Master”和“客户端成功重新连接”作为两项证据。
-- 重启原 Master，检查它重新加入后的角色和元数据状态，不假定它自动恢复为 Master。
-- 区分 FE 元数据服务切换与 BE 数据副本可用性；停止 FE 不等于停止存储该 Tablet 的 BE。
+- 将 Join 放在故障恢复之后，先等待参与实验的表和 Colocation Group 稳定，避免把再平衡或修复期间的临时退化当成正常计划。
+- 沿用模块 6 对逻辑 Join 与物理 Hash Join 的区分，此处只研究跨 BE 的数据移动：Bucket Shuffle 保留一侧 Bucket 布局并重分发另一侧，Colocate 在稳定且兼容的组内避免该 Join 的 Shuffle。
+- 只使用 `m09_events` 和同名的 `m09_users` 业务对象。先把单个事件 Partition 按 `user_id` 汇总为中间结果，并让 `m09_users` 使用不兼容的 RANDOM 布局；`[shuffle]` 只用于阻止小维度表改走 Broadcast，Doris 4.1.3 的实际计划必须出现 `BUCKET_SHUFFLE` 才继续解释。随后用相同用户数据重建同名表，使其按 `user_id` 使用六 Bucket、双副本，并与 `m09_events` 加入同一个 Colocation Group。
+- 两次查询保持相同 Join Key、过滤范围、分组指标和业务答案。Bucket Shuffle 复用按 `user_id` 汇总后的事件侧 Hash 分布，只重分发用户侧；Colocate 还要求两张物理表的分桶列类型、Bucket 数、副本数与放置兼容，而且 `SHOW PROC "/colocation_group"` 必须报告 `IsStable=true`。
+- **实验衔接：** 分别裁剪普通 `EXPLAIN` 中的 Join 节点、Join 下方关键 `VEXCHANGE`、表扫描和 Partition 范围。Bucket Shuffle 应在 Join 输入分支看到 Exchange；Colocate 的 Join 与两个输入扫描之间不应有 Exchange，但最终聚合或结果合并仍可有其他 Exchange。不比较本机容器耗时。
+
+官方参考：[Doris 4.x Join 策略与限制](https://doris.apache.org/docs/4.x/query-data/join/)。
+
+#### 9.7 解释存储放置、查询执行和服务可用性的证据边界
+
+**需求场景：** 受控停止一个容器后查询和后续写入可恢复，但团队还需判断这些证据能支持什么可用性承诺。
+
+- 区分 FE 元数据选举、FE 查询入口的健康检查与负载均衡、BE 副本修复，以及业务客户端对失败请求的重试。
+- 区分 `SHOW REPLICA DISTRIBUTION` 展示的存储放置、`EXPLAIN` 展示的计划选择，以及 Query Profile 展示的实际执行。一个 BE 存有副本，不代表它一定参与本次扫描。
 - 说明六个 Doris 节点仍共享宿主机、Docker Engine、物理磁盘和外部网络；容器级停机不能证明主机、机架或可用区容灾。
 - 回顾存算分离架构的不同前提，但 Module 9 只使用官方存算一体 `multi-node.yml`，不启动 `cloud.yml`、FoundationDB 或 MinIO。
+
+#### 9.8 从副本健康过渡到数据生命周期
+
+**需求场景：** 节点和副本已经恢复健康，但业务仍需控制长期存储成本、历史保留和误删恢复。
+
+- 副本解决同一集群内的冗余与可用性，不等于备份，也不会定义业务数据应保留多久。
+- 扩容、再平衡和版本追赶都不会撤销错误写入或替代回收站与独立备份。
 - **模块过渡：** 节点和副本健康不能撤销错误写入，也不能替业务定义数据保留和恢复策略。
 
-### 模块 9 实验：观察官方 3 FE + 3 BE 集群
+### 模块 9 实验：从 3 FE + 2 BE 扩展并观察分布式行为
 
-实验使用模块目录中的 `compose.multinode.yml` 固定一份经验证的官方 4.1 多节点 Compose，并通过 `DORIS_IMAGE=apache/doris:all-in-one-4.1.3` 固定版本。Compose project、私有子网和主机端口必须与 Level 1–8 的 `doris` 容器隔离。即使暂时停止单节点容器释放资源，Module 9 仍使用自己的端口，避免连接身份随启动顺序变化。Level 1 的 `events` 位于另一个容器的私有卷，多节点集群不能直接查询它；因此实验从相同的只读 AWS S3 课程数据源导入 `[2020-03-01 00:00:00, 2020-03-01 07:00:00)` 小样本，不修改 S3 对象。
+实验文件：[Lab 9 Notebook](module09-sharding-replication/lab9_observe_sharding_and_replication.ipynb)。实验使用模块目录的 `compose.multinode.yml`、固定镜像 `apache/doris:all-in-one-4.1.3`、独立 Compose project、私有子网和 localhost 端口；不与 Level 1–8 的单节点 `doris` 同时运行。首次缺少本地 baseline 时只读课程 S3 的 `[2020-03-01 00:00:00, 2020-03-01 07:00:00)`，不修改 S3。以下编号严格对应 Notebook 的 1.1–3.2 与结尾控制步骤。
 
-实现前必须验证宿主机架构、Docker Compose v2、端口、子网和资源。实验最低要求为 Docker Engine 报告至少 4 个 CPU Core、8.00 GB（7.45 GiB）内存，以及 BE 数据文件系统至少 20 GiB 可用空间。Module 9 不与 Level 1–8 的单节点 `doris` 容器同时运行；若检测到该容器正在运行，Notebook 会在启动检查中提前停止并提示执行 `docker stop doris`。停止容器不会删除其命名卷或课程数据。官方默认每个 FE 使用 `FE_HEAP=1024m`；经本地 4.1.3 验证的课程 Compose 把它降为 `512m`，并保留官方 `BE_MEM_LIMIT=25%`。`25%` 是每个 BE 进程基于容器可见系统内存计算的上限，不是为它预留一块独立内存。三个 FE 和三个 BE 仍共用同一个 Docker 内存池。三个 BE 也在同一 Docker 文件系统上创建各自的数据路径，所以 `SHOW BACKENDS` 重复显示的容量是对同一底层容量的三次视图，不能相加。Docker Desktop 的虚拟磁盘上限和宿主机实际剩余空间仍会限制可写数据。
+0. **Initialize the Lab。**
+   - **目的与数据环境：** 定位课程根目录，加载共享 `DorisLab`，记录 Compose 文件、HAProxy 统计地址、代理端口、固定 FE 服务/IP/主机端口映射和期望事件行数；不启动或停止任何容器。初始 helper 指向直连 `fe-1`，后续步骤会按实验目的切换连接。
+   - **期望结果：** Python 变量与 `lab` 对象创建完成，没有集群状态变化。
+   - **说明：** 内核重启不会删除容器和数据，但必须重新运行初始化以恢复本地 Python 状态。
 
-这些值只是当前小数据学习实验的下限，不是生产容量建议。Notebook 在建表前展示“当前值—最低值—PASS/BELOW MINIMUM—共享范围”对照表。若资源不足，学员可以调高 Docker 资源分配，或在 Notebook 外手动停止现有 `doris` 容器；其命名卷继续保留，Module 9 不自动停止或删除其他模块的容器。不能以减少 FE/BE 数量代替目标拓扑。
+1. **Section 1.1：建立恰好两个存活 BE 的起点。**
+   - **目的与数据环境：** 检查 Docker、Compose、隔离端口和固定镜像；若 Level 1–8 的 `doris` 正在运行则停止并提示，不自动操作它。Module 9 保留已有容器 writable layer、FE 元数据和 Doris 数据，只重启 `be-1`、`be-2` 进程释放旧 RSS，显式停止 `be-3`、`client` 与 HAProxy；已有三 FE 容器同时启动以满足持久化 FE 元数据的多数派要求。这里不重建业务表。
+   - **期望结果：** 三个 FE 均 `Alive=true`、角色均为 Follower 且恰有一个 Master；仅 `be-1`、`be-2` 存活，固定地址为 `.50`、`.51`，版本一致；已注册的 `be-3` 可以仍在 FE 元数据中但必须 `Alive=false`；HAProxy 保持停止。
+   - **说明：** “已注册”不等于“正在提供放置”；重启 BE 进程会释放进程内存，但不会删除节点注册、容器层或已有 Doris 数据。
 
-拟按以下六个主体步骤组织，须先在本地主机完整验证：
+2. **Section 1.2A：只复用已提交事件内容，重建受控的两 BE 物理 baseline。**
+   - **目的与数据环境：** 如果现有 `m09_events` 或 `m09_events_previous` 恰有 12,062 行，只把这批逻辑事件临时保留为本地复制源；`m09_events` 的物理表仍会重建为两 Partition、每 Partition 六 Bucket、双副本。除这批事件内容外，旧的 `m09_events_skewed`、`m09_availability_events`、旧 probe 和 `m09_users` 全部删除，后续按各自步骤重建；首次没有完整本地数据时才读取只读 S3。FE/BE 容器与元数据不会重建。
+   - **期望结果：** 新 `m09_events` 为 **12,062** 行、12 个逻辑 Tablet、每 Tablet 两副本；在 `be-3` 停止时，副本放置固定为 `be-1=12`、`be-2=12`、`be-3=0`，总物理副本数 24；临时 `m09_events_previous` 随后删除。
+   - **说明：** 该设计使每次实验都从相同两 BE 放置开始，同时避免重复读取 S3。被保留的是已提交的数据内容，不是旧表的 Partition、Tablet、Colocation 或其他物理状态。
 
-1. **启动并识别官方多节点环境**：使用 `docker compose up --wait`，检查 `client` 及六个 Doris 节点健康；通过 `SHOW FRONTENDS` 和 `SHOW BACKENDS` 核对三个参与选举的 FE（其中一个为当前 Master）、三个存活 BE、版本、地址及连接端口。检测到单节点环境或节点数量不符时立即停止实验。
-2. **导入课程事件并核对三副本放置**：从只读 S3 源导入七小时范围的 12,062 行，用相同数据创建高基数分布和低基数倾斜对照表；分别统计 SQL 逻辑行、唯一 Tablet 和物理副本记录，保存完整 Tablet–Replica–Backend 映射，核对期望配置、实际放置和健康版本。
-3. **追踪并比较跨 BE 的查询执行**：对高基数和低基数分布表执行完全相同的受控聚合，先核对逻辑结果一致，再用包含 BE host、Tablet ID 和逐任务 `ScanRows` 的原始 Query Profile 比较扫描任务工作量分布；不使用同一宿主机上的运行时间下结论。
-4. **复用事件分布并检查 Colocate Join 计划**：将已经按 `user_id` 分桶的 `m09_events` 加入 Colocation Group，只新增一张兼容的用户维度表；检查组状态及选中的 Join 计划。组成员关系本身不能证明发生了 Colocate Join。
-5. **停止并恢复一个 BE**：保存健康基线后停止一个 BE，等待 FE 实际检测到不可用，执行有界读写探测并记录结果；启动原容器后等待心跳和副本版本恢复。实验不删除容器，不声称发生了替代副本重建或生产级无中断。
-6. **停止当前 Master FE 并验证重新连接**：确定当前 Master，停止对应 FE，等待新的 Master 产生；从另一个 FE 端点或 `client` 重新连接并执行只读查询。重启原 FE 后检查其角色。结尾沿用课程统一的可选 `docker compose stop` / `start` 流程：停止时保留 Compose 容器及其 writable layer，恢复后重新连接并核对三 FE、三 BE 与 12,062 行事件。
+3. **Section 1.2B：启动 `be-3` 并等待自动副本迁移。**
+   - **目的与数据环境：** 在两副本事件表健康后只启动 `be-3`，不重载表、不执行手动 Tablet copy 或 `ADMIN REBALANCE`；有界轮询节点、存储路径和每 BE 副本数。
+   - **期望结果：** 三个 BE 都存有至少一个事件表副本，精确分配可变；总副本仍为 24，逻辑行仍为 12,062。对照表第一行保持 `12/12/0`，第二行显示三台 BE 均为正数。
+   - **说明：** Doris 在新增放置目标后自动迁移已有副本；扩容改变物理放置，不改变两个 Partition、六 Bucket/Partition、双副本配置或逻辑答案。
+
+4. **Section 1.3A：观察 FE 状态，再切断当前直连 Master。**
+   - **目的与数据环境：** 第一代码框只展示三个 FE 的 Host、Role、Master、Join、Alive 和 Version，不改变环境。第二代码框仅在三 FE 全部存活且 HAProxy 仍停止时，识别当前 Master、直连它的 `91xx` 端口、停止该 FE，并在原 TCP 连接上执行有业务含义的 `m09_events` 行数查询。
+   - **期望结果：** 观察表本身不触发异常；停止直连 FE 后，原连接返回紧凑的 connection failed 结果，而不是自动切换。若前置拓扑不满足，第二代码框拒绝再停一台 FE。
+   - **说明：** FE 选举可让另一个 Follower 成为 Master，但不能把已经断开的 MySQL TCP 会话迁移到它；FE 高可用与客户端入口高可用是两个问题。
+
+5. **Section 1.3B：在故障 FE 仍停止时启动 HAProxy 并建立新连接。**
+   - **目的与数据环境：** 用 `--no-deps` 启动 HAProxy，避免 Compose 顺带恢复故障 FE；读取代理健康状态，建立四个独立的新 MySQL session，并比较各 FE 目标的累计连接增量；再通过代理端口 `9230` 查询事件表。
+   - **期望结果：** 至少四个新连接只分配到两个 `UP` 的 FE，停止目标增量为零；Doris 侧仍是两个存活 FE、恰有一个 Master；代理查询返回 12,062 行。
+   - **说明：** HAProxy 的 L4 健康检查和 round-robin 负责新连接入口，Doris FE 选举负责元数据服务；代理不能恢复旧会话，应用仍需重新连接或重试。
+
+6. **Section 1.4：恢复停止的 FE 并为 Profile 选择明确协调 FE。**
+   - **目的与数据环境：** 只恢复实际停止的 FE，等待 Doris 报告三 FE 存活并等待 HAProxy 将该目标重新标为 `UP`；随后识别当前 Master，改为直连其 MySQL 与 HTTP 端口，供后续 Query Profile 获取。
+   - **期望结果：** 三 FE 均 `Alive=true`、恰有一个 Master；代理状态为 `UP`，`last check` 被解释为 `L4OK — TCP connection to FE port 9030 succeeded`。返回 FE 不必重新成为 Master。
+   - **说明：** `L4OK` 只证明 TCP 端口可连接，不执行 SQL、也不识别 Master；累计连接总数不用于证明恢复，原先失败的会话也不会复活。
+
+7. **Section 2.1：查看 `m09_events` 的逻辑与物理布局摘要。**
+   - **目的与数据环境：** 在三 BE 扩容完成后等待事件表的 Tablet 行数元数据，再显示 Partition、Bucket、Tablet、副本与每 Tablet 行数范围；不执行用于观察运行位置的查询。
+   - **期望结果：** 两 Partition、六 Bucket/Partition、12 个逻辑 Tablet、两副本/Tablet、12,062 逻辑行；`rows/tablet` 是本次布局的范围，具体数值可变。
+   - **说明：** 该表说明存储布局和可选副本，不说明下一条查询选择哪一个副本或哪个 BE 实际扫描。
+
+8. **Section 2.2：用一条地区聚合观察计划范围与实际 BE 扫描任务。**
+   - **目的与数据环境：** 查询 `m09_events` 的八个地区 count/revenue；临时把每个 BE 上该 Fragment 的 `parallel_pipeline_task_num` 设为 1 以减少同一 BE 的重复 PipelineTask 输出，同时开启 Profile level 2、关闭三类结果/条件缓存并在结束后恢复。显示裁剪后的普通 `EXPLAIN` 与原始 DetailProfile 的 host、TabletIds、ScanRows。
+   - **期望结果：** 八个地区的 `event_count` 合计 12,062；`EXPLAIN` 展示扫描 Fragment、聚合与 Exchange，通常为 `tablets=12/12`；Profile 至少显示实际参与扫描的 BE host 及其任务，但不固定要求三台 BE、特定 Tablet ID 或特定扫描行数。
+   - **说明：** `EXPLAIN` 是计划范围，Profile 是本次运行证据。每个逻辑 Tablet 只选择一个可用副本；某 BE 存有副本却未出现在 Profile，表示它没有执行本次表扫描。单宿主机耗时不能用于证明扩展收益。
+
+9. **Section 2.3A：创建三副本故障写入表并建立版本 baseline。**
+   - **目的与数据环境：** 不修改双副本 `m09_events`，另行删除重建一 Bucket、三副本的 Unique Key 表 `m09_availability_events`；插入一条 baseline 事件，等待三个副本都存活且版本完整，并按 BE 汇总当前版本。
+   - **期望结果：** 三台 BE 各有一个存储副本、一个 current-version replica，版本一致；baseline 事件可查询。
+   - **说明：** 双副本在默认多数写入条件下不能承诺停一个副本仍写成功；独立三副本表让两个存活副本可以形成多数，同时不污染固定 12,062 行聚合样本。
+
+10. **Section 2.3B：停止 `be-2`，提交一条业务事件并比较副本版本。**
+    - **目的与数据环境：** 明确停止 `be-2`，等待 FE 只报告两个存活 BE；向三副本表插入 `event_id=9000002`、`region_01`、收入 19.95 的 purchase，再查询完整业务行和逐 BE 版本摘要。
+    - **期望结果：** purchase 在两个存活 BE 形成多数后提交并可查询；`be-1` 与 `be-3` 为同一较新版本 `V_new` 且 current-version=1，停止的 `be-2` 仍列出物理副本但版本为较小的 `V_old`、current-version=0。具体版本数字不硬编码。
+    - **说明：** 停止进程不会删除副本；逻辑查询成功和元数据中停机副本落后是两项互补证据。停机副本行来自 FE 元数据，不表示此刻从已停止容器读取了物理文件。
+
+11. **Section 2.4：重启 `be-2` 并等待版本追平。**
+    - **目的与数据环境：** 启动原 BE，先等待心跳 `Alive=true` 并立即抓取一次版本摘要，再有界等待全部三副本正常且版本完整，最后重查同一 purchase。
+    - **期望结果：** 立即采样可能仍看到 `be-2` 版本较小，也可能因恢复过快已经相等；等待结束后，三台 BE 版本相同、current-version 均为 1，事件 `9000002` 仍为 19.95。
+    - **说明：** 节点存活与副本追平是不同恢复里程碑；过渡态未被采样到时必须如实说明，单 Docker 宿主机也不能证明跨主机灾难恢复。
+
+12. **Section 3.1：让同一业务查询实际选择 Bucket Shuffle。**
+    - **目的与数据环境：** 删除旧 `m09_users`，把 `m09_events` 从可能残留的 Colocation Group 移出；创建 RANDOM 分布、双副本的用户表，从事件表生成 **6,706** 个 distinct user 及 `new/returning/loyal` 分群。查询只选 `p_first_half`，先按 `user_id` 汇总事件，再用 `[shuffle]` 连接用户表，避免小维度被 Broadcast。
+    - **期望结果：** 分群结果固定为 `loyal 1098 / 100089.35`、`new 1177 / 113473.45`、`returning 994 / 102868.16`；计划必须出现 `INNER JOIN(BUCKET_SHUFFLE)`、Join 输入侧 `VEXCHANGE`、`partitions=1/2 (p_first_half)`。
+    - **说明：** 事件侧按 `user_id` 汇总后保留可复用的 Hash 分布，用户侧被路由到对应 Bucket；`[shuffle]` 是控制 Broadcast 的教学提示，最终结论仍以实际计划为准，Join 上方为最终聚合出现的 Exchange 不属于 Join 输入重分发。
+
+13. **Section 3.2：把相同用户数据预先共置并观察 Colocate。**
+    - **目的与数据环境：** 再次删除并重建同名 `m09_users`，这次使用 `HASH(user_id)`、六 Bucket、双副本、Unique Key，并让它与 `m09_events` 加入 `m09_user_join_group`；等待 `IsStable=true` 后执行与 3.1 相同过滤、Join Key、指标和分组的查询，但不使用 `[shuffle]`。
+    - **期望结果：** 组状态显示六 Bucket、双副本、stable=true；三行业务答案与 3.1 完全相同；计划出现 `INNER JOIN(COLOCATE)`，Hash Join 与两侧扫描之间没有 `VEXCHANGE`。
+    - **说明：** 相同 Join Key 和 Bucket 数不足以单独证明共置；同组、兼容副本定义和稳定放置共同允许本地 Join。其他最终聚合 Exchange 仍可存在，实验不以同机耗时宣称 Colocate 必然更快。
+
+14. **Stop、Restart 与 Lab complete。**
+    - **目的与数据环境：** 可选 `docker compose stop` 释放三 FE、三 BE 和 HAProxy 进程，同时保留容器 writable layer 与 Doris 数据；重启时先同时启动已有三个 FE 形成多数派，再启动或复用三 BE 和 HAProxy，通过代理重新连接并检查三张关键表。
+    - **期望结果：** 停止后服务为 `Exited`；重启后所有 FE/BE healthy，持久化检查为 `m09_events=12,062`、`m09_users=6,706`、停机期间 purchase 行数 `=1`。
+    - **说明：** `stop/start` 保留该隔离集群，`down` 会删除未外挂的容器数据，不能用于本实验；结尾 `Lab complete` 用一段话回顾入口切换、副本再平衡、实际扫描、版本追赶和 Join 数据移动，不使用证明清单表格。
 
 ### 证据边界与清理约定
 
-- `docker compose up --wait` 和 `client` healthy 证明预期节点在该时刻完成注册，不代表后续每个 Tablet 都健康。
-- `SHOW FRONTENDS`、`SHOW BACKENDS` 和 Tablet 元数据说明控制面观察到的节点与副本状态；SQL 结果用于检查逻辑数据，Query Profile 用于检查实际执行位置。
+- 初始阶段对三 FE、两 BE 的服务级就绪检查与扩容后 `client` healthy，只证明各阶段预期节点在该时刻完成注册，不代表后续每个 Tablet 都健康。
+- `SHOW FRONTENDS`、`SHOW BACKENDS`、`SHOW REPLICA DISTRIBUTION` 和 Tablet 元数据说明控制面观察到的节点与副本状态；代理侧连接记录用于检查 FE 入口分配，SQL 结果用于检查逻辑数据，`EXPLAIN` 用于检查计划，Query Profile 用于检查实际执行位置。
+- 新增 BE 后看到副本数变化可支持“副本在移动”，不能据此断言新增 Bucket、逻辑行发生迁移或自动扩容已经达到生产均衡。新增节点不等于原节点副本已恢复；停机恢复实验必须分别检查版本。
 - 单次正在执行的请求可能在节点停止时失败；后续重连成功不能改写为“零中断”。
 - 同一宿主机上的多个容器不提供独立物理故障域，不能用于生产网络性能、磁盘容灾或跨可用区结论。
 - `stop/start` 用于节点实验和结尾的可选资源释放；Notebook 不再运行 `down`，避免删除未外挂的 Module 9 数据。Notebook 只能操作 Module 9 Compose project，不能停止或删除其他模块的容器、网络和数据。
 
 ### 测验 9 的拟议覆盖范围
 
-约六个独立场景，覆盖分片与副本、Tablet 与副本计数、均匀与倾斜分布、三副本健康、共置条件、BE 停机期间的可用性、FE Master 选举与客户端重新连接，以及容器级和生产级故障域的区别。每题自行提供拓扑、配置和元数据，不要求正在运行 Docker 或 Doris。
+约六个独立场景，覆盖存储副本与查询选中的副本、跨 BE 扫描任务、Bucket Shuffle / Colocate 的条件、两 BE 到三 BE 的副本再平衡、双副本与三副本的停机写入门槛、FE 选举与客户端入口切换，以及容器级和生产级故障域的区别。每题自行提供拓扑、配置和元数据，不要求正在运行 Docker 或 Doris。
 
 ## 模块 10：在 Apache Doris 中管理数据生命周期
 
@@ -538,48 +685,16 @@ fe-1 ─┬─ fe-2, fe-3
 
 以上不覆盖后加索引的 `BUILD INDEX`、BloomFilter、定时或分区增量刷新、多节点性能及正式 4.1.3 与该候选构建之间的全部差异。
 
-#### 实验 9 已验证范围（2026-09-20）
+#### 实验 9 当前实现及已验证范围（截至 2026-09-28）
 
-- 基于 Apache Doris 官方 4.1 `multi-node.yml` 启动三个 Follower 角色 FE、三个 BE 和一个 `client`；使用独立 Compose project、`172.31.91.0/24` 子网及 `9130`–`9132`、`8130`–`8132`、`8140` 主机端口。
-- 课程 Compose 使用 `FE_HEAP=512m` 和官方 `BE_MEM_LIMIT=25%`运行小数据实验。Notebook 建表前动态读取学员自己的 Docker 资源，并与 4 CPUs、8 GB 内存和 20 GiB 共享数据文件系统剩余空间的实验下限比较。当前值只在运行时显示，不写入课程预期结果。三个 FE 和三个 BE 共用内存池；三个 BE 重复报告的磁盘容量不能相加。
-- `client` healthy 和三个 BE `Alive=true` 可能早于某个 BE 上报可用存储路径；实验额外等待三台 BE 的 `TotalCapacity` 与 `AvailCapacity` 非零后才创建三副本表。
-- 从与 Lab 1 相同的只读 AWS S3 数据源导入 `[2020-03-01 00:00:00, 2020-03-01 07:00:00)`：12,062 行、4,809 次购买、6,706 个用户，总收入 1,434,636.69。Level 1 的 `events` 位于另一个容器私有卷，不能由这个多节点集群直接复用。
-- 两个分区、每分区六个 Bucket 的表产生 12 个逻辑 Tablet；`SHOW TABLETS` 为每个 Tablet 返回三个不同 Backend ID 的副本。SQL 仍只返回 12,062 个逻辑事件。
-- 相同 12,062 行按 `user_id` 与八值 `region` 分布时，前者 Tablet 行数范围为 480–1,585，后者为 0–3,321；这是有界 S3 样本的元数据观察，不用于承诺性能比例。Tablet 行数由 BE 周期性上报，实测可在 SQL 提交后继续显示 0 约 90 秒；Notebook 先核对 SQL 精确行数，再有界等待存储元数据。
-- 相同聚合在 `m09_events` 和 `m09_events_skewed` 上返回完全一致的八个地区结果。两份 DetailProfile 都保留三个 BE host、所选 Tablet 和逐扫描任务的原始 `ScanRows`；低基数 `region` 分布的任务工作量范围大于高基数 `user_id` 分布。完整计划与原始 Profile 保留为折叠证据，不比较运行时间。
-- 已按 `user_id` 使用六 Bucket、三副本的 `m09_events` 加入 Colocation Group；只新增具有相同 `user_id BIGINT` 分布定义的 `m09_users`。稳定组上的实际计划包含 `INNER JOIN(COLOCATE...)`，不以同一宿主机上的耗时比较 Join 策略。
-- 停止一个 BE 后，FE 报告两个存活 BE；读取和幂等 Unique Key 写入探测成功。重启后同时等待心跳与探测表三副本版本追平。
-- 停止当前 Master FE 后，两个 Follower 选出一个新 Master；Notebook 通过另一已发布 FE 端口重新连接并读取数据。原 FE 返回后不要求重新成为 Master。
-- Notebook 分别从课程根目录和模块目录完整执行通过；结尾现已改为可选 `stop/start` 并验证恢复，不删除 Module 9 Compose project。Level 1–8 的 `doris` 容器与命名卷不由 Notebook 操作。
-
-以上不证明共享 Docker 宿主机上的生产级无中断、跨主机故障域、替代副本迁移或性能扩展比例。
-
-| 领域 | 编写预期结果前必须完成的本地验证 |
-| --- | --- |
-| 运行版本 | FE 和全部 BE 构建；当前候选发布构建与正式版本标签的区别；镜像兼容性和架构 |
-| 同步物化视图 | 支持的模型、表达式、聚合；初始任务状态；历史与新增数据覆盖；扫描索引标签；依赖清理 |
-| 异步物化视图 | 构建与刷新语法；任务检查方式；完成条件；源表和维度变化；直接查询新鲜度；改写与过期控制 |
-| 查询改写 | 满足与不满足条件的计划、粒度、聚合推导和谓词；提示不能保证实际选用 |
-| 倒排索引 | 类型与谓词、不分词语义、创建与历史数据 `BUILD INDEX` 的区别、完成元数据和实际计数 |
-| BloomFilter | 谓词、类型、历史覆盖；当前文档指出 4.1.2 起 `CHAR` 行为变化，示例采用前需核实当前构建 |
-| 统计信息与缓存 | 采集和检查语法、会话变量及默认值、失败时恢复 |
-| Query Profile | 查询 ID、HTTP 格式、采集级别、算子名称、单位、合并与逐实例范围；避免合并与明细重复计数 |
-| 多节点 | 官方 `multi-node.yml` 与 `all-in-one-4.1.3` 的兼容性；原生主机架构；3 FE/3 BE/`client` 就绪；Compose v2；project、子网、端口与资源预算；`stop/start` 和 `down` 的数据生命周期；正确集群重连 |
-| 副本 | 解析后的副本配置与 `min_load_replica_num`；健康放置；故障检测后实际读写；返回节点版本追赶 |
-| 分布与共置 | 模型限制、放置与倾斜、组元数据及稳定性、实际选中计划；默认 Bucket 数变化不等于旧数据重新分桶 |
-| 表结构 | 支持的新增及默认值、新旧行行为、轻量完成与后台任务、Key/分布/索引/物化视图限制 |
-| 动态分区 | 属性、调度状态与间隔及时区、起止边界、历史与例外、迟到数据、错误、实际到期处理 |
-| 回收站 | 不带 `FORCE` 的恢复资格、保留时间、身份与同名冲突、权限、分区兼容性、自动删除差异、恢复后内容 |
-| 维护 | 报告值与延迟字段、Version/VersionCount/RowCount 范围；不能推断精确 Rowset/Segment 或回收字节 |
-| 备份 | 后续扩展前重查支持架构、对象和恢复依赖；基础计划不访问仓库 |
-
-已只读观察到的本地配置：
-
-- `dynamic_partition_enable = true`。
-- `dynamic_partition_check_interval_seconds = 600`。
-- `catalog_trash_expire_second = 86400`。
-
-当前[动态分区文档](https://doris.apache.org/docs/4.x/table-design/data-partitioning/dynamic-partitioning/)列出的调度器默认值为关闭，但本地运行值为开启。因此记录实际值，不依赖默认假设。短时间运行 Notebook 也不能假定下一调度周期已经执行。[4.1.3 配置源码](https://github.com/apache/doris/blob/4.1.3/fe/fe-common/src/main/java/org/apache/doris/common/Config.java)定义了回收站保留时间，但存在保留时间不意味着所有删除方式都可恢复。
+- 基于 Apache Doris 官方 4.1 All-in-One 多节点环境使用三个 FE，并把数据节点从两个存活 BE 扩展到三个存活 BE；Module 9 使用独立 Compose project、固定私有子网和 localhost 发布端口。初始化显式停止单节点 `doris` 与 HAProxy，避免端口、内存和入口状态混淆。
+- `m09_events` 固定为 12,062 行、两个 Partition、每 Partition 六 Bucket、双副本。重建时只复用这批已提交的逻辑事件作为本地来源；旧物理表及其他 Module 9 业务对象按各自步骤重建。首次没有完整本地来源时才读取只读 S3。
+- 在 `be-3` 停止时，12 个 Tablet 的 24 个副本位于 `be-1` 和 `be-2`；启动 `be-3` 后，不重载数据也不发出手动迁移命令即可观察到已有副本进入新 BE，总副本数和逻辑答案保持不变。
+- 停止当前直连 Master FE 后，原 MySQL TCP 会话失败；两个存活 FE 完成选举。HAProxy 只向健康 FE 建立新连接，通过代理可以重新查询 12,062 行。恢复旧 FE 后，它重新加入但不要求重新成为 Master；`L4OK` 仅表示 FE MySQL 端口的 TCP 检查成功。
+- 地区聚合的普通 `EXPLAIN` 展示 12 个 Tablet 的计划范围，DetailProfile 展示本次实际选择的 BE host、TabletIds 和 ScanRows；实验不固定参与 BE 数、Tablet ID 或行数，也不把存有副本等同于参与本次扫描。
+- 三副本 `m09_availability_events` 在 `be-2` 停止时由另外两个副本形成多数并提交一条已知 purchase。停机 BE 的副本版本落后且不是 current version；恢复后先观察 `Alive=true`，再等待三个副本版本追平。
+- RANDOM 分布的 `m09_users` 与按 `user_id` 分布的事件输入实际选择 `INNER JOIN(BUCKET_SHUFFLE)`；用相同 6,706 个用户重建为稳定 Colocation Group 后，相同业务答案的计划选择 `INNER JOIN(COLOCATE)`，且 Join 两侧扫描之间不再出现输入 Exchange。
+- 结尾使用 `docker compose stop/start` 释放和恢复进程，保留隔离集群数据，并检查事件表、用户表和停机写入事件。以上不证明共享 Docker 宿主机上的生产级无中断、跨主机故障域或性能扩展比例。
 
 ### 证据与测验约定
 

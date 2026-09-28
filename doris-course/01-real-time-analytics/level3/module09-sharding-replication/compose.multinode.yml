@@ -100,6 +100,29 @@ services:
       doris:
         ipv4_address: ${SUBNET:-172.31.91}.52
 
+  haproxy:
+    image: ${HAPROXY_IMAGE:-haproxy:3.0-alpine}
+    depends_on:
+      fe-1:
+        condition: service_healthy
+      fe-2:
+        condition: service_healthy
+      fe-3:
+        condition: service_healthy
+    volumes:
+      - ./haproxy.cfg:/usr/local/etc/haproxy/haproxy.cfg:ro
+    ports:
+      - "127.0.0.1:${FE_PROXY_PORT:-9230}:6030"
+      - "127.0.0.1:${FE_PROXY_STATS_PORT:-8230}:8404"
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1:8404/stats"]
+      interval: 5s
+      timeout: 3s
+      retries: 12
+    networks:
+      doris:
+        ipv4_address: ${SUBNET:-172.31.91}.60
+
   client:
     <<: *node
     environment:

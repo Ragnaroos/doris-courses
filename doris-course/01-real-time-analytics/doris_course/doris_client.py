@@ -2,6 +2,9 @@ from __future__ import annotations
 
 import html
 import base64
+import csv
+import http.client
+import io
 import json
 import os
 import platform
@@ -12,6 +15,7 @@ import subprocess
 import time
 import urllib.request
 import urllib.parse
+import urllib.error
 import uuid
 from decimal import Decimal
 from pathlib import Path
@@ -642,6 +646,7 @@ class DorisLab:
         title: str = "Insert completed",
         low_memory_s3: bool = False,
         expected_rows: int | None = None,
+        show: bool = True,
     ) -> int:
         """Run a learner-visible data insert and report its wall-clock duration."""
         started_at = time.perf_counter()
@@ -670,11 +675,12 @@ class DorisLab:
                 f"{title} affected {affected:,} rows; expected {expected_rows:,}."
             )
         elapsed = time.perf_counter() - started_at
-        card(
-            f"Affected rows: {affected:,} · elapsed time: {elapsed:.1f} seconds",
-            "ok",
-            title,
-        )
+        if show:
+            card(
+                f"Affected rows: {affected:,} · elapsed time: {elapsed:.1f} seconds",
+                "ok",
+                title,
+            )
         return affected
 
     @staticmethod
@@ -1144,6 +1150,7 @@ class DorisLab:
         require_same_version: bool = False,
         timeout_seconds: int = 120,
         title: str | None = None,
+        show: bool = True,
     ) -> pd.DataFrame:
         """Poll SHOW FRONTENDS or SHOW BACKENDS until a bounded topology state appears."""
         normalized = " ".join(statement.upper().split())
@@ -1199,7 +1206,8 @@ class DorisLab:
             else ["BackendId", "Host", "Alive", "SystemDecommissioned", "TabletNum", "Version"]
         )
         frame = frame[[column for column in columns if column in frame.columns]]
-        show_frame(title or normalized.title(), frame)
+        if show:
+            show_frame(title or normalized.title(), frame)
         return frame
 
     def wait_for_backend_storage(
@@ -3397,3 +3405,312 @@ LIMIT 10
         if int(recovered.iloc[0]["recovered_rows"]) != self.EXPECTED_ROW_COUNT:
             raise AssertionError("The recovered events row count does not match the baseline.")
         card("Database metadata and all baseline rows survived restart. Module 2 can reuse them.", "ok")
+
+    @staticmethod
+    def container_running(name: str) -> bool:
+        """Return whether one Docker container currently has Running=true."""
+        state = container_inspect(name)
+        return bool(state and state.get("State", {}).get("Running", False))
+
+    def table_exists(self, table_name: str) -> bool:
+        """Return whether one safe table name exists in the current database."""
+        table_name = self._safe_table_name(table_name)
+        return bool(self._metadata_rows(f"SHOW TABLES LIKE '{table_name}'"))
+
+    def table_replication_num(self, table_name: str) -> int:
+        """Return the normalized replica count from SHOW CREATE TABLE."""
+        table_name = self._safe_table_name(table_name)
+        rows = self._metadata_rows(f"SHOW CREATE TABLE `{table_name}`")
+        if len(rows) != 1:
+            raise RuntimeError(f"Could not read the definition of {table_name}.")
+        ddl = "\n".join(str(value) for value in rows[0].values())
+        allocation = re.search(
+            r'"replication_allocation"\s*=\s*"[^"]*:\s*(\d+)"', ddl
+        )
+        direct = re.search(r'"replication_num"\s*=\s*"(\d+)"', ddl)
+        match = allocation or direct
+        if match is None:
+            raise RuntimeError(
+                f"SHOW CREATE TABLE did not expose a replica count for {table_name}."
+            )
+        return int(match.group(1))
+
+    def replica_distribution_summary(
+        self,
+        table_name: str,
+        *,
+        title: str | None = None,
+        show: bool = True,
+    ) -> pd.DataFrame:
+        """Show the physical replica count and size reported for each BE."""
+        table_name = self._safe_table_name(table_name)
+        distribution = self._metadata_rows(
+            f"SHOW REPLICA DISTRIBUTION FROM `{table_name}`"
+        )
+        backends = {
+            str(row["BackendId"]): row for row in self._metadata_rows("SHOW BACKENDS")
+        }
+        rows = []
+        for row in distribution:
+            backend_id = str(row["BackendId"])
+            backend = backends.get(backend_id, {})
+            size = row.get("ReplicaSize", row.get("Size", 0))
+            rows.append({
+                "backend_id": backend_id,
+                "host": backend.get("Host", "unknown"),
+                "alive": str(backend.get("Alive", "")).lower() == "true",
+                "stored replicas": int(row["ReplicaNum"]),
+                "replica size": self._human_bytes(self._capacity_bytes(size)),
+            })
+        frame = pd.DataFrame(rows).sort_values("host").reset_index(drop=True)
+        if show:
+            show_frame(title or f"{table_name} replicas by BE", frame)
+        return frame
+
+    def wait_for_replica_distribution(
+        self,
+        table_name: str,
+        *,
+        expected_backends: int,
+        expected_total_replicas: int,
+        max_replica_spread: int | None = None,
+        timeout_seconds: int = 300,
+        title: str | None = None,
+        show: bool = True,
+    ) -> pd.DataFrame:
+        """Wait for bounded automatic replica placement after a BE topology change."""
+        deadline = time.monotonic() + timeout_seconds
+        frame = pd.DataFrame()
+        while time.monotonic() < deadline:
+            frame = self.replica_distribution_summary(table_name, show=False)
+            counts = (
+                frame["stored replicas"].astype(int).tolist() if not frame.empty else []
+            )
+            spread_ready = (
+                max_replica_spread is None
+                or (counts and max(counts) - min(counts) <= max_replica_spread)
+            )
+            if (
+                len(counts) == expected_backends
+                and all(value > 0 for value in counts)
+                and sum(counts) == expected_total_replicas
+                and spread_ready
+            ):
+                if show:
+                    show_frame(title or f"{table_name} replica placement is ready", frame)
+                return frame
+            time.sleep(1)
+        raise TimeoutError(
+            f"Replica distribution for {table_name} did not reach "
+            f"backends={expected_backends}, total={expected_total_replicas}, "
+            f"spread<={max_replica_spread}; last rows={frame.to_dict('records')!r}"
+        )
+
+    def wait_for_colocation_group(
+        self,
+        group_name: str,
+        *,
+        timeout_seconds: int = 180,
+        title: str = "Colocation Group is stable",
+    ) -> pd.DataFrame:
+        """Wait for one named Colocation Group to become stable."""
+        if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", group_name):
+            raise ValueError(f"Unsafe Colocation Group name: {group_name!r}")
+        deadline = time.monotonic() + timeout_seconds
+        selected: dict[str, object] | None = None
+        while time.monotonic() < deadline:
+            rows = self._metadata_rows('SHOW PROC "/colocation_group"')
+            matches = [
+                row for row in rows
+                if str(row.get("GroupName", "")).split(".")[-1] == group_name
+            ]
+            if len(matches) == 1:
+                selected = matches[0]
+                if str(selected.get("IsStable", "")).lower() == "true":
+                    frame = pd.DataFrame([{
+                        "group": group_name,
+                        "buckets": selected.get("BucketsNum"),
+                        "replication": selected.get("ReplicaAllocation"),
+                        "stable": selected.get("IsStable"),
+                    }])
+                    show_frame(title, frame)
+                    return frame
+            time.sleep(1)
+        raise TimeoutError(
+            f"Colocation Group {group_name!r} did not become stable within "
+            f"{timeout_seconds} seconds; last metadata={selected!r}"
+        )
+
+    @staticmethod
+    def _proxy_stats_rows(stats_url: str, backend: str) -> list[dict[str, object]]:
+        """Read HAProxy's CSV statistics for one named backend."""
+        with urllib.request.urlopen(stats_url, timeout=5) as response:
+            payload = response.read().decode("utf-8", errors="replace")
+        lines = [line for line in payload.splitlines() if line.strip()]
+        if not lines:
+            raise RuntimeError(f"HAProxy returned no statistics from {stats_url}.")
+        lines[0] = lines[0].lstrip("# ")
+        reader = csv.DictReader(io.StringIO("\n".join(lines)))
+        rows = []
+        for row in reader:
+            if row.get("pxname") != backend or row.get("svname") in {
+                "BACKEND", "FRONTEND",
+            }:
+                continue
+            rows.append(row)
+        if not rows:
+            raise RuntimeError(
+                f"HAProxy backend {backend!r} was not present in {stats_url}."
+            )
+        return rows
+
+    def proxy_backend_summary(
+        self,
+        stats_url: str,
+        *,
+        backend: str = "doris_fes",
+        title: str = "FE targets visible through HAProxy",
+        show: bool = True,
+    ) -> pd.DataFrame:
+        """Show HAProxy target health and connection counters without raw CSV noise."""
+        rows = []
+        for row in self._proxy_stats_rows(stats_url, backend):
+            rows.append({
+                "FE target": row.get("svname", "unknown"),
+                "proxy status": row.get("status", "unknown"),
+                "active connections": int(row.get("scur") or 0),
+                "total connections": int(row.get("stot") or 0),
+                "last check": row.get("check_status") or "not reported",
+            })
+        frame = pd.DataFrame(rows).sort_values("FE target").reset_index(drop=True)
+        if show:
+            show_frame(title, frame)
+        return frame
+
+    def wait_for_proxy_backend_status(
+        self,
+        stats_url: str,
+        server_name: str,
+        expected_status: str,
+        *,
+        backend: str = "doris_fes",
+        timeout_seconds: int = 60,
+        title: str | None = None,
+        show: bool = True,
+    ) -> pd.DataFrame:
+        """Wait until HAProxy reports one FE target UP or DOWN."""
+        expected = expected_status.upper()
+        if expected not in {"UP", "DOWN"}:
+            raise ValueError("expected_status must be UP or DOWN.")
+        deadline = time.monotonic() + timeout_seconds
+        frame = pd.DataFrame()
+        last_error: Exception | None = None
+        while time.monotonic() < deadline:
+            try:
+                frame = self.proxy_backend_summary(
+                    stats_url, backend=backend, show=False
+                )
+                last_error = None
+            except (OSError, urllib.error.URLError, http.client.HTTPException) as exc:
+                # Docker can publish the statistics port just before HAProxy's
+                # HTTP listener is ready. Treat that startup race as a poll miss.
+                last_error = exc
+                time.sleep(1)
+                continue
+            selected = frame.loc[frame["FE target"] == server_name]
+            if len(selected.index) == 1 and str(
+                selected.iloc[0]["proxy status"]
+            ).upper().startswith(expected):
+                if show:
+                    show_frame(title or f"HAProxy marks {server_name} {expected}", frame)
+                return frame
+            time.sleep(1)
+        raise TimeoutError(
+            f"HAProxy did not mark {server_name} {expected}; "
+            f"last rows={frame.to_dict('records')!r}; last error={last_error!r}"
+        )
+
+    def expect_current_connection_failure(
+        self,
+        statement: str = "SELECT 1",
+        *,
+        title: str = "The direct FE connection has closed",
+    ) -> str:
+        """Verify that an already-open connection fails after its FE stops."""
+        connection = self.connection
+        if connection is None:
+            raise RuntimeError("No open connection is available for the failure check.")
+        try:
+            with connection.cursor() as cursor:
+                cursor.execute(statement)
+                cursor.fetchall()
+        except (OSError, pymysql.MySQLError) as exc:
+            try:
+                connection.close()
+            except Exception:
+                pass
+            self.connection = None
+            message = str(exc).splitlines()[0]
+            show_frame(title, pd.DataFrame([{
+                "expected outcome": "connection failed",
+                "reason": message[:180],
+            }]))
+            return message
+        raise AssertionError(
+            "The direct FE connection still executed the probe; wait until that FE stops."
+        )
+
+    def explain_join_distribution(
+        self,
+        statement: str,
+        *,
+        expected_strategy: str,
+        title: str = "Join distribution evidence",
+    ) -> str:
+        """Verify a distributed Join strategy and show only its relevant plan block."""
+        normalized = statement.strip().rstrip(";")
+        if not normalized.upper().startswith("EXPLAIN"):
+            raise ValueError("An EXPLAIN statement is required.")
+        strategy_patterns = {
+            "bucket_shuffle": r"join op:\s*[^\n]*\bBUCKET_SHUFFLE\b",
+            "colocate": r"join op:\s*[^\n]*\bCOLOCATE\b",
+        }
+        if expected_strategy not in strategy_patterns:
+            raise ValueError("expected_strategy must be 'bucket_shuffle' or 'colocate'.")
+
+        connection = self._require_connection()
+        executable, _visible = self._expand_sql(normalized)
+        with connection.cursor() as cursor:
+            cursor.execute(executable)
+            records = cursor.fetchall()
+        plan = "\n".join(str(next(iter(record.values()))) for record in records)
+        if not re.search(strategy_patterns[expected_strategy], plan, re.IGNORECASE):
+            raise AssertionError(
+                f"The plan did not select the expected {expected_strategy} Join strategy."
+            )
+
+        fragments = re.split(r"(?=^PLAN FRAGMENT \d+)", plan, flags=re.MULTILINE)
+        join_fragment = next(
+            (fragment for fragment in fragments if re.search(r"join op:", fragment, re.I)),
+            plan,
+        )
+        evidence_patterns = (
+            r"\bVHASH JOIN\b",
+            r"join op:",
+            r"equal join conjunct:",
+            r"\bVEXCHANGE\b",
+            r"\bVOlapScanNode\b",
+            r"\bTABLE:",
+            r"\bpartitions=",
+        )
+        evidence = [
+            line for line in join_fragment.splitlines()
+            if any(re.search(pattern, line, re.IGNORECASE) for pattern in evidence_patterns)
+        ]
+        # A Bucket Shuffle build-side scan can live in the next Fragment. Append
+        # each selected table and partition line without printing the full plan.
+        for line in plan.splitlines():
+            if re.search(r"\bTABLE:|\bpartitions=", line, re.IGNORECASE) and line not in evidence:
+                evidence.append(line)
+        show_log(title, "\n".join(evidence), opened=True)
+        return plan

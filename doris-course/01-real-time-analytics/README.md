@@ -80,7 +80,8 @@ doris-course/
         ├── module09-sharding-replication/
         │   ├── course.md
         │   ├── lab9_observe_sharding_and_replication.ipynb
-        │   └── compose.multinode.yml
+        │   ├── compose.multinode.yml
+        │   └── haproxy.cfg
         └── module10-managing-data/
             ├── course.md
             └── lab10_manage_data.ipynb                  planned
