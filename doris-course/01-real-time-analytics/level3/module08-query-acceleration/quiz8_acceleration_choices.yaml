@@ -1,0 +1,158 @@
+title: "Module 8 Quiz: Query Acceleration Choices"
+description: >-
+  Six independent scenarios check whether you can choose and validate Doris
+  query-acceleration structures without confusing definitions, plans, runtime
+  evidence, and business results.
+questions:
+  - id: m8_q1
+    objective: "Separate logical reuse from stored results"
+    prompt: >-
+      Several dashboards must share one reviewed SQL definition for purchase
+      revenue. The definition may change centrally, but the team does not want
+      another stored copy or a refresh process. Which object directly fits?
+    options:
+      - id: a
+        text: "A regular View that stores the shared SQL definition."
+      - id: b
+        text: "A manually populated summary table that stores precomputed rows."
+      - id: c
+        text: "A synchronous Materialized View (MV) maintained with base-table writes."
+      - id: d
+        text: "An asynchronous Materialized View refreshed by a scheduled task."
+    answer: a
+    explanation: >-
+      A regular View centralizes the SQL definition and is normally expanded to
+      its underlying tables when queried; it is not a saved result cache. The
+      other three choices store rows and therefore introduce loading, write
+      maintenance, or refresh responsibilities. This answer says nothing about
+      whether the expanded query is fast enough; plan and runtime evidence are
+      still needed for that decision.
+
+  - id: m8_q2
+    objective: "Choose materialization from scope and freshness"
+    prompt: >-
+      A category dashboard joins event facts to a product dimension and then
+      aggregates revenue. Five minutes of refresh lag is acceptable, and the
+      team wants to avoid adding maintenance work to every fact-table write.
+      Which starting choice best matches these conditions?
+    options:
+      - id: a
+        text: "A synchronous Materialized View (MV), because every committed change must update any multi-table result immediately."
+      - id: b
+        text: "An asynchronous Materialized View (MV) with a refresh policy that stays within the five-minute freshness limit."
+      - id: c
+        text: "A regular View, because naming the join once stores the joined result."
+      - id: d
+        text: "A manually populated summary with no refresh contract, because its rows will remain current automatically."
+    answer: b
+    explanation: >-
+      An asynchronous MV supports the multi-table stored result and makes the
+      accepted refresh lag explicit. A synchronous MV has a narrower supported
+      SQL scope and adds write-time maintenance; it should not be assumed to
+      support this join. A regular View stores only the definition, while a
+      manual summary needs an explicit process to stay current. The choice is
+      valid only while the refresh policy actually meets the stated freshness
+      limit.
+
+  - id: m8_q3
+    objective: "Test whether a stored grain can answer a query"
+    prompt: >-
+      A stored summary has one row per (event_hour, region) with columns
+      event_count and revenue_sum. A new report needs daily revenue_sum and
+      COUNT(DISTINCT buyer_id) by region. What can the stored summary answer?
+    options:
+      - id: a
+        text: "Both measures, because any hourly summary can always be rolled up to a day."
+      - id: b
+        text: "Daily revenue_sum only; region and an additive revenue measure are preserved, but no mergeable distinct-buyer state was stored."
+      - id: c
+        text: "Distinct buyers only, because event_count can be treated as the buyer identifier."
+      - id: d
+        text: "Neither measure, because a materialized result can answer only its exact original GROUP BY."
+    answer: b
+    explanation: >-
+      Hourly revenue_sum values are additive and can be summed to the retained
+      daily-by-region grain. Distinct buyer counts cannot be reconstructed from
+      event_count or from distinct counts per hour because the same buyer may
+      appear in several hours; the required identifiers or mergeable state are
+      absent. A finer stored grain helps only when the needed dimensions and
+      measure state are actually preserved.
+
+  - id: m8_q4
+    objective: "Match an index to the predicate"
+    prompt: >-
+      An event table is ordered mainly by event_time. Investigators frequently
+      request the matching detail rows for one exact numeric product_id, which
+      is not a useful leading Prefix Index column, and only a tiny fraction of
+      rows match. Which additional structure is the most direct starting point?
+    options:
+      - id: a
+        text: "A non-tokenized inverted index on product_id, followed by a controlled result and scan-work comparison."
+      - id: b
+        text: "An NGram BloomFilter index, because exact numeric equality is a substring-search problem."
+      - id: c
+        text: "A Join Runtime Filter stored permanently with the table."
+      - id: d
+        text: "No evaluation is needed: merely declaring any secondary index guarantees every query will use it."
+    answer: a
+    explanation: >-
+      A non-tokenized inverted index directly maps the selective numeric value
+      to candidate Row IDs within each Segment and matches the equality lookup.
+      NGram BloomFilter targets token-like substring matching, and a Runtime
+      Filter is generated during a Join rather than stored as this table index.
+      The choice remains a hypothesis until identical results, plan context,
+      and runtime scan counters are checked; Lab 8 directly validates only the
+      controlled numeric inverted-index case.
+
+  - id: m8_q5
+    objective: "Separate structure, plan, runtime, and result evidence"
+    prompt: >-
+      A selective lookup uses WHERE product_id = 481. Table metadata lists
+      product_idx as a non-tokenized inverted index on product_id. EXPLAIN
+      labels the scan with the base table name rather than the secondary-index
+      name. The executed Query Profile reports a nonzero inverted-index
+      filtered-row counter inside that scan, and indexed and unindexed versions
+      return identical rows. Which interpretation is justified?
+    options:
+      - id: a
+        text: "Metadata proves the index exists; the Profile shows index filtering during this execution; result equality checks the answer. The base scan label alone does not disprove secondary-index use."
+      - id: b
+        text: "The base scan label proves the secondary index was ignored, so the Profile counter must be only a planner estimate."
+      - id: c
+        text: "Identical query results prove that the index reduced the number of scanned rows."
+      - id: d
+        text: "A nonzero runtime counter proves the index will reduce work for every predicate and data distribution."
+    answer: a
+    explanation: >-
+      DDL or metadata establishes existence, while the Query Profile supplies
+      runtime evidence for this execution and operator scope. The business rows
+      establish result consistency. EXPLAIN describes the selected plan, but a
+      base-index scan label can coexist with Segment-local secondary-index
+      filtering. None of this guarantees the same benefit for a different
+      predicate, selectivity, or dataset.
+
+  - id: m8_q6
+    objective: "Balance read savings against maintenance cost"
+    prompt: >-
+      A report runs four times per day and already meets its latency objective.
+      Its base table receives continuous writes. A candidate asynchronous
+      Materialized View (MV)
+      adds significant storage and refresh load, and the business still
+      requires near-current data. What is the sound decision from these facts?
+    options:
+      - id: a
+        text: "Do not keep the MV on the current evidence; its infrequent read benefit does not justify the measured refresh, storage, and freshness cost."
+      - id: b
+        text: "Keep the MV because any lower elapsed time in one run proves a durable production improvement."
+      - id: c
+        text: "Refresh less often without consulting the freshness requirement, because refresh cost is the only decision variable."
+      - id: d
+        text: "Replace the base table with the MV so that write maintenance and storage costs disappear."
+    answer: a
+    explanation: >-
+      The existing report already meets its objective and runs rarely, while
+      the candidate adds recurring refresh work, storage, and freshness risk to
+      a write-heavy table. A single elapsed-time observation is not enough to
+      override those costs. The boundary can change if query frequency,
+      latency requirements, refresh efficiency, or tolerated staleness changes,
+      so the decision should be recorded with those assumptions.

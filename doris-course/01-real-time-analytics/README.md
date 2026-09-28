@@ -2,8 +2,8 @@
 
 This directory contains the course notes, executable Jupyter labs, shared
 datasets, and reusable runtime support for the three course levels. Levels 1
-and 2 are implemented. Level 3 includes executable Labs 8 and 9; its course
-notes, quizzes, and Lab 10 are still planned.
+and 2 are implemented. Level 3 includes executable Labs 8, 9, and 10; its
+course notes and quizzes are still planned.
 
 ## Repository structure
 
@@ -80,11 +80,10 @@ doris-course/
         ├── module09-sharding-replication/
         │   ├── course.md
         │   ├── lab9_observe_sharding_and_replication.ipynb
-        │   ├── compose.multinode.yml
-        │   └── haproxy.cfg
+        │   └── compose.multinode.yml
         └── module10-managing-data/
             ├── course.md
-            └── lab10_manage_data.ipynb                  planned
+            └── lab10_manage_data.ipynb
 ```
 
 Course notes, labs, and knowledge checks belong to the module that teaches

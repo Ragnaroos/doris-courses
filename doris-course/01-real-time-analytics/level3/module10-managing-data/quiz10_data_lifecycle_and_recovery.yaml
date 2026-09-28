@@ -1,0 +1,158 @@
+title: "Module 10 Quiz: Data Lifecycle and Recovery"
+description: >-
+  Six independent scenarios check whether you can choose compression and
+  Partition lifecycle policies, interpret time windows, and apply the correct
+  recovery boundary without relying on a running Doris environment.
+questions:
+  - id: m10_q1
+    objective: "Choose a compression goal from the constrained resource"
+    prompt: >-
+      A hot event table is scanned continuously. Query CPUs are saturated, but
+      storage capacity and read bandwidth have comfortable headroom. The team
+      can accept a larger stored table if decompression uses less CPU. What
+      should the next experiment prioritize?
+    options:
+      - id: a
+        text: "Test a fast-decompression compression family and measure query CPU and latency together with its additional stored bytes."
+      - id: b
+        text: "Select the highest compression ratio from a small storage report, without measuring query CPU."
+      - id: c
+        text: "Disable all column encoding, because table compression and encoding are the same layer."
+      - id: d
+        text: "Choose whichever algorithm had the shortest single elapsed-time run in a shared sandbox."
+    answer: a
+    explanation: >-
+      CPU is the stated bottleneck, so the experiment should prioritize
+      decompression cost while recording the storage and I/O trade-off. A high
+      ratio may reduce bytes but consume more CPU, and a single noisy run cannot
+      rank production behavior. Doris column encoding precedes Page compression
+      and is a separate storage layer; the decision still requires
+      representative load and query measurements.
+
+  - id: m10_q2
+    objective: "Interpret Doris physical layout in compression evidence"
+    prompt: >-
+      Two Doris Duplicate Key tables contain the same logical rows and columns.
+      events_lz4f has one Partition, four Buckets, and replication_num = 1.
+      events_zstd has two Partitions, eight Buckets per Partition, and
+      replication_num = 3. SHOW DATA reports that events_zstd is larger. Which
+      conclusion is justified?
+    options:
+      - id: a
+        text: "The report cannot rank LZ4F and ZSTD: Partition and Bucket counts change the Tablet layout, and replication_num changes the number of physical copies included in the reported size. Compare matching layouts and replicas with the same input and load shape."
+      - id: b
+        text: "LZ4F has proved a better compression ratio because the LZ4F table is smaller even though it stores fewer replicas and uses fewer Tablets."
+      - id: c
+        text: "ZSTD must have duplicated the logical SQL rows three times because a three-replica table returns three copies of every row."
+      - id: d
+        text: "Dividing the reported size by three fully fixes the comparison because Tablet, Segment, index, and load-shape overhead cannot affect Doris storage reports."
+    answer: a
+    explanation: >-
+      In Doris, every Bucket in every Partition produces a logical Tablet, and
+      replication creates physical copies of those Tablets. SHOW DATA therefore
+      reflects replica storage and layout overhead as well as compressed data.
+      Replicas do not duplicate rows in the SQL answer, and dividing by the
+      replica count does not remove differences in Tablet, Segment, index, or
+      load-shape overhead. After matching those factors, the size comparison
+      still applies only to the tested data and cannot by itself rank query CPU
+      or latency.
+
+  - id: m10_q3
+    objective: "Keep Doris compression separate from ClickHouse codecs"
+    prompt: >-
+      A design review proposes a different T64, DoubleDelta, or ZSTD codec on
+      every Doris column because a ClickHouse example used that syntax. Which
+      correction matches the Doris 4.1.3 course scope?
+    options:
+      - id: a
+        text: "Choose a Doris table-level compression family through the compression property; Doris may still apply internal column encodings before Page compression, but the ClickHouse per-column codec chain is not Doris DDL."
+      - id: b
+        text: "Copy the ClickHouse CODEC clauses directly because both products expose identical storage syntax."
+      - id: c
+        text: "Use column-level TTL to replace values with defaults before Doris compresses them."
+      - id: d
+        text: "Doris does not compress columns or Pages, so no compression setting exists."
+    answer: a
+    explanation: >-
+      The Doris table property selects the Page-compression family for the
+      table, while the storage engine can choose internal representations such
+      as dictionary or run-length encoding for column data. ClickHouse
+      per-column codec chains and column TTL are not Doris features and should
+      not be renamed into the course. This distinction does not claim that all
+      columns contribute equally to the reported whole-table size.
+
+  - id: m10_q4
+    objective: "Choose a Partition management mode"
+    prompt: >-
+      Match three requirements to their Partition mode: (1) approved accounting
+      ranges are created only by an administrator; (2) previously unseen tenant
+      values create Partitions when data arrives; (3) the system keeps a
+      clock-driven seven-day window and removes older complete ranges.
+    options:
+      - id: a
+        text: "(1) Manual Partitioning; (2) Auto Partitioning; (3) Dynamic Partitioning."
+      - id: b
+        text: "(1) Dynamic Partitioning; (2) Manual Partitioning; (3) Auto Partitioning."
+      - id: c
+        text: "(1) Auto Partitioning; (2) Dynamic Partitioning; (3) Manual Partitioning."
+      - id: d
+        text: "Use Dynamic Partitioning for all three because it creates any missing value on insert."
+    answer: a
+    explanation: >-
+      Manual Partitioning keeps explicit business control, Auto Partitioning
+      reacts to incoming values, and Dynamic Partitioning follows the current
+      clock to create and remove complete time ranges. Auto creation does not
+      by itself define a rolling deletion policy, and Dynamic Partitioning does
+      not create arbitrary historical values merely because a late row arrives.
+
+  - id: m10_q5
+    objective: "Predict an hourly Dynamic Partition window"
+    prompt: >-
+      At 2026-06-12 10:30 in Asia/Shanghai, a table uses time_unit = HOUR,
+      start = -2, end = 1, create_history_partition = true, and the same time
+      zone. Which statement correctly describes the intended ranges and two
+      incoming events?
+    options:
+      - id: a
+        text: "The online ranges are [08:00,09:00), [09:00,10:00), [10:00,11:00), and [11:00,12:00). An 08:00 event has a target; a 07:59 event does not. At 11:00 the oldest whole range becomes eligible for scheduled removal."
+      - id: b
+        text: "Only the latest two hours exist, and each row expires exactly two hours after its own timestamp."
+      - id: c
+        text: "An event at 08:00 belongs to the range ending at 08:00 because Range Partitions are right-closed."
+      - id: d
+        text: "A 07:59 event automatically creates a minute Partition because HOUR is only a naming preference."
+    answer: a
+    explanation: >-
+      Inclusive offsets from -2 through +1 yield four left-closed,
+      right-open hourly ranges when history creation is enabled. The 08:00
+      boundary belongs to the range starting at 08:00, while 07:59 has no
+      target. Expiry applies to the complete oldest hour after the clock
+      boundary and a scheduler check, not independently to each row and never
+      at minute granularity.
+
+  - id: m10_q6
+    objective: "Separate lifecycle evidence and recovery boundaries"
+    prompt: >-
+      A daily Dynamic Partition policy keeps the latest 30 calendar-day
+      ranges. After a date boundary advances the window, the scheduler reports
+      no error, SHOW PARTITIONS no longer lists the oldest day, and SQL returns
+      no rows from that range. A separate manual Partition dropped without
+      FORCE appears in the catalog recycle bin. Which conclusion is justified?
+    options:
+      - id: a
+        text: "The dynamic range is no longer online, but these observations do not prove immediate BE byte reclamation. The separate eligible manual drop may be recovered within its recycle-bin window; broader recovery requires an independent backup or replay plan."
+      - id: b
+        text: "SQL returning no rows proves that Compaction erased every Segment and released all physical space immediately."
+      - id: c
+        text: "Any replica can restore either deleted range because replication is an independent historical backup."
+      - id: d
+        text: "A recycle-bin entry guarantees permanent recovery even after its configured retention period or a FORCE drop."
+    answer: a
+    explanation: >-
+      The Partition list and SQL answer establish the online logical state;
+      scheduler status establishes that the scheduler observed its work. They
+      do not expose later physical cleanup or Compaction. A recent object drop
+      without FORCE can be eligible for RECOVER only while its recycle-bin
+      metadata remains available. Replicas converge on valid deletes, and the
+      recycle bin remains part of the same cluster, so neither replaces an
+      independent backup for wider failures.

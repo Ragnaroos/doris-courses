@@ -2,6 +2,8 @@
 
 本大纲供课程开发者参考，使用中文编写；后续面向学员的课程正文（Course）、实验（Lab）和测验（Quiz）仍使用英文。Doris 官方术语、SQL 标识符、配置项和文件名保留原文，以便与前两级课程及官方文档对照。
 
+Course 大纲只保留可迁移的业务问题、选择条件、机制和证据边界；固定表名、事件 ID、行数、金额、容器地址及某次运行的计划或 Profile 数值只写在对应 Lab 大纲中。课程可以沿用 `event_time`、`user_id`、`product_id` 等统一业务字段举例，但不能让通用结论依赖某一批实验数据。
+
 Level 3 延续 Level 1–2 已建立的电商分析流程：
 
 ```text
@@ -10,7 +12,7 @@ Level 3 延续 Level 1–2 已建立的电商分析流程：
     → 随时间演进、保留和恢复数据
 ```
 
-**当前状态：实验 8–9 已实现并通过关键路径验证；实验 10 暂不包含在本次更新中。** [Lab 8](module08-query-acceleration/lab8_accelerate_queries.ipynb) 与 [Lab 9](module09-sharding-replication/lab9_observe_sharding_and_replication.ipynb) 使用英文；模块 8–10 的 Course 仍是占位内容，Quiz 尚未实现。本文件保留中文开发大纲，并以实际 Lab 顺序记录 Module 8–9 的目的、预期结果和证据边界。
+**当前状态：Module 8–10 的 Course、Lab 与 Quiz 均已实现；Lab 关键路径已在本地 Doris 4.1.3 验证。** [Module 8 Course](module08-query-acceleration/course.md)、[Module 9 Course](module09-sharding-replication/course.md)、[Module 10 Course](module10-managing-data/course.md)、[Lab 8](module08-query-acceleration/lab8_accelerate_queries.ipynb)、[Lab 9](module09-sharding-replication/lab9_observe_sharding_and_replication.ipynb) 与 [Lab 10](module10-managing-data/lab10_manage_data.ipynb) 使用英文；每个 Module 另有一个英文交互式 Quiz Notebook 和一份本地 YAML 题库。本文件保留中文开发大纲，并以实际 Lab 顺序记录目的、预期结果和证据边界。Lab 10 跨整点的自然过期步骤仍取决于运行时钟和 Dynamic Partition 调度周期，不能把局部验证写成每次都已完成整本回归。
 
 技术基线为 Apache Doris 4.x，实验目标版本为 4.1.3。所有版本敏感行为必须通过后文列出的验证，才能写成实验的预期结果。
 
@@ -29,9 +31,28 @@ Level 3 延续 Level 1–2 已建立的电商分析流程：
 
 Frontend（FE）负责创建和优化分布式查询计划，并分配计划片段；Backend（BE）节点执行分配到的计划片段。沿用前两级课程中的 Table Model、Duplicate Key model、Unique Key model、Aggregate Key model、Partition、Bucket、Tablet、Runtime Filter、Query Profile、build side / probe side、Broadcast、Partition Shuffle、Bucket Shuffle 和 Colocate 等术语。Key columns 的职责按 Table Model 解释，不能一概视为传统主键约束。
 
+## 场景驱动的课程写作约定
+
+Level 3 不按“功能定义→语法清单”组织 Course。每个 Module 使用一条连续的电商分析业务主线：前一阶段的结果或限制引出下一个决策，不为每个小节重新编造一个无关故事。每章优先按以下顺序展开：
+
+```text
+业务或运维状态发生变化
+    → 明确新的正确性、新鲜度、性能或可用性约束
+    → 比较候选方案及成本
+    → 解释 Doris 的相关机制
+    → 说明 metadata、EXPLAIN、Query Profile 或业务结果各能回答什么
+    → 限定当前证据不能支持的结论
+    → 由尚未解决的问题进入下一节
+```
+
+- Course 负责让学员知道“为什么现在需要做选择”、“用什么条件选择”和“当前证据允许什么结论”。
+- Lab 使用可重复的 Doris 操作提供证据，不重复 Course 的长段机制说明，也不把一次实验的固定数字写成通用结论。
+- Quiz 换用新场景检查学员能否迁移决策方法，不要求记忆 Lab 的表名、行数、金额、Tablet ID 或 Profile 计数。
+- Partition、Bucket、Tablet、Replica 的数量关系，Fragment 层次，列编码与 Page 压缩等内容可以作为主线中的直接技术解释，不必为每个概念另造场景。
+
 ## 模块 8：在 Apache Doris 中加速查询
 
-当前占位文件：[模块 8 课程](module08-query-acceleration/course.md)。
+已实现课程：[Module 8 Course](module08-query-acceleration/course.md)。
 
 ### 模块目标
 
@@ -39,7 +60,17 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
 
 ### 场景与逻辑主线
 
-电商团队需要在同一份事件历史上提供反复查询的收入面板，以及按产品筛选的明细调查。先通过共享查询定义统一报表逻辑，再由重复聚合引出物化视图，由选择性明细查询引出索引。两条路径最终都回到同一验证流程：保持结果正确、检查计划、观察实际工作量、评估成本。
+电商分析团队需要在同一份事件历史上同时提供收入面板和产品明细调查。课程不把 View、Materialized View 和索引并列成功能清单，而是让报表工作量逐步变化：
+
+| 主线阶段 | 业务变化 | 当前决策 | 证据与下一步 |
+| --- | --- | --- | --- |
+| 8.1 | 面板结果正确，但运行频率和计算成本上升 | 先固定人口、粒度、指标和新鲜度，不先选功能 | 建立可对账的 baseline，才能判断后续加速是否改变语义 |
+| 8.2 | 多个面板重复书写同一 purchase 定义 | 用 regular View 共享逻辑，但不把它当成结果存储 | 结果一致后仍观察到底表工作，从而引出预计算结果 |
+| 8.3 | 单表地区汇总重复执行，且写入后必须立即可见 | 在受支持的 SQL scope 内选择 synchronous MV | 分开检查构建、计划选用和写入后答案，再进入多表计算 |
+| 8.4 | 品类报表需要重复 Join 事件和产品属性，业务接受明确的 refresh lag | 使用 asynchronous MV，显式定义刷新和陈旧边界 | 源答案、存储答案、Task 状态和透明改写分开验证 |
+| 8.5 | 新面板改变粒度或要求 distinct buyers | 判断已保存的维度和可加指标是否足以推导目标查询 | 一个改写成功、一个因状态缺失而回到明细，说明 MV 不是通用缓存 |
+| 8.6–8.7 | 用户从汇总下钻到非主要排序列的选择性明细，或可用结构未被选中 | 按谓词选索引，并先检查统计信息和谓词形态 | metadata 说明结构存在，`EXPLAIN` 说明计划，Profile 说明实际过滤 |
+| 8.8 | 加速结构已能减少部分读工作，但写入、刷新和存储成本持续存在 | 按查询频率、延迟目标、新鲜度和维护成本决定是否保留 | 记录决策假设；本地加速不回答多节点容量和可用性，进入 Module 9 |
 
 ### 学习目标
 
@@ -61,8 +92,9 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
 **需求场景：** 仪表板结果正确，但查询频率增加后成本不断上升。
 
 - 明确输入数据范围、输出粒度、指标、新鲜度和负载频率。
+- 先定义报表人口：直接读取事实表与通过维度表 Inner Join 的报表可能覆盖不同记录。无法匹配维度的事实行会被 Inner Join 排除，因此比较结果前必须先确认两条查询是否使用同一输入范围；不能把查询人口差异误判为加速结构丢失数据。
 - 使用模块 2、6 已介绍的概念，定位可能需要减少的扫描、Join、聚合和 Exchange 工作。
-- 区分结果错误、计划不合理、实际工作量过大，以及受噪声影响的总耗时；不以配置项清单开场。
+- 区分结果错误、计划不合理、实际工作量过大，以及受噪声影响的总耗时；建立“完整结果对账 → `EXPLAIN` 选择 → Query Profile 实际计数”的证据顺序，不以配置项清单或单次耗时开场。
 - **实验衔接：** 建立结果可核对的基线，在修改本模块对象之前保留计划和 Query Profile。
 
 #### 8.2 复用查询逻辑，不把逻辑复用当成结果存储
@@ -70,7 +102,8 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
 **需求场景：** 多个面板需要共享同一个购买收入定义。
 
 - 普通视图用于复用查询逻辑，CTE 用于单条语句内部的逻辑组织；定义本身不代表持久化计算结果。
-- 与模块 4 的 `daily_event_metrics` 对照：该表存储汇总数据，但现有填充过程没有建立自动刷新关系。
+- 解释普通 View 展开后通常仍访问其底层表：View 名称出现在 SQL 中，不表示 Doris 读取了另一份已计算数据。应以实际计划和扫描 Profile 判断它复用的是查询定义，还是确有其他物化访问路径。
+- 与模块 4 手动填充的汇总表对照：它存储预计算数据，但现有填充过程没有建立自动刷新关系。
 - 在明确重复计算需求后，再引入需要持续维护的预计算结果。
 - **实验衔接：** 比较本模块普通视图与其定义查询的结果；结果相同不能证明发生了缓存或物化。
 
@@ -80,7 +113,8 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
 
 - 从新鲜度要求引入同步物化视图。
 - 明确视图定义受到表达式、聚合函数和 Table Model 支持范围的限制，不承诺任意 SQL 或 Join 都适用。
-- 区分初始构建、后续写入维护和优化器选择 rollup/index；同时说明存储与导入开销。
+- 区分初始构建、后续写入维护和优化器选择 rollup/index；同步物化视图作为基表下的物化索引参与计划选择，并不是查询 SQL 显式改成了另一张独立表。同时说明额外存储与导入维护开销。
+- 用一条带唯一业务标识、可安全重跑的已知写入解释同步维护：业务结果的预期增量证明提交后的答案改变，计划继续选择物化索引证明访问路径没有退回基表；两项证据必须分开陈述，具体标识和增量留给 Lab。
 - **实验衔接：** 在本模块的 Duplicate Key 表上创建受支持的视图，等待构建完成，检查计划选中的扫描索引，并在追加本模块数据后核对基表查询结果。
 
 官方参考：[同步物化视图](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/sync-materialized-view/)。
@@ -90,8 +124,9 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
 **需求场景：** 品类收入需要反复连接事件和产品属性，报表允许一定刷新延迟。
 
 - 引入异步物化视图，并明确刷新约定。
-- 区分直接查询视图中的存储数据，与对基表查询进行透明改写。
+- 区分直接查询视图中的存储数据，与对基表查询进行透明改写；关闭 rewrite 后比较源 Join 与存储结果，避免查询视图时又被优化器改写而形成循环论证。
 - 比较手动与定时刷新、全量与满足条件的分区增量刷新；维度变化同样会影响新鲜度。
+- 用维度属性重分类说明陈旧性：源查询已经把相关事实移动到新的分类，但手动 COMPLETE refresh 前，异步视图仍保存旧分类结果；refresh Task 成功后再用全部分组对账确认追平。Task 成功、数据新鲜和透明改写是三个不同状态，具体分类名、行数和金额留给 Lab。
 - **实验衔接：** 使用本模块的事实表和维度表副本，演示手动刷新、源数据变化及刷新后的对账。核实一致性配置之前，不预先规定过期视图的改写行为。
 
 官方参考：[物化视图选型](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/overview/)、[异步物化视图概述](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/overview/)、[管理与查询](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/functions-and-demands/)。
@@ -101,7 +136,7 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
 **需求场景：** 物化视图已经存在，但仪表板仍然执行原有工作。
 
 - 检查请求的粒度、维度、谓词以及指标是否能够从视图推导。
-- 复用此前的语义区分：可加指标、需要兼容分子和分母状态的平均值，以及不可直接相加的去重计数。
+- 复用此前的语义区分：若异步视图保存分类、地区、`COUNT(*)` 与 `SUM(revenue)`，优化器可以把可加指标继续汇总到更高粒度；若它没有保存 `user_id` 或可合并的去重状态，就不能从该视图推导 `COUNT(DISTINCT user_id)`，必须读取保留所需明细的来源。
 - 区分构建或刷新成功、满足改写条件、优化器实际选用，以及执行工作量减少。
 - **实验衔接：** 各选择一个满足条件和一个刻意超出范围的查询，检查实际计划、比较完整分组结果、读取相关扫描和聚合计数。没有命中改写也是需要解释的观察结果。
 
@@ -111,10 +146,11 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
 
 - 简要说明 Partition、Bucket、Prefix Index 和 ZoneMap 过滤后剩余的工作，不重复实验 2 的布局重建。
 - 以不分词的 Inverted Index 作为主要二级索引示例。
+- 解释倒排索引是 Segment 内从列值到 Row ID bitmap 的额外结构：`product_id=某值` 先得到该 Segment 中可能匹配的行位，再由 Scanner 读取需要返回的列。它不改变 Partition、Bucket 或 Tablet 归属，也不是 MySQL 聚簇/非聚簇 B-tree 的同义词。
 - 比较适用于等值或 `IN` 谓词的 BloomFilter Index，说明假阳性和数据块内的值分布，不能只看列基数。
 - 分词搜索与 NGram BloomFilter 仅作为有限的选型对照：词项匹配和子串匹配回答的问题不同。
 - 说明历史数据的索引构建覆盖范围，以及存储和写入开销。
-- **实验衔接：** 本模块有索引和无索引的表保持相同行、结构、分布和排序，只改变索引条件；核对结果和原始索引计数，不承诺固定加速倍数。
+- **实验衔接：** 本模块有索引和无索引的表保持相同行、结构、分布和排序，只改变 `INDEX ... (product_id) USING INVERTED`；核对业务结果、扫描表/索引身份、`RowsInvertedIndexFiltered` 与 `ScanRows`。Lab 只直接验证数值等值谓词和不分词倒排索引；BloomFilter、分词搜索及 NGram 仅在 Course 做选型边界，不写成 Lab 已验证结论，也不承诺固定加速倍数。
 
 官方参考：[倒排索引](https://doris.apache.org/docs/4.x/key-features/inverted-index/)、[布隆过滤器索引](https://doris.apache.org/docs/4.x/table-design/index/bloomfilter/)、[索引选型](https://doris.apache.org/docs/4.x/query-acceleration/tuning/tuning-plan/optimizing-table-index/)。
 
@@ -124,7 +160,7 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
 
 - 使用提示前，先检查相关统计信息和谓词形态。
 - 说明统计信息用于估算，不是实际运行的行数。
-- 统计信息采集只针对模块 8 的对象，不对共享数据库整体执行；Join 顺序和 Runtime Filter 机制回顾模块 6。
+- 统计信息应针对当前查询依赖的表和列采集，不把“对整个共享数据库执行维护操作”写成普通调优步骤；Join 顺序和 Runtime Filter 机制回顾模块 6。
 - **实验衔接：** 记录统计信息与选中计划，不假定采集统计信息后计划一定改变。
 
 官方参考：[统计信息采集与管理](https://doris.apache.org/docs/4.x/query-acceleration/optimization-technology-principle/statistics/)。
@@ -134,7 +170,7 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
 **需求场景：** 某个结构帮助了一个面板，但占用了存储和维护资源。
 
 - 比较反复查询节省的工作与构建、写入、刷新、存储成本。
-- 控制结果缓存，同时单独记录存储缓存条件。
+- 为观察查询实际执行的扫描与计算，应记录 Profile 级别并控制可能复用先前结果或过滤信息的会话缓存，采集结束或失败后恢复原设置；未清空操作系统和存储层缓存时，不能把结果描述为冷缓存性能基准。具体会话变量由 Lab 展示，不要求学员在 Course 中记忆配置清单。
 - 保留算子身份、单位和计数汇总范围；不累加重叠计时，也不只按等待时间判断瓶颈。
 - 用证据支持最终选择，并说明尚存的不确定性。
 - **模块过渡：** 本地查询加速不能证明多节点容量、放置和可用性，模块 9 接着解决这些问题。
@@ -238,13 +274,13 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
     - **期望结果：** 停止后状态为 `exited`；重启后容器回到 `healthy`，完整实验后的 `m08_events` 为 **75,260** 行，且 `event_id=-8001` 恰有一行。
     - **说明：** 停止/重启不会清空 Module 8 对象；结尾 `Lab complete` 用一段话回顾普通 View、同步/异步物化视图、改写边界与倒排索引证据，不再使用“证明事项”表格。
 
-### 测验 8 的拟议覆盖范围
+### 测验 8 的已实现覆盖范围
 
-约六个独立场景，覆盖逻辑复用与结果存储、新鲜度驱动的物化选择、改写条件、谓词驱动的索引选择、计划与运行证据、维护成本取舍。每个场景自行提供所需事实或小段证据。
+[Quiz 8 Notebook](module08-query-acceleration/quiz8_acceleration_choices.ipynb) 与 [Quiz 8 YAML](module08-query-acceleration/quiz8_acceleration_choices.yaml) 包含六个独立场景，覆盖逻辑复用与结果存储、新鲜度驱动的物化选择、改写条件、谓词驱动的索引选择、计划与运行证据、维护成本取舍。每个场景自行提供所需事实或小段证据。
 
 ## 模块 9：Apache Doris 的分片与副本
 
-当前占位文件：[模块 9 课程](module09-sharding-replication/course.md)。
+已实现课程：[Module 9 Course](module09-sharding-replication/course.md)。
 
 ### 模块目标
 
@@ -252,9 +288,21 @@ Frontend（FE）负责创建和优化分布式查询计划，并分配计划片�
 
 ### 场景与逻辑主线
 
-事件服务首先需要一个不会绑定单个 FE 的查询入口。团队先识别当前 Master 并直连它，停止该 FE 后观察原连接失败，再加入带健康检查的统一入口，验证新连接能够避开故障 FE；恢复该 FE 后再继续数据实验。存储侧先在两个 BE 上建立双副本事件表，此时两个 BE 都持有每个 Tablet 的一份副本；加入第三个 BE 后，后台再平衡才使三个 BE 持有不同 Tablet 子集。完成扩容后，用一条地区聚合观察 FE 选择哪些 Tablet 副本并把扫描任务下发到哪些 BE；三台 BE 都保存副本，不代表每次查询都必须使用三台。随后用三副本事件小表观察一个 BE 停机期间的写入与返回节点版本追赶。最后复用事件与用户表，对照 Bucket Shuffle Join 和 Colocate Join，把数据放置与 Join 数据移动连接起来。
+电商事件服务从单节点教学环境进入需要扩容和容错的多节点部署。主线不把 FE HA、BE 副本、MPP 执行和 Join 分发拆成无关主题，而是沿“入口故障→容量扩展→实际执行→副本故障→稳定布局上的 Join”推进：
 
-### 官方实验环境基线
+| 主线阶段 | 运行状态变化 | 当前决策 | 证据与下一步 |
+| --- | --- | --- | --- |
+| 9.1 | 单 FE + 单 BE 不足以观察选举、副本放置和跨 BE 执行 | 建立三个可投票 FE 和两个初始 BE 的隔离拓扑 | 先核对真实角色、Master 和连接路径，避免把容器数当成集群可用性 |
+| 9.2 | 应用直连当前 Master，该 FE 停止 | 分开处理 FE metadata quorum 和客户端新连接路由 | 原 TCP session 失败；存活 FE 选主；HAProxy 仅为新连接选健康 FE，且单代理仍是入口风险 |
+| 9.3 | 两个 BE 已存储双副本表，容量需求促使团队加入第三个 BE | 让调度器重新分布 Replica placement，不改写原有 Sharding key | metadata 展示 Tablet 数不变、副本开始利用新 BE；`Alive` 不等于平衡完成 |
+| 9.4 | 三个 BE 已持有不同 Tablet 子集，团队需要知道一条查询真正使用了哪些副本 | 沿 FE 计划追踪 Fragment Instance 和 BE PipelineTask | `SHOW REPLICA DISTRIBUTION` 回答存储放置，`EXPLAIN` 回答计划，Profile 中的 host/Tablet/ScanRows 回答本次执行 |
+| 9.5 | 一个 BE 停机时事件写入仍在继续 | 按副本多数门槛决定能否提交，并把心跳恢复与版本追平分开 | 逻辑结果证明提交，逐 BE Version 证明落后副本是否追平；恢复后才进入稳定布局上的 Join |
+| 9.6–9.7 | 事件与用户维度频繁按 `user_id` 连接 | 先在不兼容布局上用 Bucket Shuffle，再用稳定且兼容的 Colocation Group 避免 Join 输入 Shuffle | Join 附近的 `VEXCHANGE` 和 Join node 说明分发选择；业务答案一致不证明网络成本一样 |
+| 9.8 | 实验在一台 Docker 宿主机上完成了扩容、停机和分布式执行 | 明确生产决策仍需独立故障域、负载和网络证据 | 不用单宿主机 elapsed time 给策略排名；数据已分布可用后进入 Module 10 的存储与生命周期 |
+
+### Lab 开发环境基线（不进入 Course 正文）
+
+本节的服务名、端口和容器生命周期仅供开发与复现实验使用。Course 正文讲解 FE/BE 职责、连接入口、副本与分发机制，不要求学员记忆这些本地标识符。
 
 Module 9 使用 Apache Doris 官方 [`multi-node.yml`](https://github.com/apache/doris/tree/master/docker/runtime/all-in-one/4.1/compose)，固定镜像为 `apache/doris:all-in-one-4.1.3`。同一镜像通过 `DORIS_ROLE` 分别启动一个进程角色，形成以下拓扑：
 
@@ -265,7 +313,7 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 ```
 
 - `fe-1` 初始引导集群，`fe-2`、`fe-3` 默认作为 Follower 加入；基础实验不把 `fe-3` 改成 Observer，以保留三个参与选举的 FE。
-- `be-1`、`be-2` 先运行，`be-3` 留给在线扩容实验。`m09_events` 显式使用两个副本；在两个 BE 阶段每个 BE 各存放每个 Tablet 的一个副本，加入第三个 BE 后再观察放置是否变化。三副本事件小表只在三个 BE 就绪后创建。默认副本数不能代替实验中明确的建表配置。
+- `be-1`、`be-2` 先运行，`be-3` 留给在线扩容实验。双副本事件基线在两个 BE 阶段使每个 BE 各存放每个 Tablet 的一份副本，加入第三个 BE 后再观察放置是否变化。三副本事件小表只在三个 BE 就绪后创建。默认副本数不能代替实验中明确的建表配置。
 - 当前 `client` 容器的健康检查期望三个 BE；若沿用此条件，初始阶段只启动三 FE + 两 BE，扩容后再启动 `client`。实际 Lab 需核对官方镜像对新增 BE 的注册方式，使用有界就绪检查，不用固定 `sleep` 代替。
 - Module 9 使用独立 Compose project、私有子网和不与现有单节点沙箱冲突的主机端口。官方 Compose 支持 `FE_PORT`、`FE2_PORT`、`FE3_PORT`、`FE_HTTP_PORT`、`FE2_HTTP_PORT`、`FE3_HTTP_PORT`、`BE_HTTP_PORT` 和 `SUBNET`。课程候选值为 MySQL 端口 `9130`–`9132`、FE HTTP 端口 `8130`–`8132`、BE HTTP 端口 `8140` 和子网前缀 `172.31.91`，采用前必须检查占用。容器内部仍使用 Doris 默认端口。
 - 在 Docker Desktop 上，主机不能直接路由到容器私网地址。需要跟随 FE 重定向到 BE 的操作应从 `client` 容器执行。当前 Notebook 的 `DorisLab.connect` 固定连接 `127.0.0.1:9130`，即 `fe-1`，停掉 Master 后才手动切换到另一个 FE；这不是 FE 负载均衡。新版实验先识别当前 Master 及其发布端口并明确直连，再停止该 FE，证明原 TCP 连接不会自动迁移；随后按官方方案加入带健康检查的轻量 HAProxy TCP 入口，让新连接避开故障 FE，并用代理统计或等价证据核对连接目标。恢复原 FE 后确认它重新加入，再为后续 Lab 保持完整 FE 拓扑。代理仍位于同一 Docker 宿主机，本身也不是冗余入口。[FE 负载均衡](https://doris.apache.org/docs/4.x/admin-manual/cluster-management/load-balancing/)。
@@ -293,20 +341,21 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 
 **需求场景：** 单个 FE + 单个 BE 可以演示 SQL，但不能证明副本放置、跨 BE 执行或 FE 选举。
 
-- 说明同一 `all-in-one-4.1.3` 镜像如何由 `DORIS_ROLE` 启动 FE、BE 和 `client` 角色。
+- 说明同一多节点教学镜像如何按角色启动 FE、BE 和客户端容器；镜像标签与环境变量属于 Lab 环境说明，不是课程需要记忆的 Doris 架构概念。
 - 区分 FE 的查询规划与元数据职责，以及 BE 的数据存储与计划片段执行职责。
-- 解释 `fe-1` 初始引导、Follower 加入、两个初始 BE 注册、第三个 BE 后续加入和 `client` 健康检查的顺序。
+- 解释初始 FE 引导、其他 Follower 加入、初始 BE 注册、新 BE 后续加入和客户端健康检查的顺序。
 - 使用 `SHOW FRONTENDS`、`SHOW BACKENDS` 和容器健康状态核对实际拓扑，不仅根据容器数量判断集群可用。
-- 说明现有 Notebook 固定直连 `fe-1`；FE 选举不等于客户端负载均衡。统一入口需由客户端多地址机制或外部代理提供，并分别验证新连接分配与故障后重连。
+- 说明客户端直接连接某一台 FE 时，FE 选举不等于客户端负载均衡。统一入口需由客户端多地址机制或外部代理提供，并分别验证新连接分配与故障后重连。
 - **实验衔接：** 先启动隔离 Compose project 中的三个 FE 和两个 BE，核对角色、版本、地址、当前 Master 与直连端口，证明连接没有误指向 Level 1–8 的单节点环境。
 
 #### 9.2 分开验证 FE 选举和客户端负载均衡
 
-**需求场景：** 三个 FE 均能提供 SQL 入口，但当前 Notebook 只连 `fe-1`；它关闭后，已有连接会断开。
+**需求场景：** 多个 FE 均能提供 SQL 入口，但客户端只直连其中一台；该 FE 关闭后，已有连接会断开。
 
 - 三个 Follower 中只有一个当前 Master；它失效后，存活 Follower 可选出新的 Master。选举维护的是 FE 元数据服务，不会自动迁移原有 MySQL TCP 会话，也不提供新连接的均匀分配。
 - 先识别当前 Master FE 及其 localhost 发布端口并直连，记录本次连接的协调 FE；停止这个 FE 后，用该连接再次执行查询，预期得到连接错误，而不是透明切换到另一个 FE。
 - 启动带健康检查的 HAProxy 统一入口，通过多次新建连接观察其分配目标。停止一个目标 FE 后，分别检查新 Master 选举、代理摘除故障目标和通过统一入口重新连接成功；不能仅用三个 FE 端口分别可查询来声称已经负载均衡。
+- 解释代理统计字段的范围：`active connections` 是采样时仍由 HAProxy 转发到该 FE 的 TCP session，`total connections` 是 HAProxy 进程启动后累计分配到该 FE 的 session，连接两端是客户端与 HAProxy、HAProxy 与 FE MySQL 端口；`L4OK` 只说明 TCP 健康检查成功。累计值用来观察新连接分配，不表示查询数、并发查询数或 FE 生成计划的次数。
 - 已经建立的 MySQL TCP 会话不会被 HAProxy 搬到另一台 FE；应用仍需要连接池或重试逻辑。恢复被停止的 FE 后确认它重新加入并重新进入代理可用目标，再继续后续数据实验。
 - **实验衔接：** 保留“直连失效”“FE 选举”“代理健康检查与新连接分配”“客户端重连”四类证据，不承诺在途查询零中断，也不把单个 HAProxy 容器描述成冗余入口。
 
@@ -316,12 +365,13 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 
 **需求场景：** 现有两个 BE 的存储或计算余量不足，团队加入第三个 BE，希望确认旧数据是否会被利用新节点承载。
 
-- 副本数不能超过满足放置约束的可用 BE 数。若 `BE 数量 = replication_num`，每个 BE 都会持有每个逻辑 Tablet 的一份副本；因此 2 BE + 2 副本和原来的 3 BE + 3 副本一样，都不能展示不同 BE 持有不同 Tablet 子集。
+- 副本数不能超过满足放置约束的可用 BE 数。若可用 BE 数量恰好等于 `replication_num`，每个 BE 都必须持有每个逻辑 Tablet 的一份副本，因此无法形成“不同 BE 持有不同 Tablet 子集”的放置；只有放置目标多于副本数时，调度器才有选择空间。
 - 实验仍先在两个 BE 上建立两个副本的事件表，用它作为扩容前基线；此时两个 BE 确实都覆盖全表。加入第三个 BE 后变成 `BE 数量 > replication_num`，后台调度器才有条件把已有副本逐步复制到新 BE，再清理旧的多余副本，使三个 BE 分担不同 Tablet 子集。
 - 说明 Bucket 对应逻辑 Tablet；副本是同一 Tablet 在不同 BE 上的物理拷贝，不会增加 SQL 可见的逻辑行数。分别统计唯一 Tablet ID、元数据副本记录和每 BE 副本数，不把三者混为一谈。
+- 用事件表 DDL 串联这些概念：`event_time` 先决定时间 Partition，每个 Partition 内再由 `HASH(user_id)` 和 Bucket 数产生逻辑 Tablet；`逻辑 Tablet 数 = Partition 数 × 每 Partition Bucket 数`，物理副本记录数还要乘以 `replication_num`。多份副本代表同一个逻辑 Tablet，不会让 SQL 重复返回业务行；当前 Lab 的具体数量留在实验大纲中核对。
 - 比较扩容前后 `SHOW BACKENDS`、`SHOW REPLICA DISTRIBUTION`、少量逐 Tablet 的 `SHOW TABLETS` 和 SQL 逻辑答案；用有界等待观察调度，不把“第三个 BE 已 Alive”误读为“迁移完成”。
-- 旧表仍是原来的 Partition 和 Bucket 数；新增 BE 改变可放置位置，不会自动把已有 6 个 Bucket 改成更多 Bucket。共置表再平衡期间可能暂时不稳定，Join 计划需在稳定后另行核对。
-- **实验衔接：** 只启动预留的 `be-3` 并确认它已注册。比较前后 Tablet–Backend 映射；若小数据样本在有界时间内未触发可见迁移，明确展示调度状态和证据不足，不通过手动移动副本伪装成“自动再平衡”。
+- 旧表仍保持原来的 Partition 和 Bucket 数；新增 BE 改变可放置位置，不会自动增加既有 Bucket。共置表再平衡期间可能暂时不稳定，Join 计划需在稳定后另行核对。
+- **实验衔接：** 只启动预留的新 BE 并确认它已注册。比较前后 Tablet–Backend 映射；若小数据样本在有界时间内未触发可见迁移，明确展示调度状态和证据不足，不通过手动移动副本伪装成“自动再平衡”。
 
 官方参考：[弹性扩容](https://doris.apache.org/docs/4.x/admin-manual/cluster-management/elastic-expansion/)、[副本均衡与修复](https://doris.apache.org/docs/4.x/admin-manual/maint-monitor/tablet-repair-and-balance/)。
 
@@ -329,20 +379,24 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 
 **需求场景：** 扩容后的三个 BE 已持有不同 Tablet 子集，但团队需要知道一条查询实际使用了哪些副本和执行节点。
 
-- `m09_events` 仍按 `HASH(user_id)` 分成 12 个逻辑 Tablet，每个 Tablet 有两个物理副本。三台 BE 是可用的放置目标；FE 对每个所需 Tablet 选择一个可用副本，不会把两个副本都扫描一遍。
+- 事件表按 `HASH(user_id)` 分成多个逻辑 Tablet，每个 Tablet 有配置数量的物理副本。多个 BE 是可用的放置目标；FE 对每个所需 Tablet 选择一个健康副本，不会把同一 Tablet 的所有副本都扫描一遍。
 - 区分业务行数、逻辑 Tablet、BE 上保存的物理副本和本次查询选中的副本。`SHOW REPLICA DISTRIBUTION` 说明副本放置，不能证明某个 BE 参与了这次查询。
 - 解释 FE 如何形成 Plan Fragment，为选中的 Tablet 副本下发 Fragment Instance；BE 执行扫描与局部聚合，Exchange 传递中间结果。`EXPLAIN` 表示计划，Query Profile 中的 BE host、Tablet ID 和 `ScanRows` 才是本次运行证据。
+- 按一条 SQL 的真实分发顺序讲解：FE 先根据 `event_time` 谓词裁剪 Partition，再确定所需 Bucket/Tablet；从每个 Tablet 配置的多个副本中选择一个健康副本，把包含若干 Tablet 范围的扫描 Fragment Instance 下发到相应 BE；每个 BE 的 PipelineTask 扫描本地 Tablet、执行局部聚合，再通过 Exchange 把中间结果送往上层 Fragment，最终由协调 FE 返回答案。
+- 明确四个容易混淆的数量：Plan Fragment 是一段可分布执行的计划模板；Fragment Instance 是该模板在某个执行节点上的实例；PipelineTask 是实例内部的并行任务；本地 Pipeline 并行度不改变 Tablet、副本数或业务结果。Lab 为缩短 Profile 而采用的具体并行设置只写在实验说明中，不能解释成关闭多 BE 执行。
+- 用裁剪后的文本教会学员沿结构阅读：`tablets=已选择/总数` 是计划扫描范围，`numNodes` 是计划估计使用的节点范围；DetailProfile 中每个 `host` 下的 `TabletIds` 和 `ScanRows` 才说明该 BE 本次实际承担了哪些扫描。容器私网 IP、Tablet ID 和具体数量会随环境变化，Course 不固定这些值。
 - 多个不同的 BE host 出现在扫描 Profile 中，可以证明这次执行跨 BE 并行；没有出现的 BE 即使保存副本，也没有执行本次表扫描。副本选择和调度可能变化，因此不固定断言三台 BE 都参与、具体 Tablet ID 或具体扫描行数。
-- **实验衔接：** 对 `m09_events` 执行一条地区聚合，先核对八个地区和总行数，再对照裁剪后的 `EXPLAIN` 与 DetailProfile。只解释实际出现的 BE 扫描任务，不增加第二张偏斜对照表，也不以同一宿主机耗时声称扩展收益。
+- **实验衔接：** 对事件表执行地区聚合，先核对完整分组结果和总行数，再对照裁剪后的 `EXPLAIN` 与 DetailProfile。只解释实际出现的 BE 扫描任务，不增加第二张偏斜对照表，也不以同一宿主机耗时声称扩展收益。
 
 #### 9.5 在一个 BE 停机时写入，并观察返回节点追赶版本
 
 **需求场景：** 一个 BE 停止，但应用仍尝试读取和追加事件。
 
-- 双副本表在默认“多数副本写入”策略下需要两份都成功，停一个持有副本的 BE 不能直接承诺写入成功；三副本表在一个 BE 停止后仍可由另外两个副本形成写入多数。因此在第三个 BE 已加入且稳定后，用独立的 `m09_availability_events` 三副本事件小表承载故障写入，不改动事件聚合的固定样本。
+- 在默认“多数副本写入”策略下，可提交副本数取决于配置的副本数和可用副本。双副本表停掉一个持有副本的 BE 时，不能直接承诺写入成功；三副本表停掉一个 BE 后，另外两个副本仍可能形成多数。Course 先解释门槛，再由 Lab 使用独立三副本事件小表验证，不改动聚合基线。
 - 停机前确认三个 BE 和故障写入事件表的每个 Tablet 都有三个健康、版本完整的副本，记录每个 BE 对应的 `Version`；再停止一个明确命名的 BE 容器。
 - 区分 Docker 容器被停止、FE 心跳检测到节点不可用、正在执行的请求失败和后续重试结果。
 - 在两个 BE 存活时做一次可重跑的写入，确认 SQL 已提交且逻辑结果更新；随后从 `SHOW TABLETS` 分别看到存活副本与停机副本的版本状态。停机副本元数据中的旧版本不能当作已从其容器读取的物理内容。
+- 将版本值解释为相对证据而不是固定答案：停机期间发生新提交后，形成多数的存活副本应处于同一个较新版本并标记为 current version；停止的 BE 保留较小旧版本且不再是 current version。若停机前后没有新提交，版本可以相同；恢复完成后只要求全部副本相等，不硬编码具体版本数字。
 - 使用 `kill/start` 或 `stop/start` 保留该容器的数据；不能使用会删除整个集群数据的 `down`。
 - 启动原 BE 后立即读取一次节点与逐 BE 副本版本；若已经追平，如实说明恢复太快，不能保证每次都能捕捉到过渡态。随后有界等待全部副本版本一致且健康，并再次查询同一个业务值。节点 `Alive` 与副本版本追平是不同的完成条件。
 - **实验衔接：** 展示写入前、停机写入后、节点刚返回和完全追平后的简短逐 BE `Version` 对照；不硬编码具体版本号，也不把原节点的追赶误称为向替代节点迁移。
@@ -355,7 +409,10 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 
 - 将 Join 放在故障恢复之后，先等待参与实验的表和 Colocation Group 稳定，避免把再平衡或修复期间的临时退化当成正常计划。
 - 沿用模块 6 对逻辑 Join 与物理 Hash Join 的区分，此处只研究跨 BE 的数据移动：Bucket Shuffle 保留一侧 Bucket 布局并重分发另一侧，Colocate 在稳定且兼容的组内避免该 Join 的 Shuffle。
-- 只使用 `m09_events` 和同名的 `m09_users` 业务对象。先把单个事件 Partition 按 `user_id` 汇总为中间结果，并让 `m09_users` 使用不兼容的 RANDOM 布局；`[shuffle]` 只用于阻止小维度表改走 Broadcast，Doris 4.1.3 的实际计划必须出现 `BUCKET_SHUFFLE` 才继续解释。随后用相同用户数据重建同名表，使其按 `user_id` 使用六 Bucket、双副本，并与 `m09_events` 加入同一个 Colocation Group。
+- 使用统一的事件—用户场景：事件表按 `HASH(user_id)` 分布，查询先选择一个时间 Partition，再把事件按 `user_id` 聚合为 `(user_id,event_count,total_revenue)`，使同一用户的中间状态继续位于可复用的事件 Bucket；用户维度包含 `(user_id,user_segment)`，第一种布局故意使用不兼容的 RANDOM 分布。
+- 具体解释 Bucket Shuffle 的路由：如果某个用户的事件状态位于一个事件 Bucket，而 RANDOM 用户记录位于别处，Join 输入侧 `VEXCHANGE` 会按事件表的 `user_id` Bucket 映射把该用户记录发送到负责相应 Bucket 的 Fragment Instance；事件侧保持原布局，移动的是用户侧。Bucket 号与负责它的 BE 不是永久绑定关系，本次执行仍需从副本中选择实际扫描位置。
+- `[shuffle]` 只用于阻止小维度表改走 Broadcast，不能单独证明 Bucket Shuffle；实际计划必须出现 `INNER JOIN(BUCKET_SHUFFLE)`，且 Join 输入分支出现 `VEXCHANGE`，才能解释为用户侧被重新分发。Join 上方为最终 `GROUP BY user_segment`、排序或结果合并出现的 Exchange 不属于 Join 输入移动。
+- 随后用相同逻辑用户数据重建维度表，使其同样按 `user_id` 分桶、采用兼容的 Bucket 和副本定义，并与事件表加入同一个 Colocation Group。稳定后，对应 Bucket 的事件和用户 Tablet 具有兼容放置，计划应为 `INNER JOIN(COLOCATE)`，Hash Join 与两侧扫描之间不再需要输入 Exchange；具体行数与 DDL 参数留在 Lab 大纲中。
 - 两次查询保持相同 Join Key、过滤范围、分组指标和业务答案。Bucket Shuffle 复用按 `user_id` 汇总后的事件侧 Hash 分布，只重分发用户侧；Colocate 还要求两张物理表的分桶列类型、Bucket 数、副本数与放置兼容，而且 `SHOW PROC "/colocation_group"` 必须报告 `IsStable=true`。
 - **实验衔接：** 分别裁剪普通 `EXPLAIN` 中的 Join 节点、Join 下方关键 `VEXCHANGE`、表扫描和 Partition 范围。Bucket Shuffle 应在 Join 输入分支看到 Exchange；Colocate 的 Join 与两个输入扫描之间不应有 Exchange，但最终聚合或结果合并仍可有其他 Exchange。不比较本机容器耗时。
 
@@ -466,148 +523,284 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 - 同一宿主机上的多个容器不提供独立物理故障域，不能用于生产网络性能、磁盘容灾或跨可用区结论。
 - `stop/start` 用于节点实验和结尾的可选资源释放；Notebook 不再运行 `down`，避免删除未外挂的 Module 9 数据。Notebook 只能操作 Module 9 Compose project，不能停止或删除其他模块的容器、网络和数据。
 
-### 测验 9 的拟议覆盖范围
+### 测验 9 的已实现覆盖范围
 
-约六个独立场景，覆盖存储副本与查询选中的副本、跨 BE 扫描任务、Bucket Shuffle / Colocate 的条件、两 BE 到三 BE 的副本再平衡、双副本与三副本的停机写入门槛、FE 选举与客户端入口切换，以及容器级和生产级故障域的区别。每题自行提供拓扑、配置和元数据，不要求正在运行 Docker 或 Doris。
+[Quiz 9 Notebook](module09-sharding-replication/quiz9_distribution_and_availability.ipynb) 与 [Quiz 9 YAML](module09-sharding-replication/quiz9_distribution_and_availability.yaml) 包含六个独立场景，覆盖存储副本与查询选中的副本、跨 BE 扫描任务、Bucket Shuffle / Colocate 的条件、两 BE 到三 BE 的副本再平衡、双副本与三副本的停机写入门槛、FE 选举与客户端入口切换，以及容器级和生产级故障域的区别。每题自行提供拓扑、配置和元数据，不要求正在运行 Docker 或 Doris。
 
-## 模块 10：在 Apache Doris 中管理数据生命周期
+## 模块 10：控制 Apache Doris 的存储成本与数据生命周期
 
-当前占位文件：[模块 10 课程](module10-managing-data/course.md)。
+已实现课程：[Module 10 Course](module10-managing-data/course.md)。
+
+### ClickHouse 参考课程与 Doris 映射
+
+ClickHouse Academy 当前把 Module 10 分为 `Compression`、`TTL`、`Lab 10.1: Configuring Compression` 和 `Lab 10.2: Configuring TTL`。本地 `ClickHouse101.pdf` 只列出 Module 10 标题，没有记录这些内容；以下映射来自实际 Academy 课程目录和 Lab 页面。
+
+- Compression Lab 先从 `system.parts` 读取整表压缩前后字节和 Part 数，再从 `system.parts_columns` 查看逐列压缩率；它用 Compact/Wide Part 解释为什么小表可能没有可用的逐列文件统计，然后让学员用相同数据比较默认压缩与 `T64 + LZ4`、`DoubleDelta + ZSTD`、`LZ4HC` 等列级 Codec。
+- TTL Lab 创建 60 秒行级 TTL，先等待再查询，说明到期不等于已经被后台 Merge 删除，并用 `MATERIALIZE TTL` 强制执行；随后增加 15 秒列级 TTL，观察列值先变为类型默认值、整行再在 60 秒后删除，最后把五年保留规则应用到已有表。
+- Doris 4.x 的可迁移问题是“怎样在压缩率与解压成本之间选择”和“怎样让旧时间范围自动退出在线数据集”；ClickHouse 的 `CODEC(...)`、Compact/Wide Part、行级/列级 TTL 与 `MATERIALIZE TTL` 不能改名后当作 Doris 功能。
+- Doris 的 `compression` 是建表时选择的表级存储属性。Doris 内部仍按列编码、按 Page 压缩，但课程不宣称可以像 ClickHouse 一样为每列组合 Delta、DoubleDelta、Gorilla 或 T64 Codec。
+- Doris 的滚动保留主线采用 Dynamic Partitioning：调度器按当前时间创建和删除完整 Range Partition。它不是为每一行单独计算过期时间，也没有与 ClickHouse `MATERIALIZE TTL` 等价的实验命令。
+
+ClickHouse 参考：[Real-time Analytics with ClickHouse](https://learn.clickhouse.com/real-time-analytics-with-clickhouse)。Doris 参考：[数据压缩](https://doris.apache.org/docs/4.x/table-design/column-compression/)、[动态分区](https://doris.apache.org/docs/4.x/table-design/data-partitioning/dynamic-partitioning/)。
 
 ### 模块目标
 
-在结构演进、时间范围到期和误操作恢复的场景中选择并验证生命周期操作。把对象管理、后台存储维护和灾难恢复，与模块 7 的行级变化区分开。
+面对持续增长的事件数据，选择可解释的压缩策略和按时间分区的保留策略；用逻辑结果、表定义、调度状态和存储元数据分别验证结果。学员最终应能说明数据何时不再可查询、何时仍可能位于回收站、何时才需要独立备份，并避免把副本、TTL 和物理空间回收混为一谈。
 
 ### 场景与逻辑主线
 
-服务需要增加报表属性、保留滚动时间窗口，并处理迟到的历史数据。一次误删分区进一步引出恢复问题：哪些数据可以恢复、多久内可以恢复、依赖什么机制？最后区分副本、回收站恢复和独立备份。
+实时事件表每天继续增长，团队需要同时控制每份数据的存储成本、在线时长和删除后的恢复风险。主线沿“降低存储成本→定义可管理时间范围→让旧范围自动离线→处理迟到与误删→建立独立恢复边界”推进：
+
+| 主线阶段 | 数据生命周期变化 | 当前决策 | 证据与下一步 |
+| --- | --- | --- | --- |
+| 10.1 | 事件无限增长，团队同时面对存储、保留和恢复需求 | 先定义热度、保留时长、迟到数据、RPO 和 RTO | 把“数据太多”拆成压缩、Partition 管理、在线过期和恢复四个决策 |
+| 10.2–10.3 | 相同逻辑事件需要更少空间，但查询仍需读取相同值 | 从 CPU、I/O 和存储的紧张程度选压缩侧重，用受控输入决定是否偏离默认 | DDL 说明有效算法，逻辑核对说明输入可比，存储报告只支持当前样本的大小结论 |
+| 10.4 | 数据已经更紧凑，但旧时间范围仍会无限积累 | 在 Manual、Auto 与 Dynamic Partitioning 之间按创建触发条件和删除责任选择 | 将保留单位明确为完整 Partition，不翻译成逐行 TTL |
+| 10.5 | 团队需要滚动窗口，还会收到迟到事件 | 用 `time_unit`、`start`、`end`、时区和历史例外定义窗口，另行定义窗口外数据政策 | 先推导半开 Partition 边界和写入归属，再让时钟和 scheduler 推进窗口 |
+| 10.6 | 策略已接受，但最旧 Partition 可能仍可见 | 分开验证配置、scheduler 观察、catalog/SQL 可见性和物理回收 | 跨过边界只代表已符合过期条件；调度完成和字节回收还是独立状态 |
+| 10.7 | 近期数据需要高速介质，旧数据需要更低成本的在线存储 | 只在真实多介质或远端存储部署上选择冷热分层 | Course 说明架构选择；单磁盘 Docker Lab 不伪装成迁移证据 |
+| 10.8 | Partition 可能被误删，错误也可能传播到所有在线副本 | 用回收站处理有限窗口内的合格对象删除，用独立 backup/重放处理更广故障 | `RECOVER` 成功后还需核对数据；Replica 和 recycle bin 都不是 backup |
 
 ### 学习目标
 
 完成本模块后，学员应能够：
 
-1. 在选择操作前明确结构兼容性、保留范围、时区、迟到数据策略和恢复要求。
-2. 区分满足条件的轻量结构变更与后台变更，并使用相应证据确认完成。
-3. 根据创建和保留需求选择手动分区、Auto Partitioning 或 Dynamic Partitioning。
-4. 解释整分区保留策略与逐行过期的区别。
-5. 按作用范围和恢复预期区分对象删除、清空、条件删除和覆盖。
-6. 判断回收站恢复的适用条件及其无法撤销的操作。
-7. 读取维护元数据，但不声称观察到了未展示的物理清理。
-8. 区分数据冗余、已删除对象恢复和备份恢复。
+1. 解释列式编码、Page 压缩、压缩率、解压 CPU 和查询 I/O 之间的关系。
+2. 根据实时查询、均衡成本或归档优先级选择 Doris 支持的表级压缩算法，并说明为什么必须用真实数据验证。
+3. 在相同表结构、相同逻辑行和相同导入批次下比较压缩后的存储报告值，不用单次运行时间声称某算法更快。
+4. 区分 Manual Partitioning、Auto Partitioning 与 Dynamic Partitioning 的创建依据和生命周期职责。
+5. 用 `time_unit`、`start`、`end`、时区和保留例外定义完整 Partition 的滚动窗口。
+6. 区分属性被接受、调度器运行正常、Partition 实际出现或消失，以及物理字节最终回收。
+7. 解释迟到数据、无匹配 Partition 和历史保留例外对写入的影响。
+8. 区分在线副本、回收站恢复、远端备份和权威数据源重放所解决的问题。
+9. 说明本地/远端冷热分层需要真实的存储介质或对象存储，不能由单个 Docker 文件系统证明。
 
 ### 课程内容大纲
 
-#### 10.1 将生命周期需求转化为明确边界
+#### 10.1 从无限增长的问题定义生命周期边界
 
-**需求场景：** 增加属性、删除旧数据和恢复操作都必须保持报表语义。
+**需求场景：** 事件持续写入，团队必须同时回答“每行占多少空间”“保留多久”和“删除错误能否撤销”。
 
-- 明确事件时间与处理时间、保留边界、迟到数据和对象归属。
-- 从允许丢失多少变化、允许中断多久，引入恢复点目标（Recovery Point Objective，RPO）和恢复时间目标（Recovery Time Objective，RTO）。
-- 沿用模块 7 的行、分区、整表范围划分，不重复其数据修改语句目录。
-- **实验衔接：** 创建本模块小表，在操作前记录结构和内容检查结果。
+- 先明确查询热度、保留时长、迟到数据、监管例外、可接受的恢复点目标（Recovery Point Objective，RPO）和恢复时间目标（Recovery Time Objective，RTO）。
+- 将生命周期拆成四个决策：减少每份数据的存储成本、创建可管理的时间范围、让旧范围退出在线表、为误删或集群损失准备恢复路径。
+- 回顾模块 4 的 Partition 与 Bucket：Partition 是本模块执行保留和恢复的业务范围，Bucket/Tablet 仍是分布与副本单位。
+- 回顾模块 7 的行级更新、删除、`TRUNCATE` 与 `INSERT OVERWRITE`，本模块不再重复数据修改语法目录。
+- **实验衔接：** 选择前置模块已清洗事件表的有界一天作为压缩输入，只复制到 Module 10 自有表，不修改来源。
 
-#### 10.2 在保持数据约定的前提下演进表结构
+#### 10.2 先理解 Doris 在哪里压缩数据
 
-**需求场景：** 新报表属性需要同时适用于旧行和新写入。
+**需求场景：** 同一批事件需要更少磁盘空间，但报表仍要读取相同的列和值；团队要先判断更紧张的是存储与读取 I/O，还是查询时的解压 CPU，再决定是否偏离默认设置。
 
-- 根据可空性和默认值语义，选择兼容的 Value column 新增操作。
-- 如果变更以后台任务运行，区分语句被接受与任务完成。
-- 讨论 Key、分布、索引、物化视图依赖，不承诺任意类型变更或 Table Model 转换。
-- **实验衔接：** 执行一个受支持的新增操作，检查变更后的结构及新旧行行为；只有实际产生任务时才轮询任务。
+- Doris 先按列组织数据并应用字典编码、Run-Length Encoding（RLE）等编码，再按 Page 使用压缩算法；查询只解压实际读取的 Page。
+- 避免把编码简化成“整列只保存一次值，再让所有行指向它”。字典编码可以把重复完整值映射为较短编号，RLE 可以记录连续相同值及重复次数；具体编码由存储层按数据特征选择。Page 压缩则在编码后的字节上寻找重复片段，因此两层收益可能同时存在。
+- 区分两层机会：`event_type` 只有 `cart`、`purchase` 两个完整取值，列编码可能高效表示重复值；`event_context` 的完整字符串因 `event_id` 不同而逐行唯一，JSON 字段名及消息文本仍反复出现，Page 压缩可以利用重复的字节片段。高重复值不等于任何压缩算法都会取得固定的表级压缩率；完整值唯一也不等于 Page 压缩没有收益。
+- 说明 Page 尺寸、列编码方式、Segment/Tablet 的索引及元数据等开销都会影响小表的报告大小；表级报告无法隔离某一列节约的字节，也不能推断 CPU 或查询速度。
+- 说明 4.1.3 所属版本从 4.0.3 起默认使用 Zstandard（ZSTD）；仍以本地 `SHOW CREATE TABLE` 和实际构建验证为准。
+- 比较 `LZ4`/`LZ4F`、`LZ4HC`、ZSTD、Snappy、Zlib 与不压缩的主要权衡：压缩和写入成本、解压 CPU、读取字节与存储占用。官方算法列表将其记为 `none`，但本地 `doris-4.1.3-rc02-7126cf65d96` 建表实测接受并回显的属性值是 `NO_COMPRESSION`；Lab 使用实测值。
+- 明确 Doris 通过表级 `PROPERTIES ("compression" = "...")` 选择算法；不能把 ClickHouse 每列 `CODEC(...)` 示例翻译成 Doris DDL。
+- 给出场景决策：没有代表性证据时保留默认 ZSTD；频繁读取且解压 CPU 已经成为瓶颈时，尝试 LZ4F 并测量查询 CPU、时延及额外存储/I/O；存储或读取 I/O 昂贵时优先验证 ZSTD 的实际节省。`NO_COMPRESSION` 是对照而非普遍建议。不要只凭算法名称或实验中的压缩率承诺性能。
 
-官方参考：[表结构变更](https://doris.apache.org/docs/4.x/table-design/schema-change/)。
+官方参考：[数据压缩](https://doris.apache.org/docs/4.x/table-design/column-compression/)、[FE `default_compression_type`](https://doris.apache.org/docs/4.x/admin-manual/config/fe-config/)。
 
-#### 10.3 选择分区应在何时创建
+#### 10.3 用相同逻辑数据比较压缩选择
 
-**需求场景：** 近期数据日期可预测，但回填可能包含很早的日期。
+**需求场景：** 团队需要决定是否偏离默认 ZSTD，而不是只根据算法介绍做选择。
 
-- 比较手动边界、由导入值驱动的 Auto Partitioning，以及由时钟驱动的 Dynamic Partitioning。
-- 在模块 4 自动分区示例之上，新增“创建与保留分别如何管理”的选择问题。
-- 检查调度器实际时区和执行间隔。
-- **实验衔接：** 用本地生成、相对当前时间的日期观察动态分区创建，不直接使用基线中的 2019–2020 年时间戳。
+- 控制变量：列、Table Model、Key 顺序、Partition、Bucket、输入行、导入批次和副本数保持相同，只改变 `compression`。
+- 用同一批确定性 `INSERT ... SELECT` 输入和相同的行数核对比较对象；本实验不为三张副本重复展示相同的业务汇总查询。
+- 压缩对照必须从空表装入同一批确定性输入，不能在已有数据上重复追加后继续比较。具体的清理、重建和导入顺序属于 Lab 的可重跑设计，Course 只说明为什么输入批次和装载次数必须一致。
+- 从同一天的 `events_modelled` 确定性生成一个结构化事件日志 `event_context`：`event_id` 让完整字符串逐行不同，而 JSON 字段名、消息文本等字节模式反复出现。用 `COUNT(DISTINCT ...)` 验证“完整值不重复”，再用表级存储报告比较这种输入下不同 Page 压缩设置的整体结果；不能只靠该报告把收益归因于 `event_context`，也不能只靠不同取值数量预测压缩比。Doris 不照搬 ClickHouse 的 `system.parts_columns`、Compact/Wide Part 或逐列 Codec 实验。
+- 用 `SHOW CREATE TABLE` 确认声明的算法；用 `SHOW DATA`、`SHOW PARTITIONS` 或 `SHOW TABLETS` 读取 Doris 报告的压缩后存储大小和副本范围。
+- 解释 `SHOW DATA` 的 Size 包含副本，比较单副本小表时仍可能受文件头、索引、Segment 数和元数据上报延迟影响。
+- 不把一次小数据结果写成普遍压缩率，也不使用共享容器上的单次查询时间给算法排名。
+- **实验衔接：** 只用 `NO_COMPRESSION`、`LZ4F` 与 `ZSTD` 三张对照表，均装入相同事件和相同的生成日志文本；先展示两个 `event_type` 的值及频数、完整日志值逐行不同但前缀共享，再核对行数和报告大小，最后判断差异足以支持哪一种存储判断、尚不足以支持哪一种 CPU/时延判断。`NO_COMPRESSION` 仍保留列编码及表结构开销，不等于原始行字节数；实验文本是教学构造，不代表实际生产事件的压缩率。
 
-官方参考：[自动分区](https://doris.apache.org/docs/4.x/table-design/data-partitioning/auto-partitioning/)、[动态分区](https://doris.apache.org/docs/4.x/table-design/data-partitioning/dynamic-partitioning/)。
+官方参考：[SHOW DATA](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/table-and-view/data-and-status-management/SHOW-DATA/)。
 
-#### 10.4 保留滚动窗口，同时保护必要历史数据
+#### 10.4 把“TTL”翻译成 Doris 的完整分区保留
 
-**需求场景：** 系统应淘汰完整旧范围，但保留约定的历史例外。
+**需求场景：** 只保留最近若干天的在线事件，同时预先准备未来写入范围。
 
-- 按分区边界定义策略，不把它解释为每一行独立计算年龄。
-- 说明调度延迟、历史保留例外和迟到数据行为。
-- 检查实际分区：修改属性成功不能证明清理已经执行。
-- **实验衔接：** 使用少量相对日期样本和有界轮询。调度间隔调整只允许发生在隔离环境。
-- 不能将其等同于 ClickHouse 行级 TTL，也不能在共享历史表上启用该实验策略。
+- Manual Partitioning 适合边界由业务显式控制的场景；Auto Partitioning 根据到达的数据值创建缺失 Partition；Dynamic Partitioning 根据当前时钟滚动创建未来 Partition 并删除窗口外的历史 Partition。
+- Auto Partitioning 是当前文档推荐的自动建分区方式，但它本身不按时钟删除旧范围；滚动保留仍需 Dynamic Partitioning 或外部管理流程。
+- Doris Dynamic Partitioning 支持单个 `DATE`/`DATETIME` Range Partition Key；课程按完整 Partition 解释保留，不描述逐行 TTL。
+- ClickHouse 行 TTL、列 TTL、默认值替换和 `MATERIALIZE TTL` 只作为差异对照，不进入 Doris SQL 示例。
+- **实验衔接：** 使用相对当前时钟生成的小型事件表，避免把固定历史日期直接放入今天的动态窗口。
 
-#### 10.5 区分数据移除与可恢复的对象删除
+官方参考：[手动分区](https://doris.apache.org/docs/4.x/table-design/data-partitioning/manual-partitioning/)、[自动分区](https://doris.apache.org/docs/4.x/table-design/data-partitioning/auto-partitioning/)、[动态分区](https://doris.apache.org/docs/4.x/table-design/data-partitioning/dynamic-partitioning/)。
 
-**需求场景：** 操作者可能需要清空范围、替换范围或删除其定义，并想知道是否可以撤销。
+#### 10.5 定义滚动窗口并处理迟到数据
 
-- 简要对照模块 7 的清空、覆盖，与删除 Partition 或表的区别。
-- 回收站恢复面向符合条件的已删除对象，不是对行删除、upsert 或清空操作的通用撤销。
-- 说明 `FORCE`、过期、同名冲突和操作特有限制；不能暗示所有自动保留策略造成的删除都能恢复。
-- **实验衔接：** 使用单独手动管理的恢复样本表，而不是动态分区样本表，执行不带 `FORCE` 的删除与恢复流程。
+**需求场景：** 保留昨天到今天的数据、预建明天的范围，同时保留一个业务指定的历史例外。
 
-#### 10.6 按预期内容验证恢复
+- `dynamic_partition.time_unit` 决定按小时、日、周、月或年滚动；`start` 决定最早保留偏移，`end` 决定预创建到未来多远。
+- `dynamic_partition.time_zone` 决定“今天”的计算基准；周/月边界还受起始日配置影响。
+- `create_history_partition` 控制首次创建时是否补齐窗口内历史 Partition；它不同于迟到数据到达后任意创建窗口外 Partition。
+- `reserved_history_periods` 用于保留明确的历史时间范围，但不能替代完整归档策略。
+- 分析三种迟到数据：仍落在现存 Partition、落在保留例外、落在已删除且不会自动重建的范围。第三种写入不能假定成功。
+- **实验衔接：** Course 用按日保留解释业务选择；Lab 为了观察时间自然推进，使用小时分区和一个位于保留边界的标记事件，先展示小时边界与行归属，再于下一个整点之后观察最旧 Partition 被调度器移除；单独验证一个窗口外迟到写入的实际错误。具体 `start` 值和事件 ID 留在 Lab 大纲中。
+- 强调动态策略删除的是整个时间 Partition，不是只删除用于观察边界的标记行；其他落在同一小时范围内的行会一起退出在线表。
 
-**需求场景：** 删除的对象重新出现，但仍需核实其中的业务数据。
+#### 10.6 分开验证配置、调度和过期结果
 
-- 恢复前检查可恢复对象身份和资格。
-- 恢复后检查结构、已知标识、数量和指标。
-- 区分命令成功与业务恢复验证成功。
-- **实验衔接：** 只操作本模块的 Partition 或表，绝不删除共享数据库或清空全局回收站。
+**需求场景：** `ALTER TABLE` 已成功，但旧 Partition 仍然可见。
 
-官方参考：[回收站恢复](https://doris.apache.org/docs/4.x/admin-manual/data-admin/recyclebin/)。
+- `ALTER TABLE ... SET` 成功只证明属性被接受；Dynamic Partition 调度线程按 `dynamic_partition_check_interval_seconds` 周期执行，不保证立即变化。
+- `time_unit` 最细是 `HOUR`，不能配置“只保留几分钟”的 Partition 窗口。Lab 采用真实的整点滚动，不修改 FE 检查间隔；调度周期仅影响越过整点后任务何时执行，不能改变小时 Partition 的保留边界。具体运行值必须从目标环境读取，不写成课程中的固定常量。
+- 用 `SHOW DYNAMIC PARTITION TABLES` 检查 Enable、State、LastSchedulerTime、LastCreatePartitionMsg 和 LastDropPartitionMsg。
+- 用 `SHOW PARTITIONS` 检查实际 Partition 集合，用 SQL 检查仍可见的业务日期与指标；三类证据分别回答不同问题。
+- 实验把一个事件放在当前滚动窗口的最早小时，显示其所属完整小时与下一整点的最早到期时刻；暂停 Notebook 后，学员可在该时刻之后回来并重新连接。helper 先判断是否已跨过整点：未到时提示返回时间，不长时间阻塞；跨过后才进行有界的调度等待。再次执行相同 `SELECT` 并检查实际 Partition 集合，策略不变，也不执行手动 `DROP PARTITION` 或修改全局 FE 配置。
+- 区分两个时刻：跨过下一整点只表示最旧 Partition 已经处于窗口之外；真正从在线表消失还要等 Dynamic Partition 调度器运行。计时器只在已经满足到期条件后等待调度，超时给出最后状态，不无限轮询，也不把等待时长解释为 TTL 精度。
+- Partition 从查询结果消失不证明磁盘空间立即回收。回收站保留和后台清理可能继续占用空间，实验不声称观察到具体 Rowset、Segment 或回收字节。
+- Doris 没有本实验可调用的 `MATERIALIZE TTL` 等价命令；不能为了模仿 ClickHouse 强制 Compaction。
 
-#### 10.7 解释维护状态，不虚构内部证据
+#### 10.7 将冷热分层作为部署选择，而不是本地假演示
 
-**需求场景：** 查询结果正确，但版本、存储使用或任务状态显示潜在压力。
+**需求场景：** 近期数据需要本地高速介质，较老数据需要更低成本的存储。
 
-- 将小批次写入压力与已讲过的 Group Commit、Compaction 联系起来。
-- 区分精确查询计数与报告元数据，分别解释任务状态、保留版本和磁盘使用。
-- 使用观察结果指导排查，不据此声称精确 Rowset/Segment 数量或物理空间回收。
-- **实验衔接：** 检查本模块操作前后的元数据；不强制 Compaction、不执行无界写入基准，也不承诺观察到空间回收。
+- 本地 SSD/HDD 分层通过 Partition 的 `storage_medium` 与 `storage_cooldown_time` 表达，前提是 BE 实际配置了不同介质的数据路径。
+- 本地到远端的分层通过 Resource、Storage Policy 与 `cooldown_ttl` 把冷数据迁移到 S3 兼容存储或 HDFS；远端数据可靠性依赖外部存储自身保障。
+- Storage Policy、Table Model、备份恢复和存算分离模式之间存在限制，设计时必须重新核对当前版本。
+- Module 10 Lab 不访问 AWS S3、不创建远端 Resource，也不把同一 Docker 文件系统上的多个目录称为冷热介质；课程用选择场景和官方架构图解释这一能力。
 
-#### 10.8 选择超出在线副本能力的数据保护方式
+官方参考：[本地/远端冷热分层](https://doris.apache.org/docs/4.x/table-design/tiered-storage/remote-storage/)、[Partition 属性](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/table-and-view/table/ALTER-TABLE-PARTITION/)。
 
-**需求场景：** 错误已传播到所有副本，或整个集群丢失。
+#### 10.8 在自动保留之外建立恢复边界
 
-- 比较在线副本、回收站恢复、独立保留的快照，以及从权威来源重放。
-- 将备份频率和恢复验证与 RPO、RTO 联系起来。
-- 说明范围与依赖：当前文档不将异步物化视图纳入备份，恢复后还需关注共置和动态分区配置。
-- 基础计划只讲备份恢复概念，不访问 AWS S3 或部署备份仓库。本地仓库扩展需要另行确定范围并验证。
+**需求场景：** 旧 Partition 被错误删除，或错误已经传播到所有在线副本。
 
-官方参考：[备份恢复能力与限制](https://doris.apache.org/docs/4.x/admin-manual/data-admin/backup-restore/overview/)。
+- 在线副本解决节点故障，不撤销已提交并复制的错误操作。
+- 对不带 `FORCE` 的 Database、Table 或正式 Partition 删除，Doris 将对象放入回收站；先用 `SHOW CATALOG RECYCLE BIN` 确认对象身份和保留资格，再选择 `RECOVER`。FE 参数 `catalog_trash_expire_second` 的官方默认值是 **86400 秒（24 小时）**，本地 4.1.3 沙箱当前值也是 `86400`；实际部署可以修改，条目也可能被主动清理，不能把“默认一天”当作恢复保证。`DROP ... FORCE` 绕过这条可恢复路径，不能靠 `RECOVER` 撤销该次强制删除。
+- 区分两种删除用途：Lab 初始化可以对自己拥有的旧沙箱对象执行不可恢复的 FORCE 清理，以确保实验可重跑；正式恢复演示必须对目标 Partition 使用不带 `FORCE` 的删除，再查回收站并恢复。不能从初始化清理方式推导生产删除建议，具体对象名留在 Lab 大纲中。
+- 同名对象、对象 ID、保留时间、权限和 `FORCE` 会影响恢复结果；恢复命令成功后仍需核对结构、已知标识、行数和指标。
+- Lab 故意不预先保存 Partition ID，并在受控环境中按名称恢复最近删除的目标 Partition，用来证明“不知道 ID 仍可能恢复”；Course 必须同时说明同名历史条目会产生歧义，真实事故应在回收站中结合 TableId、PartitionId 与 DropTime 选择目标。
+- 不承诺 Dynamic Partition 自动淘汰的每个对象都能作为操作流程依赖回收站恢复；实验恢复使用单独的手动 Partition，和调度器样本分开。
+- 回收站不是备份。跨集群恢复或整个集群丢失需要 Repository Snapshot 或从权威来源重放，并根据 RPO/RTO 定期验证。
+- 基础实验不创建备份仓库；课程只说明当前 Doris 备份恢复的部署限制、异步物化视图、Storage Policy、Colocation Group 和动态分区恢复后的额外工作。
 
-### 模块 10 实验：管理结构、保留范围与对象恢复
+官方参考：[RECOVER](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/recycle/RECOVER/)、[FE 配置](https://doris.apache.org/docs/4.x/admin-manual/config/fe-config/)、[备份恢复概览](https://doris.apache.org/docs/4.x/admin-manual/data-admin/backup-restore/overview/)。
 
-使用独立命名、可重置的一个 FE 和一个 BE 的管理环境，本地生成数据，数据库仍为 `doris_course`。它不依赖完整事件基线、模块 9 持续运行或外部存储。
+### 模块 10 实验：比较压缩并验证分区生命周期
 
-拟按以下四个主体步骤组织，具体操作和预期结果仍待验证：
+实验文件：[Lab 10 Notebook](module10-managing-data/lab10_manage_data.ipynb)。实验使用 Level 1–8 的单节点 `doris` 和 `doris_course`，不要求 Module 9 多节点集群运行；只读 `events_modelled` 的一天范围，其他数据均在本地生成。所有可变对象使用 `m10_*` 名称，不访问 AWS S3。以下编号严格对应 Notebook 的执行顺序。
 
-1. **演进表结构并核对新旧行**：在自有样本表上执行一个受支持的 Value column 新增操作，检查变更后的定义、旧行取值和新写入行为。如果操作产生后台任务，则检查其完成状态；不把语句被接受等同于任务完成，也不推断所有结构变更都立即完成或没有成本。
-2. **建立滚动保留策略并观察实际分区**：使用相对当前日期生成的小型样本，检查 Dynamic Partition 调度器配置、状态和实际分区集合。通过有界等待比较调度前后的分区，解释历史保留例外和迟到数据边界；修改属性成功不等于清理已经发生，也不将整分区保留解释为行级 TTL。
-3. **删除并恢复手动管理的对象**：使用独立恢复样本表，对本模块的表或 Partition 执行不带 `FORCE` 的删除，检查回收站中的对象身份与恢复资格，再恢复并核对结构、已知标识、数量和指标。该步骤不删除共享数据库、不清空全局回收站，也不把对象恢复描述为对数据修改、清空或强制删除的通用撤销。
-4. **对照逻辑结果与维护元数据**：检查上述自有操作前后的查询结果和原始元数据，明确标注 Version、VersionCount、RowCount 等字段的来源和范围。区分 SQL 可见内容与存储报告值，不声称直接观察了 delete bitmap、Rowset/Segment 内部状态或物理空间回收。
+0. **Initialize the Lab。**
+   - **目的与数据环境：** 定位课程根目录并加载 `DorisLab` 与 UI helper；不启动 Docker、不连接 Doris、不修改表。内核重启后只需重新运行这里。
+   - **期望结果：** `lab` 对象创建完成，没有数据库输出。
+   - **说明：** Python 会话状态与 Doris 容器/命名卷状态彼此独立。
 
-### 测验 10 的拟议覆盖范围
+1. **Section 1A：启动单节点环境并检查压缩输入。**
+   - **目的与数据环境：** 启动或复用 `doris`，连接 `doris_course`，只读 Lab 4 的 `events_modelled` 在 `[2020-03-01, 2020-03-02)` 的行数；不修改源表。
+   - **期望结果：** 完整一天为 **75,259** 行，否则提示先完成 Lab 4。
+   - **说明：** 这建立三种压缩表共同的数据范围，只验证已知行数，不把它当作逐字段一致性证明。
 
-约六个场景，覆盖兼容结构变更、自动与动态分区、保留策略与迟到数据、恢复资格、逻辑与物理证据，以及副本和恢复目标。无需运行服务或完成实验。
+2. **Section 1B：重建并装载 `NO_COMPRESSION` 对照表。**
+   - **目的与数据环境：** `DROP ... FORCE` 仅清理旧的 Module 自有 `m10_events_none`，随后创建固定一 Partition、四 Bucket、单副本的 Duplicate Key 表，并用确定性 `INSERT ... SELECT` 为每行生成 `event_context`；完整字符串因 `event_id` 唯一，但 JSON key 与说明文本重复。
+   - **期望结果：** `m10_events_none` 提交 **75,259** 行，表属性为 `NO_COMPRESSION`。
+   - **说明：** `NO_COMPRESSION` 仍保留 Doris 列编码，只跳过 Page 压缩，因此它是 Page 压缩对照，不是源文本原始字节大小。
+
+3. **Section 1C：以相同结构和输入重建 `LZ4F` 表。**
+   - **目的与数据环境：** 单独删除、创建和装载 `m10_events_lz4f`；列、Key、Partition、Bucket、副本与生成 SQL 均与 baseline 相同，只把表级 compression 改为 `LZ4F`。该代码框可单独重跑，但三个建表代码框不是一个跨表原子事务。
+   - **期望结果：** `m10_events_lz4f` 提交 **75,259** 行。
+   - **说明：** 控制表结构和输入后，后续报告大小差异才可用于比较当前 Page 压缩选择。
+
+4. **Section 1D：以相同结构和输入重建 `ZSTD` 表。**
+   - **目的与数据环境：** 单独删除、创建和装载 `m10_events_zstd`，唯一实验变量为表级 `ZSTD`；它也是当前构建的 FE 默认压缩类型。
+   - **期望结果：** `m10_events_zstd` 提交 **75,259** 行。
+   - **说明：** 当属性等于默认值时，`SHOW CREATE TABLE` 可能省略显式 property，helper 需结合 FE `default_compression_type` 解析有效算法。
+
+5. **Section 1E：观察低基数列值与唯一字符串中的共同字节。**
+   - **目的与数据环境：** 在 `m10_events_none` 上按 `event_type` 分组，显示行数、完整 `event_context` distinct 数以及短前缀；不删除重复行、不读取单列物理文件。
+   - **期望结果：** `cart=56,961`、`purchase=18,298`；两个类型中 `distinct_contexts=event_count`，完整字符串全部不同，但示例前缀中的 `source/schema/pipeline/message` 结构相同。
+   - **说明：** `event_type` 的少量取值可先受列编码影响；完整字符串不重复仍可因相同字节模式受 Page 压缩。该查询不能证明 Doris 选择了哪种内部编码，也不能给出逐列压缩比。
+
+6. **Section 1F：等待元数据并比较三张表的存储报告。**
+   - **目的与数据环境：** 先用 SQL 确认三表可查询，再有界等待 `SHOW DATA` 报告 75,259 行和非零大小；汇总有效算法、解析来源、逻辑行、报告大小、Partition、Tablet、副本和相对 `NO_COMPRESSION` 的节省比例。
+   - **期望结果：** 三行均为 75,259 行、一 Partition、四 Tablet、单副本，effective compression 分别为 `NO_COMPRESSION`、`LZ4F`、`ZSTD`；本地验证中 LZ4F 与 ZSTD 都明显少于 baseline，但具体大小和百分比允许变化。
+   - **说明：** 这是整表、当前布局和当前元数据快照的存储报告，不能把差异全部归因到 `event_context`，也不能据此推断 CPU、延迟或通用压缩率；是否修改默认值仍需代表性生产数据和工作负载测试。
+
+7. **Section 2A：创建五个小时 Partition 的 Dynamic Partition 窗口。**
+   - **目的与数据环境：** 设置 Doris 会话和动态分区时区为 `Asia/Shanghai`，强制删除重建 Module 自有 `m10_retained_events`；配置 `time_unit=HOUR`、`start=-3`、`end=1`、`create_history_partition=true`，并等待五个初始 Partition。该步骤开始一次新的时钟观察，返回后不能重跑。
+   - **期望结果：** 当前表拥有“前三个完整小时 + 当前小时 + 下一小时”共五个 Range Partition。
+   - **说明：** 规则管理完整小时边界，不是从每行写入时刻开始的精确三小时 TTL；设置相同的会话和调度时区避免边界解释不一致。
+
+8. **Section 2B：插入三个时间标记并记录最早过期边界。**
+   - **目的与数据环境：** 向刚创建的窗口插入 `NOW()-3 HOUR`、`NOW()-2 HOUR` 和 `NOW()` 三条已知事件；查询事件 `1001` 的实际时间与 `eligible_at`，并显示调度状态及每个 Partition 的半开边界和行数。
+   - **期望结果：** 三行写入成功；`1001` 位于最旧保留小时，`eligible_at` 是下一整点；五个 Partition 中三个各有一行，另两个为空，具体名称与时间随运行时刻变化。
+   - **说明：** 已满三小时的事件仍可在线到其整个小时 Partition 越过窗口且调度器完成检查，证明 Dynamic Partition 是整段生命周期管理。
+
+9. **Section 3A：跨整点后有界等待自动删除。**
+   - **目的与数据环境：** 学员可关闭 Notebook 或重启内核，但必须保留容器/卷且不能重跑 Section 2；回来后启动或复用 `doris`、重新连接并恢复时区。若尚未到 `eligible_at`，helper 显示准确返回时间并停止；越过边界后最多等待 900 秒，显示实时计时器，不修改 FE 检查间隔、不改 `start`、不手动 DROP。
+   - **期望结果：** 已删除时立即成功；尚未删除时计时器在调度器移除最旧 Partition 后结束；超时会给出最后状态而不是无限阻塞。
+   - **说明：** 计时测的是整点后等待调度器运行的时间，不是三小时行级 TTL，也不是物理空间回收耗时。
+
+10. **Section 3B：用相同 SQL 与 Partition 状态确认逻辑过期。**
+    - **目的与数据环境：** 再次按 `event_id=1001` 查询，读取 Dynamic Partition 调度状态和当前 Partition 窗口；不执行任何删除命令。
+    - **期望结果：** `1001` 返回零行，原最旧小时已不在 Partition 列表中；若只跨一个小时，`1002/1003` 通常仍在线，离开更久时允许更多完整小时过期。
+    - **说明：** SQL 答案与实际边界证明该时间范围已不在线，调度状态只证明调度器观察；这仍不能证明所有 BE 物理字节已立即回收。
+
+11. **Section 3C：尝试写入窗口之外的迟到事件。**
+    - **目的与数据环境：** 插入当前整点前四小时的事件 `1099`，要求捕获 `no partition for this tuple`；随后显示仍在线的行。
+    - **期望结果：** 写入被拒绝，在线表中既没有已过期的 `1001`，也没有失败的 `1099`；更新事件是否仍在取决于实际离开时长。
+    - **说明：** Dynamic Partition 不会替业务决定如何处理窗口外迟到数据；业务需选择拒绝、转存或显式管理历史 Partition。
+
+12. **Section 4A：创建与调度器隔离的手动恢复样本。**
+    - **目的与数据环境：** `DROP TABLE IF EXISTS m10_recovery_events FORCE` 仅用于不可恢复地清理上次 Lab 自有旧表；随后创建手动 Range Partition 表，`p_recover` 存两行、`p_keep` 存一行，并先查询两天汇总。该表不启用 Dynamic Partition。
+    - **期望结果：** 2020-03-01 为两行、49.90；2020-03-02 为一行、9.95。
+    - **说明：** 独立手动表避免自动调度改变恢复样本；初始化的 FORCE 清理和下一步正式的不带 FORCE 误删必须区分。
+
+13. **Section 4B：不带 `FORCE` 删除 Partition，并在事后查询回收站。**
+    - **目的与数据环境：** 执行 `ALTER TABLE ... DROP PARTITION p_recover`，不预先记录 Partition ID；删除后先查询在线汇总，再按名称执行 `SHOW CATALOG RECYCLE BIN`，展示 Type、TableId、PartitionId 与 DropTime。
+    - **期望结果：** 在线只剩 2020-03-02 的一行 9.95；回收站至少包含一个名为 `p_recover` 的 Partition 条目，可能还包含旧运行的同名历史条目。
+    - **说明：** 不带 FORCE 的手动 Partition 删除进入有限期回收路径；默认 `catalog_trash_expire_second=86400` 只是当前恢复窗口默认值，不是保证。生产事故必须结合 ID 与时间确认目标。
+
+14. **Section 4C：在未预先保存 ID 的情况下按名称恢复。**
+    - **目的与数据环境：** 在刚刚完成的隔离实验中执行不带 ID 的 `RECOVER PARTITION p_recover FROM m10_recovery_events`，再查询两天完整汇总。该设计有意选择同名对象中最近删除的条目。
+    - **期望结果：** 恢复后重新得到 2020-03-01 两行 49.90 和 2020-03-02 一行 9.95。
+    - **说明：** “不知道 ID 也可能恢复”依赖目标恰是最近删除且条目仍有效；若同名历史复杂，应使用回收站 ID 精确选择。`DROP ... FORCE`、行级 DELETE、自动淘汰和整集群丢失不能套用此恢复结论，回收站也不是独立备份。
+
+15. **Stop、Restart 与 Lab complete。**
+    - **目的与数据环境：** 可选停止单节点 `doris` 释放资源，同时保留容器、镜像、FE/BE 命名卷和全部 `m10_*` 对象；幂等重启后重新连接并检查三张压缩表与恢复表。
+    - **期望结果：** 停止后为 `exited`；重启后为 `healthy`，三张压缩表各 **75,259** 行，`m10_recovery_events` 为 **3** 行。
+    - **说明：** 停止/重启验证本地命名卷持久化，不证明备份、跨集群恢复或冷热介质迁移；结尾 `Lab complete` 用一段话回顾压缩选择、小时保留、迟到数据和回收站恢复，不使用证据汇总表格。
+
+### 实验 10 的证据边界
+
+- 相同的确定性插入 SQL 和行数核对支持受控比较；不把行数相同当作逐行相等的独立证明。`SHOW CREATE TABLE` 与 FE 默认值确定有效算法；存储元数据只说明当前样本和当前布局报告的压缩后大小，不拆分逐列贡献。
+- Dynamic Partition 属性证明策略定义，调度状态证明调度器观察，`SHOW PARTITIONS` 与 SQL 结果证明某个完整范围当前是否在线；三者不能互相替代。
+- Partition 不可查询不等于物理字节已删除；回收站 Size、Tablet Size 或磁盘可用量也可能异步变化。
+- 单节点容器不能验证介质迁移、远端对象可靠性、备份恢复、并发负载或生产压缩收益。
+- Lab 只操作明确列出的 `m10_*` 对象和临时 FE 配置；共享 helper 必须在异常路径恢复原配置。
+
+### 测验 10 的已实现覆盖范围
+
+[Quiz 10 Notebook](module10-managing-data/quiz10_data_lifecycle_and_recovery.ipynb) 与 [Quiz 10 YAML](module10-managing-data/quiz10_data_lifecycle_and_recovery.yaml) 包含六道独立场景题，覆盖：
+
+1. 根据查询频率、CPU 与存储目标选择压缩侧重点。
+2. 结合 Partition、Bucket、Tablet、Replica 与 `SHOW DATA` 的统计范围，判断两张物理布局不同的表能否用于给压缩算法排名。
+3. 区分 Doris 表级压缩与 ClickHouse 列级 Codec。
+4. 在 Manual、Auto 与 Dynamic Partitioning 之间选择。
+5. 根据 `start`、`end`、时区和迟到日期预测 Partition 与写入结果。
+6. 区分属性成功、调度完成、逻辑到期、回收站恢复、物理回收和备份恢复。
+
+测验不依赖 Docker、Doris、S3 或已经运行的 Lab；每题自行提供必要的表定义、时间基准和元数据片段。
+
 
 ## 准备情况与开发前置验证
 
-本节记录开发状态，与各模块内容大纲分开。检查日期：**2026-09-21**。
+本节记录开发状态，与各模块内容大纲分开。检查日期：**2026-09-28**。
 
 ### 本地文件现状与缺失产物
 
 初始化前，Level 3 README 仅列出三个主题和隔离要求，没有模块目标、学习目标、章节顺序、数据约定、测验计划或证据矩阵。每个 `course.md` 只有标题和一句范围说明。因此不存在可以直接认可或判定过时的详细旧大纲。
 
-| 模块 | 现有内容 | 缺失产物 | 建议后续文件名 |
+| 模块 | 现有内容 | 缺失产物 | 已实现文件 |
 | --- | --- | --- | --- |
-| 8 | 课程占位内容、已验证的 Lab 8、共享 helper 支持 | 完整课程、测验 Notebook 与 YAML | `course8_accelerating_queries_in_apache_doris.md`；`quiz8_acceleration_choices.ipynb` 及 `.yaml` |
-| 9 | 课程占位内容；已实现 Lab 9、多节点 Compose 和共享 helper | 完整课程、测验 Notebook 与 YAML | `course9_sharding_and_replication_in_apache_doris.md`；`quiz9_distribution_and_availability.ipynb` 及 `.yaml` |
-| 10 | 两行课程占位内容 | 完整课程、实验、测验配套文件、管理环境配置 | `course10_managing_data_in_apache_doris.md`；`lab10_manage_data.ipynb`；`quiz10_data_lifecycle_and_recovery.ipynb` 及 `.yaml`；`compose.management.yml` |
+| 8 | 已实现英文 Course、已验证的 Lab 8、共享 helper，以及六题 Quiz Notebook 与 YAML | 无 | `course.md`、`lab8_accelerate_queries.ipynb`、`quiz8_acceleration_choices.ipynb` 及 `.yaml` |
+| 9 | 已实现英文 Course、Lab 9 三个部分、多节点 Compose、HAProxy、共享 helper，以及六题 Quiz Notebook 与 YAML；已在 Doris 4.1.3 验证 Bucket Shuffle 与 Colocate 计划 | 无 | `course.md`、`lab9_observe_sharding_and_replication.ipynb`、`quiz9_distribution_and_availability.ipynb` 及 `.yaml` |
+| 10 | 已实现英文 Course、已验证的 Lab 10、压缩/动态分区/回收站共享 helper，以及六题 Quiz Notebook 与 YAML | 无 | `course.md`、`lab10_manage_data.ipynb`、`quiz10_data_lifecycle_and_recovery.ipynb` 及 `.yaml` |
 
-以上只是建议名称，不代表文件已经存在。后续课程沿用 Level 2 的组织方式：课程信息表、模块目标、学习目标、场景主线、概念章节、实验衔接、总结和官方参考。在两个课程目录及已检查的工作区上层目录中，未发现适用的 `AGENTS.md` 或 `SKILL.md`。
+表中 Course、Lab 与 Quiz 均已创建。Quiz 沿用 Level 2 的共享 `CourseQuiz`、本地 YAML、交互式反馈和导航方式；题目独立提供所需事实，不依赖 Docker、Doris、S3、Kafka、已运行的 Lab 或系统时钟。在两个课程目录及已检查的工作区上层目录中，未发现适用的 `AGENTS.md` 或 `SKILL.md`。
 
 ### 已核验的本地资产
 
@@ -626,24 +819,24 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 | 归属模块 | 建议对象命名 | 数据来源与隔离方式 |
 | --- | --- | --- |
 | 模块 8 | `m08_events`、`m08_products`、`m08_events_unindexed`、`m08_events_indexed`、`m08_purchase_view`、`m08_sync_metrics`、`m08_async_category_metrics` | 有界本地副本及自有追加数据，不在其他模块基表上附加结构 |
-| 模块 9 | `m09_events`、`m09_events_skewed`、`m09_users`、`m09_availability_probe` | 隔离多节点环境中从只读课程 S3 源导入的有界样本；`m09_events` 与 `m09_users` 复用兼容的 `user_id` 分布 |
-| 模块 10 | `m10_schema_events`、`m10_retained_events`、`m10_recovery_events` | 隔离管理环境中的微型本地样本 |
+| 模块 9 | `m09_events`、`m09_users`、`m09_availability_events` | 隔离多节点环境中从只读课程 S3 源导入的有界样本；`m09_events` 与 `m09_users` 复用兼容的 `user_id` 分布 |
+| 模块 10 | `m10_events_none`、`m10_events_lz4f`、`m10_events_zstd`、`m10_retained_events`、`m10_recovery_events` | 单节点环境中的有界本地副本和相对当前小时的微型数据；不访问 S3 |
 
-使用明确的对象归属清单，不做通配符清理。重复运行必须处理依赖视图、未完成任务、恢复后的名称和部分完成的步骤。Module 9 只读导入课程 S3 数据的有界子集；其他模块继续遵循各自的数据边界。
+使用明确的对象归属清单，不做通配符清理。重复运行必须处理依赖视图、未完成任务、恢复后的名称和部分完成的步骤。Module 9 只读导入课程 S3 数据的有界子集；Module 10 的基础计划不访问 AWS S3。
 
 ### 共享支持的复用与缺口
 
 | 领域 | 已检查的现有支持 | 执行前需要补齐的能力 |
 | --- | --- | --- |
 | 根目录定位与界面 | 向上查找 `COURSE_ROOT`、`DorisLab`、统一青绿色样式、原始日志展示 | 继续支持从根目录启动 Jupyter 和直接在 VS Code 打开 Notebook |
-| SQL 连接 | 显式 `connect` 接受主机与端口；自动 `_require_connection` 默认 localhost:9030；假定 root 和空密码 | 重连绑定选定环境并核实身份，不能静默回退到基线环境 |
-| Docker | 网络、存储卷、健康检查基础函数、单容器 All-in-One 生命周期和 Module 9 多节点 Compose 支持 | 后续模块继续使用独立名称、端口、存储和限定范围的生命周期操作 |
-| Profile 获取 | `profiles.py` 转调 `DorisLab`；支持原始计划、Join Runtime Filter 和跨 BE 扫描任务证据 | FE HTTP 地址绑定实际协调查询的 FE，并保留查询、算子、BE host 和实例身份 |
+| SQL 连接 | 显式 `connect` 接受主机与端口；自动 `_require_connection` 默认 localhost:9030；假定 root 和空密码 | Module 9 需区分直连 FE、代理入口与实际协调查询的 FE；重连绑定选定环境并核实身份，不能静默回退到基线环境 |
+| Docker | 网络、存储卷、健康检查基础函数、单容器 All-in-One 生命周期和 Module 9 多节点 Compose 支持 | Module 9 需支持服务级 2 BE → 3 BE 启动、代理健康与可观测连接分配；Module 10 复用单节点 `doris` 的 Stop/Restart 模式；不新建模块级 Python 文件 |
+| Profile 获取 | `profiles.py` 转调 `DorisLab`；支持原始计划和 Join Runtime Filter 片段 | FE HTTP 地址不能固定为单节点 localhost:8030；经代理连接时需定位实际协调查询的 FE，并保留查询、算子、BE host 和实例身份 |
 | 扫描摘要 | `compare_profiles` 提取少量计数及固定结果别名 | 保留原始索引、物化视图、聚合、Exchange 证据，避免只取首个匹配或跨无关算子汇总全文 |
 | 元数据 | 已有 Partition/Tablet 摘要 | 保留副本放置行；不能沿用将元数据 `RowCount` 标成 `Logical rows` 的做法；精确行数使用 SQL |
 | 后台任务 | 已有 Routine Load 专用等待逻辑 | 为物化视图、索引、结构变更、保留策略和副本健康提供有界等待，显示错误及最后状态 |
 | 会话设置 | Profile 辅助函数保存并恢复多个变量 | 恢复逻辑还需覆盖初始化和采集失败，区分结果缓存与存储缓存 |
-| 测验 | `CourseQuiz.from_yaml`、独立导入、校验、导航、反馈、重试和测试 | 后续创建模块内配套文件，保留 `quiz.py` 已实现的单选按钮首行对齐 |
+| 测验 | `CourseQuiz.from_yaml`、独立导入、校验、导航、反馈、重试和测试 | Module 8–10 已创建模块内 Notebook 与 YAML；未修改 `quiz.py`，并已在真实 JupyterLab 检查单选按钮首行对齐 |
 
 实验 8 已在共享 `profiles.py` 中增加 `capture_query`、临时会话设置恢复和保留算子范围的原始扫描计数展示；继续使用现有本地 FE Profile 接口。物化视图任务等待、结果核对与选中扫描检查已整合到共享 `DorisLab`，通过参数传入表名、视图名和任务 ID，不在共享实现中硬编码模块 8 对象。Notebook 通过 `lab` 调用；任务等待按新 Job/Task ID 识别本次提交，处理失败和超时，并在重置前等待旧实验任务结束。模块目录不再包含 Python 支持文件。多节点地址隔离等后续缺口仍需处理。缺失计数不填零，不累加 MergedProfile 与 DetailProfile。
 
@@ -656,17 +849,17 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 | 主题 | 范围决定 |
 | --- | --- |
 | Prefix Index、裁剪、手动汇总重建 | 仅作前置回顾，模块 8 新增持续维护的物化结果与二级索引选择 |
-| 所有逻辑 Join 和分布提示 | 模块 6 已覆盖，模块 9 重点是放置和可用性 |
-| upsert、部分列更新、MERGE、清空、覆盖 | 模块 7 已覆盖，模块 10 新增生命周期与恢复 |
+| 所有逻辑 Join 和分布提示 | 模块 6 已覆盖，模块 9 只对照本场景的 Bucket Shuffle 与 Colocate 实际计划 |
+| upsert、部分列更新、MERGE、清空、覆盖 | 模块 7 已覆盖，模块 10 新增压缩、分区级保留与恢复边界 |
 | ClickHouse Projections、MergeTree parts/granules、插入数据块触发的物化视图 | 不改名当作 Doris 机制，不假设历史回填语义相同 |
 | Keeper、ReplicatedMergeTree、Distributed 表、`ON CLUSTER` | 不将其部署和 SQL 模型照搬到 Doris FE/BE 与 Tablet 副本 |
-| ClickHouse 行级 TTL、`OPTIMIZE FINAL` | 不用来描述 Dynamic Partition 保留或 Doris Compaction |
+| ClickHouse 列级 Codec、行级/列级 TTL、`MATERIALIZE TTL`、`OPTIMIZE FINAL` | 不用来描述 Doris 表级压缩、Dynamic Partition 保留或 Doris Compaction |
 | “三个副本就代表高可用” | 还需核对放置、完整版本、写入策略、FE 可用性和故障域 |
 | “视图存在，所以查询已加速” | 必须同时有计划选用、实际工作量和正确结果的证据 |
-| 完整故障切换、物理空间回收、生产网络性能排名 | 不属于基础实验可宣称的结果 |
-| 云端冷热分层、外部目录、跨集群复制、备份仓库 | 作为未来可选范围，本轮不部署 |
+| 跨主机或生产级故障切换、物理空间回收、生产网络性能排名 | 多容器环境只验证受控 FE/BE 停机、代理新连接分配、BE 副本再平衡与追赶，不扩展为这些结论 |
+| SSD/HDD 与远端冷热分层、外部目录、跨集群复制、备份仓库 | 课程说明能力与限制，基础 Lab 不部署 |
 
-本地 `ClickHouse101.pdf` 共十页，第 8–10 页描述模块 8 的加速和模块 9 的分布。模块 10 只在目录中出现，没有详细笔记。因此它可以支持总体顺序参考，不能直接提供模块 10 大纲。本次检查未能通过网页读取工具获取 [ClickHouse 学习网站](https://learn.clickhouse.com/)，不声称已检查其当前课程。Doris 机制以本文链接的官方资料为依据。
+本地 `ClickHouse101.pdf` 共十页，第 8–10 页描述模块 8 的加速和模块 9 的分布，模块 10 只在目录中出现。2026-09-21 已进一步读取 [ClickHouse Academy 当前学习路径](https://learn.clickhouse.com/real-time-analytics-with-clickhouse)及两份公开 Lab：Module 10 包含 Compression、TTL、配置压缩 Lab 和配置 TTL Lab。上文只借鉴问题顺序与实验方法；ClickHouse 的 Part、列级 Codec、行级/列级 TTL 和 `MATERIALIZE TTL` 不作为 Doris 能力。Doris 机制以 4.x 官方文档和本地 4.1.3 验证为准。
 
 ### 版本敏感事项验证清单
 
@@ -696,6 +889,47 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 - RANDOM 分布的 `m09_users` 与按 `user_id` 分布的事件输入实际选择 `INNER JOIN(BUCKET_SHUFFLE)`；用相同 6,706 个用户重建为稳定 Colocation Group 后，相同业务答案的计划选择 `INNER JOIN(COLOCATE)`，且 Join 两侧扫描之间不再出现输入 Exchange。
 - 结尾使用 `docker compose stop/start` 释放和恢复进程，保留隔离集群数据，并检查事件表、用户表和停机写入事件。以上不证明共享 Docker 宿主机上的生产级无中断、跨主机故障域或性能扩展比例。
 
+#### 实验 10 已验证范围（截至 2026-09-22）
+
+- 在单节点 `doris` 环境中只读 `events_modelled` 的 `[2020-03-01, 2020-03-02)`：75,259 行、收入 5,670,241.29；三张 `m10_*` 压缩表的完整行数与收入一致。
+- 当前构建拒绝 `compression = NONE`，接受并回显 `NO_COMPRESSION`；`LZ4F` 显式回显，显式创建的 `ZSTD` 因等于 FE `default_compression_type` 而在规范化后的 `SHOW CREATE TABLE` 中省略，helper 使用 FE 默认值解析有效算法。
+- 原先只复制事件列时，相同一个 Partition、四个 Tablet 和单副本样本的一次报告值分别为 `NO_COMPRESSION` 849.246 KB、`LZ4F` 848.231 KB 和 `ZSTD` 797.770 KB；这一组小差异是修改教学数据设计的原因，已不再作为当前 Notebook 的预期结果。
+- 用当前 Notebook 相同的 DDL 和 `INSERT ... SELECT`（只替换为临时测试表名）在本地 4.1.3 验证：每张表仍为 75,259 行，`event_context` 有 75,259 个不同的完整字符串；`SHOW DATA` 的一次报告值分别为 `NO_COMPRESSION` 18.022 MB、`LZ4F` 2.415 MB、`ZSTD` 1.856 MB。测试表已清理。Notebook 不固定这些大小，不把教学构造文本的压缩效果推广到生产，也不比较单次查询时间。
+- 先前按日版本曾在 `Asia/Shanghai` 使用 `start=-2`、`end=1` 创建四个分区；收紧到 `start=-1` 后由调度器移除最旧分区。该历史验证**不等于**新设计已跨整点完整运行通过。
+- 先前按日版本临时将 `dynamic_partition_check_interval_seconds` 设为 5，并在成功或异常时恢复；当前按小时自然过期版本已不修改该全局配置。已在本地验证 `SET time_zone = 'Asia/Shanghai'` 与小时截断 SQL，但尚未等待真实整点完成整本 Notebook 回归。
+- 先前按日版本验证过窗口外迟到写入返回 `no partition for this tuple`；当前按小时迟到写入仍待新流程完整验证。
+- 在独立手动分区表上不带 `FORCE` 删除 `p_recover`，删除后按名称检查回收站，再以省略 ID 的 `RECOVER PARTITION` 恢复最近删除的同名对象；恢复后已知两日行数和收入全部一致。Notebook 提醒在真实事故中核对所属表、Partition ID 和删除时间以避免同名歧义。
+- 原版 Notebook 的核心单元、可选 Stop/Restart 与持久化核对曾完整执行通过；新的生成文本压缩对照已单独在本地验证，但修改后的 Notebook 尚未整本重跑。模块目录没有新增 Python 支持文件。
+
+以上不证明 Partition 离开在线表后物理字节立即回收，也不验证 SSD/HDD 迁移、远端对象存储、备份仓库或跨集群灾难恢复。
+
+| 领域 | 编写预期结果前必须完成的本地验证 |
+| --- | --- |
+| 运行版本 | FE 和全部 BE 构建；当前候选发布构建与正式版本标签的区别；镜像兼容性和架构 |
+| 同步物化视图 | 支持的模型、表达式、聚合；初始任务状态；历史与新增数据覆盖；扫描索引标签；依赖清理 |
+| 异步物化视图 | 构建与刷新语法；任务检查方式；完成条件；源表和维度变化；直接查询新鲜度；改写与过期控制 |
+| 查询改写 | 满足与不满足条件的计划、粒度、聚合推导和谓词；提示不能保证实际选用 |
+| 倒排索引 | 类型与谓词、不分词语义、创建与历史数据 `BUILD INDEX` 的区别、完成元数据和实际计数 |
+| BloomFilter | 谓词、类型、历史覆盖；当前文档指出 4.1.2 起 `CHAR` 行为变化，示例采用前需核实当前构建 |
+| 统计信息与缓存 | 采集和检查语法、会话变量及默认值、失败时恢复 |
+| Query Profile | 查询 ID、HTTP 格式、采集级别、算子名称、单位、合并与逐实例范围；避免合并与明细重复计数 |
+| 多节点 | 官方 `multi-node.yml` 与 `all-in-one-4.1.3` 的兼容性；初始 3 FE + 2 BE 到 3 FE + 3 BE 的服务级启动和自动注册；`client` 三 BE 健康检查的时序；FE 代理镜像、健康检查、连接分配、失败会话重连和端口资源；Compose v2 与 `stop/start` 数据生命周期 |
+| 副本 | 双副本事件表与三副本事件小表的解析配置、默认多数写入门槛及 `min_load_replica_num`；新 BE 加入后的自动均衡是否对小表发生、具体迁移和等待上限；停机写入与返回节点版本追赶 |
+| 分布与共置 | 副本放置与本次查询选中的 Tablet 副本；Profile 中实际参与扫描的 BE；Bucket Shuffle 在单分区查询中的 4.1.3 计划、Broadcast 回退、Colocation Group 稳定性；新增 BE 不等于旧数据重新分桶 |
+| 压缩 | 4.1.3 接受的 `compression` 值、默认算法、`SHOW CREATE TABLE` 输出、相同数据的报告大小、元数据更新延迟与副本计数范围 |
+| 动态分区 | 属性、调度状态与间隔及时区、起止边界、历史与例外、迟到数据、错误、实际到期处理 |
+| 回收站 | 不带 `FORCE` 的恢复资格、保留时间、身份与同名冲突、权限、分区兼容性、自动删除差异、恢复后内容 |
+| 维护 | 报告值与延迟字段、Version/VersionCount/RowCount 范围；不能推断精确 Rowset/Segment 或回收字节 |
+| 备份 | 后续扩展前重查支持架构、对象和恢复依赖；基础计划不访问仓库 |
+
+已只读观察到的本地配置：
+
+- `dynamic_partition_enable = true`。
+- `dynamic_partition_check_interval_seconds = 600`。
+- `catalog_trash_expire_second = 86400`。
+
+当前[动态分区文档](https://doris.apache.org/docs/4.x/table-design/data-partitioning/dynamic-partitioning/)列出的调度器默认值为关闭，但本地运行值为开启。因此记录实际值，不依赖默认假设。短时间运行 Notebook 也不能假定下一调度周期已经执行。[4.1.3 配置源码](https://github.com/apache/doris/blob/4.1.3/fe/fe-common/src/main/java/org/apache/doris/common/Config.java)定义了回收站保留时间，但存在保留时间不意味着所有删除方式都可恢复。
+
 ### 证据与测验约定
 
 | 证据 | 可以支持的结论 | 不能据此推断的结论 |
@@ -707,10 +941,10 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 
 每模块使用四至六道独立英文单选题，优先采用场景选择、结果预测和原因解释。复用 `doris_course/quiz.py` 与 Level 1–2 Notebook 风格。Notebook 目标与 YAML 保持一致，并在两种 Notebook 使用方式中检查长选项单选按钮与第一行文字的对齐。测验不依赖 Docker、Doris、S3、Kafka 或已完成的实验。
 
-### 建议开发顺序
+### 后续复核顺序
 
-1. **先验证模块 8 的可行性：** 在本模块小表上验证一个同步物化视图、一个异步物化视图和一组索引对照。确认 Query Profile 证据后再编写课程，然后将实验与测验对齐到受支持的范围。
-2. **模块 9 已完成环境和证据验证：** 已验证连接隔离、资源检查、副本放置、跨 BE 执行、Colocate Join、受控 BE 停机恢复和 FE 选举。
-3. **隔离方式明确后开发模块 10：** 准备独立小环境，先验证结构变更和手动恢复，再处理依赖时钟的保留策略。最后讲恢复方式的选择，不引入外部集成。
+1. **先复核 Module 8：** 保持普通 View、同步/异步物化视图、透明改写和倒排索引之间的术语与证据边界一致。
+2. **再复核 Module 9：** 按实际 Lab 的入口切换、BE 扩容与执行位置、副本版本恢复、Bucket Shuffle / Colocate 顺序核对 Course、Lab 与 Quiz。
+3. **最后复核 Module 10：** 核对数据形状与压缩选择、小时级 Dynamic Partition、迟到数据和回收站恢复；跨整点自然过期仍需真实时钟与调度周期才能完成实验观察。
 
-学员学习顺序保持 **8 → 9 → 10**。每个模块内部依次完成：确定场景、验证敏感行为、根据证据编写课程和实验、创建独立测验。当前实验 8 和实验 9 已进入实现；后续内容继续按各自大纲开发。
+学员学习顺序保持 **8 → 9 → 10**。Course、Lab 与 Quiz 已经实现；后续变更继续以实际 Course 和 Notebook 为约束，在三类内容之间统一术语、场景和证据边界。

@@ -12,7 +12,7 @@ ROOT = Path(__file__).resolve().parents[1]
 
 class QuizTests(unittest.TestCase):
     def test_navigation_revision_and_score(self):
-        for path in sorted(ROOT.glob('level[12]/*/quiz*.yaml')):
+        for path in sorted(ROOT.glob('level[123]/*/quiz*.yaml')):
             with self.subTest(quiz=path.name):
                 quiz = CourseQuiz.from_yaml(path)
                 quiz._render_question()
@@ -59,7 +59,7 @@ class QuizTests(unittest.TestCase):
     def test_notebooks_and_both_working_directories(self):
         original = Path.cwd()
         try:
-            for path in ROOT.glob('level2/*/quiz*.ipynb'):
+            for path in ROOT.glob('level[123]/*/quiz*.ipynb'):
                 nb = nbformat.read(path, 4)
                 nbformat.validate(nb)
                 initialization = next(c.source for c in nb.cells if 'from pathlib import Path' in c.source)
@@ -69,10 +69,28 @@ class QuizTests(unittest.TestCase):
                     namespace = {}
                     exec(initialization, namespace)
                     quiz = namespace['quiz']
-                    self.assertEqual(len(quiz.questions), 6)
-                    self.assertEqual(len({q.question_id for q in quiz.questions}), 6)
+                    if 'level3' in path.parts:
+                        self.assertEqual(len(quiz.questions), 6)
+                    else:
+                        self.assertIn(len(quiz.questions), (5, 6))
+                    self.assertEqual(
+                        len({q.question_id for q in quiz.questions}),
+                        len(quiz.questions),
+                    )
         finally:
             os.chdir(original)
+
+    def test_question_and_option_ids_are_unique_and_explanations_exist(self):
+        for path in sorted(ROOT.glob('level[123]/*/quiz*.yaml')):
+            with self.subTest(quiz=path.name):
+                quiz = CourseQuiz.from_yaml(path)
+                question_ids = [question.question_id for question in quiz.questions]
+                self.assertEqual(len(question_ids), len(set(question_ids)))
+                for question in quiz.questions:
+                    option_ids = [option.option_id for option in question.options]
+                    self.assertEqual(len(option_ids), len(set(option_ids)))
+                    self.assertIn(question.answer, option_ids)
+                    self.assertTrue(question.explanation.strip())
 
 
 if __name__ == '__main__':

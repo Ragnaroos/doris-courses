@@ -1,0 +1,155 @@
+title: "Module 9 Quiz: Distribution and Availability"
+description: >-
+  Six independent scenarios check whether you can reason about Frontend entry
+  paths, Backend replicas, distributed scans, failure recovery, and Join data
+  movement without overclaiming the multi-container evidence.
+questions:
+  - id: m9_q1
+    objective: "Separate FE election from client reconnection"
+    prompt: >-
+      Three Frontend (FE) Followers form a voting group. A client has a direct
+      TCP session to the current Master, which stops. The two surviving FEs can
+      form a metadata quorum, and a single HAProxy instance can reach both.
+      What should the application expect?
+    options:
+      - id: a
+        text: "The existing TCP session automatically migrates to the newly elected Master without reconnecting."
+      - id: b
+        text: "The old session fails; the quorum can elect a Master, and a new connection through HAProxy can select a healthy FE. HAProxy itself remains one entry-point failure risk."
+      - id: c
+        text: "HAProxy elects the new Doris Master and repairs FE metadata before accepting SQL."
+      - id: d
+        text: "Proxy reachability alone proves that a metadata quorum and every Doris query are available."
+    answer: b
+    explanation: >-
+      FE election preserves the metadata service when a voting majority
+      survives, but it does not move an established client TCP session. A
+      client, driver, or proxy supplies a healthy target for a new session.
+      HAProxy performs routing and health checks, not Doris election, and one
+      proxy instance is still a single entry-point failure domain. The answer
+      does not claim that an in-flight query resumes.
+
+  - id: m9_q2
+    objective: "Relate logical Tablets to physical replicas"
+    prompt: >-
+      A table has two Partitions, four Buckets per Partition, replication_num =
+      3, and three available Backend (BE) nodes. How many base-index logical
+      Tablets and physical replica records are expected, and how should SQL
+      count the business rows?
+    options:
+      - id: a
+        text: "8 logical Tablets, 24 physical replica records, and each logical business row is returned once."
+      - id: b
+        text: "24 logical Tablets, 8 physical replica records, and SQL returns every row three times."
+      - id: c
+        text: "8 logical Tablets and 8 physical replica records because the three BEs share one replica."
+      - id: d
+        text: "6 logical Tablets and 18 physical replica records because Partition and BE counts are added."
+    answer: a
+    explanation: >-
+      The base index has 2 x 4 = 8 logical Tablets. Three physical copies of
+      each produce 24 replica records. Replication provides placement and
+      availability; a normal scan selects an appropriate copy of each required
+      logical Tablet rather than returning three copies of every business row.
+      Additional indexes would have their own Tablets, so this calculation is
+      explicitly limited to the base index.
+
+  - id: m9_q3
+    objective: "Interpret automatic replica rebalancing"
+    prompt: >-
+      A two-Partition table has six Buckets per Partition and two replicas. It
+      was created while two BEs were available. A third BE is added and the
+      Tablet scheduler later places some existing replicas on it. What changed?
+    options:
+      - id: a
+        text: "Replica placement changed; the 12 logical Tablets, Partition boundaries, Bucket key, and two-replica total per Tablet did not need to change."
+      - id: b
+        text: "Every Partition was split again, so the table now has 18 logical Tablets."
+      - id: c
+        text: "The distribution key was automatically replaced with the most balanced column."
+      - id: d
+        text: "Logical rows were copied into the SQL result because the third BE introduced another readable version."
+    answer: a
+    explanation: >-
+      Adding a BE creates another placement target. The scheduler can copy and
+      remove physical replicas while retaining the configured replica count and
+      the existing logical Tablet identities. It does not redefine Partition
+      boundaries, Bucket count, or the sharding key. An alive new BE also does
+      not by itself prove that balancing has finished; placement metadata must
+      be observed.
+
+  - id: m9_q4
+    objective: "Distinguish stored copies from one scan execution"
+    prompt: >-
+      Metadata shows logical Tablet T7 stored on BE-A and BE-B. One executed
+      Query Profile shows an OLAP scan for T7 only under a Fragment Instance on
+      BE-B, with two PipelineTasks on that host. Which reading is correct?
+    options:
+      - id: a
+        text: "Both replicas exist, but this execution selected the BE-B copy; Fragment Instances and PipelineTasks describe execution work, not additional Tablet replicas."
+      - id: b
+        text: "The two PipelineTasks prove that T7 has two extra replicas on BE-B."
+      - id: c
+        text: "BE-A must also have scanned T7 because every stored replica participates in every query."
+      - id: d
+        text: "Selecting one replica changes the query grain, so rows from T7 are only partially represented."
+    answer: a
+    explanation: >-
+      Replica metadata describes where Doris could read the logical Tablet. The
+      host-scoped Profile describes where this execution actually scanned it.
+      Fragment Instances, Pipelines, and PipelineTasks are execution units and
+      are not synonyms for Tablets or replicas. Selecting one healthy copy
+      avoids duplicate business rows; exact host choice and task count can vary
+      between executions.
+
+  - id: m9_q5
+    objective: "Apply majority writes and version recovery"
+    prompt: >-
+      Under the default majority rule, one BE is unavailable. Table A has two
+      replicas; Table B has three. No load-threshold override is configured.
+      After the BE restarts, SHOW BACKENDS reports Alive = true immediately.
+      Which statement is sound?
+    options:
+      - id: a
+        text: "Table A normally cannot commit with one of two copies unavailable; Table B can commit through two of three. Alive = true must still be followed by a replica-version check."
+      - id: b
+        text: "Both tables can commit because one surviving replica is always a majority."
+      - id: c
+        text: "Only Table A can commit because fewer replicas require fewer acknowledgements."
+      - id: d
+        text: "Alive = true proves that every returning replica already contains the latest committed version."
+    answer: a
+    explanation: >-
+      More than half of the replicas are required by the default rule: two of
+      two for Table A and two of three for Table B. A returning BE can resume
+      heartbeats before its Tablet copy has caught up to the current version,
+      so node health and data-version convergence are separate milestones. A
+      configured min_load_replica_num override would change the premise and
+      must be checked separately.
+
+  - id: m9_q6
+    objective: "Choose Bucket Shuffle or Colocate"
+    prompt: >-
+      Events are HASH distributed by user_id into eight Buckets. A first user
+      table is RANDOM distributed. A second user table is HASH distributed by
+      user_id into eight Buckets with the same replica count, but it is not in a
+      shared Colocation Group. Which conclusion follows for an equi-Join on
+      user_id?
+    options:
+      - id: a
+        text: "Bucket Shuffle can preserve the event-side layout and route the RANDOM user side. Matching HASH DDL alone is still insufficient to claim Colocate without a shared stable placement contract."
+      - id: b
+        text: "The RANDOM user table is automatically Colocated because user_id appears in the Join condition."
+      - id: c
+        text: "Matching Bucket columns and counts always remove every Exchange, even when the tables have no Colocation Group."
+      - id: d
+        text: "Bucket Shuffle and Colocate change an INNER JOIN into different logical Join types."
+    answer: a
+    explanation: >-
+      Bucket Shuffle can reuse one compatible Bucket layout and move the other
+      input to it. Colocate additionally requires compatible table definitions,
+      shared group membership, replica placement, and a stable group. Broadcast,
+      Partition Shuffle, Bucket Shuffle, and Colocate describe data-distribution
+      strategies, not new logical Join semantics. EXPLAIN can establish the
+      selected strategy, while a single-host container Lab cannot establish a
+      production network or failure-domain advantage.
