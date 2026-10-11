@@ -1,0 +1,10 @@
+#!/usr/bin/env bash
+set -euo pipefail
+
+MCP_HOME="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+
+set -a
+. "$MCP_HOME/.env.mcp.local"
+set +a
+
+exec "$MCP_HOME/.venv/bin/doris-mcp-server" --transport stdio
