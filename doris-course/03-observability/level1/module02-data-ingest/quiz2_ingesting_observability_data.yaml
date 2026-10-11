@@ -1,0 +1,110 @@
+title: 'Module 2 Quiz: Ingesting Observability Data'
+description: Six questions check how logs, metrics, and traces move through OpenTelemetry (OTel) pipelines
+  into Doris, including pull versus push, batching, retry boundaries, and what a seemingly successful
+  trace export actually proves.
+questions:
+- id: choose_log_collection_boundary
+  objective: Place file-log collection in the correct pipeline stage
+  prompt: A Doris Frontend (FE) writes rotating log files. A Collector container receives a read-only
+    mount of the FE log directory and can reach Doris on the DOG network. Which pipeline design matches
+    the Lab's log-ingest boundary?
+  options:
+  - id: doris_reads_disk
+    text: Grafana reads the mounted log file and writes each dashboard row into Doris
+  - id: grafana_file
+    text: The Collector stores logs only in Grafana, while Doris remains responsible only for metrics
+  - id: collector_sql
+    text: Doris reads the mounted log file directly and uses the Collector only as a metrics gateway
+  - id: filelog_to_doris
+    text: A file-log receiver reads the mounted file, processors parse it, and a Doris exporter writes
+      rows
+  answer: filelog_to_doris
+  explanation: The Collector receives the file through a read-only mount, parses its records, and exports
+    them to Doris. Grafana is a visualization layer and does not collect the file into Doris.
+- id: distinguish_pull_and_push
+  objective: Distinguish scrape-based metrics from pushed traces
+  prompt: Doris FE and Backend (BE) endpoints expose Prometheus metrics. A Python application pushes spans
+    to an OpenTelemetry Protocol (OTLP) endpoint. Which statement describes the receivers needed by the
+    Collector?
+  options:
+  - id: prometheus_otlp
+    text: A Prometheus receiver scrapes Doris metrics; an OTLP receiver accepts application spans
+  - id: otlp_prometheus
+    text: An OTLP receiver scrapes Doris metrics; a Prometheus receiver waits for application spans
+  - id: file_for_both
+    text: Both sources must be written to a shared log file before the Collector can read them
+  - id: grafana_receivers
+    text: Grafana is the receiver for both sources, and Doris only stores Grafana panel definitions
+  answer: prometheus_otlp
+  explanation: Prometheus metrics are pulled from scrape endpoints, while OTLP is a push protocol used
+    by instrumented applications. Separate receivers can feed one or more Doris export pipelines.
+- id: predict_batch_export_timing
+  objective: Predict batching behavior
+  prompt: A Collector batch processor is configured with a send size of 2,000 records and a timeout of
+    5 seconds. Only 20 valid records arrive during the first second, and no error occurs. When should
+    those records normally be exported?
+  options:
+  - id: next_day
+    text: Only after the Collector restarts and flushes its disk queue
+  - id: immediately
+    text: Immediately, because any non-empty batch is exported at once
+  - id: at_timeout
+    text: At approximately the 5-second timeout, unless the batch fills sooner
+  - id: never
+    text: Never, because a timeout sends only batches that reached the send size
+  answer: at_timeout
+  explanation: Batching exports when the size threshold is reached or when the timeout expires. A small
+    batch is delayed until the timeout rather than being discarded.
+- id: judge_trace_print_evidence
+  objective: Evaluate whether a print statement proves export
+  prompt: Python code creates a span with a BatchSpanProcessor, exits the span context, and prints Data
+    sent successfully!. Doris currently has no matching span row. Which conclusion is best supported?
+  options:
+  - id: grafana_required
+    text: Doris accepts spans only after Grafana opens the trace panel
+  - id: durable_export
+    text: The span is durable in Doris because the program printed a success message
+  - id: queued_not_exported
+    text: The span may still be queued in the batch processor; the print does not prove Doris received
+      it
+  - id: otlp_broken
+    text: OTLP cannot export traces after a span context closes
+  answer: queued_not_exported
+  explanation: A batch span processor can export asynchronously. A print statement only proves that the
+    application reached that line; it does not prove that the span was flushed to the Collector or stored
+    by Doris.
+- id: map_signals_to_target_tables
+  objective: Route telemetry by its data shape
+  prompt: A pipeline receives periodic http.server.duration numeric samples and a text exception event
+    containing a trace identifier. The team wants time-series analysis for the samples and full-text search
+    for the exception. Which mapping is appropriate?
+  options:
+  - id: metrics_logs
+    text: Store duration samples in the metrics table and the exception event in the logs table
+  - id: logs_metrics
+    text: Store duration samples in the logs table and the exception event in the metrics table
+  - id: traces_only
+    text: Store both records only in the traces table as span attributes
+  - id: one_payload
+    text: Store both records in one untyped text column without distinguishing their shape
+  answer: metrics_logs
+  explanation: Numeric time-series samples fit the metrics model. Text events with attributes fit the
+    logs model. The trace identifier supports correlation, but it does not make every record a trace span.
+- id: reason_about_retry_queue
+  objective: Reason about exporter retry and queue limits
+  prompt: The Doris exporter becomes unavailable for two minutes. Its sending queue and retry-on-failure
+    behavior are enabled, and the queue has not filled. What is the most accurate expectation?
+  options:
+  - id: disable_batch
+    text: Retries automatically disable batching and guarantee one request per record
+  - id: bounded_delivery
+    text: The Collector retries within configured limits; queued data is not guaranteed forever or across
+      a Collector crash
+  - id: permanent_storage
+    text: Every queued record is permanently durable and will survive any Collector restart
+  - id: direct_array
+    text: Doris pulls the records directly from the application's memory after recovery
+  answer: bounded_delivery
+  explanation: A sending queue and retry settings provide bounded buffering and retry behavior. They do
+    not turn the pipeline into an unlimited durable message system, so long outages or Collector loss
+    can still lose data.

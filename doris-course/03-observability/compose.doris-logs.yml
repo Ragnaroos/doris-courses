@@ -1,0 +1,5 @@
+services:
+  doris:
+    volumes:
+      - ${DORIS_LOG_ROOT:?set DORIS_LOG_ROOT}/fe:/opt/apache-doris/fe/log
+      - ${DORIS_LOG_ROOT:?set DORIS_LOG_ROOT}/be:/opt/apache-doris/be/log

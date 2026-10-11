@@ -1,0 +1,109 @@
+title: 'Level 2 Module 1 Quiz: Observability Table Models'
+description: Six questions check whether you can choose DUPLICATE, AGGREGATE, and UNIQUE models for raw
+  telemetry, pre-aggregated metrics, and alert deduplication, and predict how rows combine under each
+  model.
+questions:
+- id: choose_raw_telemetry_model
+  objective: Choose a model for append-only raw telemetry
+  prompt: A team ingests raw logs and trace spans. Immutable events must remain individually queryable,
+    and write throughput is important. Which Doris table model best fits this requirement?
+  options:
+  - id: unique
+    text: UNIQUE, which keeps only the latest row for each key
+  - id: unknown
+    text: The model does not affect whether raw events remain individually queryable
+  - id: duplicate
+    text: DUPLICATE, which appends rows and preserves all detail
+  - id: aggregate
+    text: AGGREGATE, which combines rows as soon as they are loaded
+  answer: duplicate
+  explanation: Raw observability events are append-only and need to remain available as individual rows.
+    DUPLICATE preserves every loaded detail row and is the default choice when no merge semantics are
+    required.
+- id: choose_error_count_model
+  objective: Choose a model for pre-aggregated counters
+  prompt: The main query is the number of ERROR events per service per day. The team does not need raw
+    error messages in this reporting table, and Doris should combine repeated keys during loading. Which
+    model fits?
+  options:
+  - id: unique
+    text: UNIQUE with the original message as the only measure
+  - id: duplicate_count
+    text: DUPLICATE and count rows at query time instead of combining keys during loading
+  - id: aggregate
+    text: AGGREGATE with a SUM measure for the event count
+  - id: duplicate
+    text: DUPLICATE with one row for every original error
+  answer: aggregate
+  explanation: AGGREGATE is intended for pre-aggregated data. When repeated keys are loaded, SUM combines
+    their count values, so the table is optimized for the reporting grain rather than retaining every
+    raw message.
+- id: choose_alert_dedup_model
+  objective: Choose a model for one current alert per key
+  prompt: An alerting service emits repeated records for the same normalized alarm identity each day.
+    The table must retain one current record per day and alarm identity so repeated copies do not create
+    an alert storm. Which model is appropriate?
+  options:
+  - id: unique
+    text: UNIQUE with a daily time component and the alarm identity in the key
+  - id: duplicate
+    text: DUPLICATE, because duplicate rows are automatically removed by the query planner
+  - id: aggregate_sum
+    text: AGGREGATE SUM on the alarm text, because identical alerts should be added together
+  - id: no_model
+    text: Any model, because Doris deduplicates rows only when a dashboard is opened
+  answer: unique
+  explanation: A UNIQUE key represents the entity that should occur once. Including the day and normalized
+    alarm identity in the key makes repeated delivery of the same alarm replace one logical state row
+    rather than create many alert records.
+- id: predict_aggregate_count_merge
+  objective: Predict AGGREGATE merge behavior
+  prompt: An AGGREGATE table has key (stat_date, service_name) and measure error_count BIGINT SUM. Two
+    rows are loaded with the same key and error_count values 4 and 7. What is the result of querying error_count
+    for that key?
+  options:
+  - id: two_rows
+    text: Two rows, because a SUM measure never combines duplicate keys
+  - id: eleven
+    text: '11'
+  - id: four
+    text: 4, because the first loaded value wins
+  - id: seven
+    text: 7, because AGGREGATE keeps only the latest replacement
+  answer: eleven
+  explanation: SUM is an aggregate measure. Rows that share the key are combined, so the stored count
+    is the sum of the loaded values rather than a replacement or a duplicate pair.
+- id: predict_unique_current_record
+  objective: Predict UNIQUE replacement behavior
+  prompt: A UNIQUE table has key (alarm_date, alarm_hash). A row with status open is loaded first; later,
+    after the alert is resolved, another load writes the same key with status resolved. With no sequence
+    column and sequential loads, what should the table expose for that key?
+  options:
+  - id: both
+    text: Two rows, one for each status
+  - id: sum
+    text: One row whose status is the sum of open and resolved
+  - id: rejected
+    text: No row, because a UNIQUE key rejects later writes
+  - id: latest
+    text: One current row whose status is resolved
+  answer: latest
+  explanation: UNIQUE represents one logical row per key. In sequential loads without out-of-order sequence
+    handling, the later load replaces the earlier state for that key rather than creating another row.
+- id: interpret_dedup_row_count
+  objective: Separate deduplication from occurrence counting
+  prompt: After deduplicating alerts with a UNIQUE table, a query for one day shows exactly one row for
+    an alarm identity. The table has no count measure. Which conclusion is supported?
+  options:
+  - id: one_logical_alert
+    text: The row represents one current logical alert; it does not prove the source emitted only one
+      duplicate event
+  - id: one_source_event
+    text: The source emitted exactly one matching event that day
+  - id: zero_suppression
+    text: All later copies were rejected before reaching Doris and never entered any pipeline
+  - id: aggregate_count
+    text: The row contains the original occurrence count even though no count measure exists
+  answer: one_logical_alert
+  explanation: Deduplication preserves one logical state row per key. Without a count measure, row count
+    cannot reveal how many duplicate source events were collapsed into that row.

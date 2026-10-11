@@ -1,0 +1,109 @@
+title: 'Level 2 Module 4 Quiz: Analysis and Litefuse'
+description: Six questions check whether you can choose window and aggregate operations for trace analysis,
+  interpret percentile evidence, and place Litefuse in an application-observability workflow without confusing
+  it with the DOG stack.
+questions:
+- id: choose_ranked_span_analysis
+  objective: Choose row-level ranking over aggregate-only analysis
+  prompt: A team needs the three longest server spans for each service_name, and each result must retain
+    its trace_id, span_id, and timestamp. Which analysis shape fits?
+  options:
+  - id: count_only
+    text: Return the number of spans per service without durations or identifiers
+  - id: window_rank
+    text: Assign a per-service rank by descending duration in a window, then retain rows whose rank is
+      at most three
+  - id: global_limit
+    text: Sort all services together by duration and keep the first three rows
+  - id: max_only
+    text: Return only MAX(duration) for each service
+  answer: window_rank
+  explanation: The required grain is one row per selected span, while the ranking scope is each service.
+    A window function supplies the per-service rank and keeps row-level identifiers; a global limit or
+    aggregate-only query answers different questions.
+- id: choose_event_count_grain
+  objective: Keep event-count calculations at the requested grain
+  prompt: Each server span has an events array. A dashboard needs the average number of events per request,
+    not the total number of events in the selected interval. Which expression matches the requested grain?
+  options:
+  - id: total_size
+    text: Sum size(events) once for the whole interval
+  - id: max_size
+    text: Return only the maximum array size and label it as the average
+  - id: row_count
+    text: Count span rows and assume every request contains one event
+  - id: average_size
+    text: Average size(events) across requests, optionally grouped by service and operation
+  answer: average_size
+  explanation: The event count must first be calculated per request, then averaged at the reporting grain.
+    A total answers total volume, and a maximum is not an average.
+- id: choose_latency_percentile
+  objective: Choose a statistic that exposes tail latency
+  prompt: A service has an average response time of 120 ms, but user complaints mention occasional multi-second
+    waits. The team needs to monitor the slow tail without assuming every request is slow. Which metric
+    is the most appropriate?
+  options:
+  - id: percentile
+    text: P95 or P99 latency, supplemented by request volume
+  - id: average
+    text: Average latency only, because it reveals the slowest requests
+  - id: maximum
+    text: Maximum latency only, because one worst sample represents the tail
+  - id: median
+    text: Median latency only, because the middle request reveals occasional multi-second waits
+  answer: percentile
+  explanation: High percentiles show the slow tail that an average can hide. Request volume remains useful
+    because a large P99 change can have a different impact when traffic is low.
+- id: interpret_p99_result
+  objective: Interpret percentile evidence without overclaiming
+  prompt: A grouped query reports P99 latency of 2.1 seconds for one API, while its P50 is 90 ms. Which
+    conclusion is best supported?
+  options:
+  - id: no_issue
+    text: The P50 proves the tail is harmless
+  - id: volume
+    text: The result alone proves exactly how many users were affected
+  - id: tail_slow
+    text: About one percent of requests are at or above the reported tail level under the chosen definition;
+      this does not mean every request took 2.1 seconds
+  - id: all_slow
+    text: Every request took at least 2.1 seconds
+  answer: tail_slow
+  explanation: A high percentile describes the tail of the observed distribution, not every request. Additional
+    volume and distribution checks are needed to estimate how many users were affected.
+- id: choose_litefuse_for_llm_traces
+  objective: Choose the appropriate surface for Large Language Model (LLM) traces
+  prompt: A team is building an AI assistant and needs to inspect prompts, model calls, tool steps, and
+    response quality across Large Language Model (LLM) application runs. The existing DOG stack handles
+    infrastructure logs, metrics, and distributed service traces. Which choice fits?
+  options:
+  - id: logs_only
+    text: Store prompts as CPU metrics, because every prompt is a numeric sample
+  - id: grafana_only
+    text: Use Grafana contact points as the LLM trace model
+  - id: litefuse
+    text: Use Litefuse for LLM application traces and evaluations while keeping the DOG stack for infrastructure
+      telemetry
+  - id: replace_all
+    text: Replace Doris and Grafana, because Litefuse stores all infrastructure metrics and dashboards
+  answer: litefuse
+  explanation: Litefuse is used in the Lab to inspect LLM application behavior such as prompts, model
+    calls, and agent steps. It complements rather than replaces the DOG infrastructure-observability stack.
+- id: distinguish_litefuse_delivery_configuration
+  objective: Distinguish Litefuse SDK delivery from Doris ingestion
+  prompt: An application sets LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and a Litefuse base URL, then
+    wraps an LLM call with the Litefuse client. Which statement describes the telemetry boundary?
+  options:
+  - id: litefuse_endpoint
+    text: The SDK sends application traces to the configured Litefuse service; those credentials do not
+      route the traces into the Doris telemetry tables
+  - id: doris_credentials
+    text: The Litefuse keys authenticate direct writes to Doris Frontend (FE) metadata
+  - id: grafana_storage
+    text: The Litefuse SDK stores prompts only in Grafana contact points
+  - id: no_delivery
+    text: The SDK sends only to an OpenTelemetry Collector; Litefuse displays whatever Doris stores
+  answer: litefuse_endpoint
+  explanation: Litefuse credentials target the configured Litefuse endpoint for application traces. They
+    are separate from the OTel-to-Doris pipelines that carry infrastructure logs, metrics, and service
+    spans.

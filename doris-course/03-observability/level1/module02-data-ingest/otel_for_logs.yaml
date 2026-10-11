@@ -1,0 +1,58 @@
+receivers:
+  filelog:
+    include: [ /var/log/fe.log  ]
+    start_at: beginning
+    multiline:
+      line_start_pattern: '^(?:RuntimeLogger\s)?\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}'
+    operators:
+      - type: regex_parser
+        regex: '^(?:RuntimeLogger\s)?(?P<time>\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}) (?P<severity>INFO|WARN|ERROR) (?P<message>.*)'
+        timestamp:
+          parse_from: attributes.time
+          layout: '%Y-%m-%d %H:%M:%S,%L'
+        severity:
+          parse_from: attributes.severity
+          trace: TRACE
+          debug: DEBUG
+          info: INFO
+          warn: WARN
+          error: ERROR
+          fatal: FATAL
+
+processors:
+  batch:
+    send_batch_size: 10000
+    timeout: 2s
+
+exporters:
+  doris:
+    endpoint: http://doris:8040
+    mysql_endpoint: doris:9030
+    database: otel
+    username: root
+    password:
+    table:
+      logs: otel_logs
+    create_schema: true
+    history_days: 10
+    create_history_days: 10
+    timezone: Asia/Shanghai
+    timeout: 60s
+    log_response: true
+    sending_queue:
+      enabled: true
+      num_consumers: 20
+      queue_size: 1000
+    retry_on_failure:
+      enabled: true
+      initial_interval: 5s
+      max_interval: 30s
+    headers:
+      load_to_single_tablet: "true"
+
+service:
+  pipelines:
+    logs:
+      receivers: [filelog]
+      processors: [batch]
+      exporters: [doris]

@@ -1,0 +1,107 @@
+title: 'Module 3 Quiz: Visualizing Observability Data'
+description: Six questions check whether you can choose the right table and filters in Grafana, interpret
+  what a visible result does and does not prove, and switch between aggregate trends and request-level
+  detail.
+questions:
+- id: choose_error_log_filters
+  objective: Build a discriminating log query
+  prompt: An engineer needs ERROR logs from the otel_logs table that mention a configuration problem.
+    The table contains structured severity and body fields. Which filter set identifies the intended records?
+  options:
+  - id: severity_and_body
+    text: severity_text = ERROR and a body match for the configuration keyword
+  - id: severity_only
+    text: Only severity_text = ERROR, because every ERROR is a configuration problem
+  - id: body_only
+    text: Only a body match for the configuration keyword, regardless of severity
+  - id: timestamp_only
+    text: Only a recent timestamp, because severity and body are display-only fields
+  answer: severity_and_body
+  explanation: 'The requirement has two conditions: ERROR severity and a configuration topic in the message.
+    Combining both filters excludes warnings and unrelated errors.'
+- id: predict_combined_filter_result
+  objective: Predict the result of combining filters
+  prompt: 'Three log rows arrive: A is ERROR with body config reload failed; B is WARN with body config
+    reload failed; C is ERROR with body request timed out. A dashboard filter requires ERROR severity
+    and the keyword config. Which row is returned?'
+  options:
+  - id: a_and_c
+    text: A and C
+  - id: all
+    text: A, B, and C
+  - id: a_only
+    text: Only A
+  - id: a_and_b
+    text: A and B
+  answer: a_only
+  explanation: Filters are combined as conditions that the same row must satisfy. B fails the severity
+    condition, and C fails the keyword condition.
+- id: scope_cpu_metric_by_node
+  objective: Keep the analysis grain aligned with the question
+  prompt: A team must find which Doris node exceeds 90% CPU utilization. The otel_metrics_gauge table
+    contains metric_name, value, and node-identifying dimensions. Which analysis preserves the required
+    grain?
+  options:
+  - id: max_without_dimension
+    text: Take the maximum value without retaining the node dimension
+  - id: error_logs
+    text: Search ERROR log messages and assume the first service name is the overloaded node
+  - id: per_node
+    text: Filter to the CPU-utilization metric and evaluate each node's value separately
+  - id: cluster_average
+    text: Average CPU utilization across all nodes, then inspect the single average
+  answer: per_node
+  explanation: The question asks which node is above the threshold, so the node dimension must remain
+    in the result. A cluster-wide average can hide one saturated node.
+- id: interpret_single_cpu_spike
+  objective: Distinguish a spike from sustained saturation
+  prompt: A five-minute Grafana panel shows one CPU sample at 92%, surrounded by samples between 88% and
+    90%. The requirement is to notify only when utilization stays above 90% for ten minutes. What can
+    the team conclude from the single point?
+  options:
+  - id: one_sample
+    text: Only that one sample exceeded 90%; it does not establish a sustained ten-minute condition
+  - id: cannot_measure
+    text: Grafana cannot evaluate CPU utilization after the first spike
+  - id: lower_threshold
+    text: The threshold should be lowered immediately so the spike always alerts
+  - id: sustained
+    text: The condition has been sustained for ten minutes
+  answer: one_sample
+  explanation: A threshold crossed in one sample is evidence of a spike, not evidence that the condition
+    persisted for the required duration. The alert window and continuity must be evaluated separately.
+- id: interpret_time_range_result
+  objective: Separate query-window effects from data loss
+  prompt: An incident occurred yesterday, but a Grafana panel using the default last-5-minutes range is
+    empty. The underlying logs and metrics are still present in Doris when queried for yesterday. Which
+    explanation is best supported?
+  options:
+  - id: alert_required
+    text: An alert rule must fire before historical data becomes queryable
+  - id: window
+    text: The panel's time range excludes the incident; adjust the range before concluding data is missing
+  - id: deleted
+    text: Doris deleted yesterday's data because the dashboard was empty
+  - id: trace_only
+    text: Only trace data can be displayed for a custom time range
+  answer: window
+  explanation: A panel is constrained by its query time range. An empty current window does not prove
+    that historical rows are absent, especially when direct historical queries return data.
+- id: choose_trend_and_detail_views
+  objective: Choose complementary visualization levels
+  prompt: A team needs to compare P99 request latency across services over 24 hours and then inspect the
+    individual spans behind one slow trace. Which view sequence is appropriate?
+  options:
+  - id: detail_only
+    text: Use only a single span table for all 24 hours and ignore the trend
+  - id: log_only
+    text: Use only ERROR logs, because every slow request emits an error
+  - id: static_panel
+    text: Use one static aggregate number and remove all trace identifiers
+  - id: trend_then_detail
+    text: Use a time-series view for the P99 trend, then open trace/span detail filtered to the selected
+      trace
+  answer: trend_then_detail
+  explanation: The trend answers when P99 changed and which service stands out. Trace detail answers what
+    happened inside one slow request. The two views answer different questions and should complement each
+    other.

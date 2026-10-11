@@ -1,0 +1,109 @@
+title: 'Module 1 Quiz: Observability Foundations in the DOG Stack'
+description: Six questions check whether you can choose the right telemetry signal, assign responsibilities
+  across Doris, OpenTelemetry, and Grafana (DOG), and judge whether the available evidence proves that
+  telemetry reached the expected destination.
+questions:
+- id: select_signal_for_request_path
+  objective: Choose the telemetry signal for a request-path question
+  prompt: A checkout request crosses three services. The team needs the timing of each hop and the parent-child
+    relationship between operations. Which telemetry signal directly models that request path?
+  options:
+  - id: metrics
+    text: Metrics, because one numeric time series can represent every hop
+  - id: traces
+    text: Traces, because spans record operations and their parent-child relationships
+  - id: dashboard
+    text: A Grafana dashboard, because panels create the request hierarchy
+  - id: logs
+    text: Logs, because each line records a complete request path
+  answer: traces
+  explanation: Traces represent a request as a set of related spans, including timing and parent-child
+    relationships. Logs and metrics can be correlated with a trace, but neither signal directly encodes
+    the request hierarchy.
+- id: interpret_running_collector_with_empty_table
+  objective: Judge what an unhealthy data path does and does not prove
+  prompt: The OpenTelemetry (OTel) Collector process has been running for 12 minutes. During that period,
+    the Doris log table received no rows and a Grafana log query returned no results. Which conclusion
+    is best supported by this evidence?
+  options:
+  - id: grafana_deletes
+    text: Grafana must be deleting rows before display
+  - id: metrics_required
+    text: Doris cannot accept logs unless metrics are also being ingested
+  - id: stack_healthy
+    text: The whole DOG stack is healthy because the Collector is running
+  - id: possible_pipeline_failure
+    text: The Collector can be running while its receiver input or Doris export path is failing; inspect
+      both stages
+  answer: possible_pipeline_failure
+  explanation: A running process only proves that the Collector process is alive. It does not prove that
+    the log receiver is reading records or that the Doris exporter is delivering them. Those stages must
+    be checked separately.
+- id: assign_dog_responsibilities
+  objective: Distinguish collection, storage, and visualization responsibilities
+  prompt: A platform team must ingest logs, metrics, and traces from many services, retain them for SQL
+    analysis, and expose operational views. Which responsibility split matches the DOG architecture?
+  options:
+  - id: collector_doris_grafana
+    text: OTel Collector receives and exports telemetry; Doris stores and queries it; Grafana visualizes
+      it
+  - id: grafana_store
+    text: Grafana stores telemetry; Doris collects it; the OTel Collector renders charts
+  - id: doris_collect
+    text: Doris collects from applications; Grafana stores the raw data; the OTel Collector only authenticates
+      users
+  - id: app_storage
+    text: Each application stores all telemetry locally; Doris and Grafana only cache the latest request
+  answer: collector_doris_grafana
+  explanation: The OTel Collector owns collection and export, Doris provides analytical storage and query,
+    and Grafana owns visualization. Keeping these responsibilities separate is the purpose of the DOG
+    stack.
+- id: prove_demo_telemetry_reached_dog
+  objective: Select the strongest end-to-end evidence
+  prompt: After generating traffic from the demo storefront, which observation is the strongest evidence
+    that request-specific traces completed the path into Doris and are visible through Grafana?
+  options:
+  - id: demo_page
+    text: The demo storefront page loads without an error
+  - id: containers_running
+    text: The Doris, Collector, and Grafana containers are in the running state
+  - id: request_rows_visible
+    text: New request-specific trace rows are present in Doris and can be queried through Grafana
+  - id: config_readable
+    text: The Collector can read its YAML configuration file
+  answer: request_rows_visible
+  explanation: Request-specific rows visible through the storage and visualization layers provide end-to-end
+    evidence. A running page or process proves only that an earlier part of the path is available.
+- id: choose_signal_for_cpu_trend
+  objective: Choose telemetry for time-based operational analysis
+  prompt: An operations team needs 15-second CPU-utilization samples for each Doris node over seven days,
+    with trend and percentile panels. Which signal is designed for this requirement?
+  options:
+  - id: dashboard
+    text: A dashboard, because the dashboard becomes the source of the samples
+  - id: logs
+    text: Application logs, because one log line is emitted for every CPU sample
+  - id: metrics
+    text: Metrics, because numeric samples have timestamps and dimensions for time-series analysis
+  - id: traces
+    text: Traces, because the longest span represents CPU utilization
+  answer: metrics
+  explanation: Metrics are timestamped numeric samples with dimensions such as node, which makes them
+    the appropriate signal for utilization trends and percentile analysis.
+- id: infer_signal_pipeline_independence
+  objective: Reason about independent signal pipelines
+  prompt: Checkout metrics remain visible after a new test, but no new checkout traces arrive. Traces
+    from another service still arrive. Which conclusion is best supported?
+  options:
+  - id: independent_pipeline
+    text: The checkout trace instrumentation or its trace-delivery path can fail independently of checkout
+      metrics
+  - id: grafana_hides
+    text: Grafana cannot display traces when metrics are displayed at the same time
+  - id: doris_restart
+    text: Doris must have restarted and disabled only the trace table
+  - id: metrics_prove_traces
+    text: Checkout traces must have arrived because checkout metrics arrived
+  answer: independent_pipeline
+  explanation: Logs, metrics, and traces can use different receivers, exporters, and application instrumentation.
+    Success in one signal pipeline does not prove that another signal pipeline is healthy.

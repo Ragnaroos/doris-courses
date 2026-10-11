@@ -1,0 +1,24 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "doris-observability-course"
+version = "0.1.0"
+description = "Shared runtime support for the Apache Doris observability course"
+requires-python = ">=3.9,<3.14"
+dependencies = [
+  "ipykernel==6.29.5",
+  "ipywidgets>=8.1,<9",
+  "jupyterlab==4.4.10",
+  "nbformat==5.10.4",
+  "opentelemetry-api>=1.30,<2",
+  "opentelemetry-sdk>=1.30,<2",
+  "opentelemetry-exporter-otlp-proto-http>=1.30,<2",
+  "pandas==2.2.3",
+  "PyMySQL==1.1.1",
+  "PyYAML>=6.0,<7",
+]
+
+[tool.setuptools.packages.find]
+include = ["doris_course*"]
