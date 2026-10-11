@@ -1,11 +1,14 @@
-"""Offline checks for the evidence and background-job boundaries used in Lab 8."""
+"""Offline checks for the evidence and background-job boundaries in Labs 8-9."""
 
 import unittest
-from unittest.mock import patch
+from unittest.mock import Mock, patch
 
 import pandas as pd
 
-from doris_course.profiles import capture_query, scan_profile_excerpt, session_settings
+from doris_course.profiles import (
+    capture_query, distributed_scan_profile_excerpt, distributed_scan_summary,
+    distributed_scan_tasks, scan_profile_excerpt, session_settings,
+)
 
 from doris_course import DorisLab
 import doris_course.doris_client as client
@@ -122,6 +125,38 @@ DetailProfile(query-id):
         self.assertEqual(detail.count("RowsInvertedIndexFiltered"), 1)
         self.assertIn("not present", scan_profile_excerpt("no merged section"))
 
+    def test_distributed_scan_summary_keeps_detail_hosts_and_exact_rows(self):
+        profile = """DetailProfile(query-id):
+  Fragment 2:
+    Pipeline 0(host=TNetworkAddress(hostname:be-a, port:9050)):
+      PipelineTask(index=0):
+        OLAP_SCAN_OPERATOR(table_name=events(events))(id=0):
+          - TabletIds: [10, 11]
+          - ScanRows: 1.2K (1200)
+    Pipeline 0(host=TNetworkAddress(hostname:be-b, port:9050)):
+      PipelineTask(index=0):
+        OLAP_SCAN_OPERATOR(table_name=events(events))(id=0):
+          - TabletIds: [12]
+          - ScanRows: 800
+"""
+        frame = distributed_scan_summary(profile)
+        self.assertEqual(frame["be_host"].tolist(), ["be-a", "be-b"])
+        self.assertEqual(frame["selected_tablets"].tolist(), [2, 1])
+        self.assertEqual(frame["scan_rows"].tolist(), [1200, 800])
+        self.assertEqual(frame["table"].tolist(), ["events(events)", "events(events)"])
+
+        excerpt = distributed_scan_profile_excerpt(profile)
+        self.assertIn("Fragment 2", excerpt)
+        self.assertIn("hostname:be-a", excerpt)
+        self.assertIn("TabletIds: [10, 11]", excerpt)
+        self.assertIn("ScanRows: 1.2K (1200)", excerpt)
+        self.assertIn("hostname:be-b", excerpt)
+        self.assertNotIn("<table", excerpt)
+
+        tasks = distributed_scan_tasks(profile)
+        self.assertEqual(tasks["scan_rows"].tolist(), [1200, 800])
+        self.assertEqual(tasks["tablet_ids"].tolist(), [["10", "11"], ["12"]])
+
     def test_full_group_comparison_catches_equal_total_different_groups(self):
         left = pd.DataFrame([("a", 1), ("b", 2)], columns=["category", "n"])
         right = pd.DataFrame([("a", 2), ("b", 1)], columns=left.columns)
@@ -157,6 +192,47 @@ DetailProfile(query-id):
         DorisLab.assert_scan(Evidence(), "m08_events")
         with self.assertRaises(AssertionError):
             DorisLab.assert_scan(Evidence(), "m08_events", "m08_sync_metrics")
+
+    def test_fresh_table_with_unknown_metadata_row_count_can_load(self):
+        lab = DorisLab.__new__(DorisLab)
+        lab._metadata_rows = Mock(side_effect=[
+            [{"Tables_in_doris_course": "new_table"}],
+            [{"VisibleVersion": "1", "RowCount": "-1"}],
+        ])
+        lab.insert = Mock(return_value=10)
+        loaded = lab.load_table_once(
+            "new_table", "INSERT INTO new_table VALUES (1)", expected_rows=10
+        )
+        self.assertEqual(loaded, 10)
+        lab.insert.assert_called_once()
+
+    def test_replica_backend_summary_exposes_one_stale_backend(self):
+        lab = DorisLab.__new__(DorisLab)
+        tablet_rows = []
+        for tablet_id in (10, 11):
+            for backend_id, version in ((1, 2), (2, 2), (3, 1)):
+                tablet_rows.append({
+                    "TabletId": tablet_id,
+                    "BackendId": backend_id,
+                    "State": "NORMAL",
+                    "Version": version,
+                    "LstSuccessVersion": version,
+                    "LstFailedVersion": -1,
+                })
+        lab._metadata_rows = Mock(side_effect=[
+            tablet_rows,
+            [
+                {"BackendId": 1, "Alive": "true"},
+                {"BackendId": 2, "Alive": "true"},
+                {"BackendId": 3, "Alive": "false"},
+            ],
+        ])
+        with patch.object(client, "show_frame"):
+            frame = lab.tablet_replica_backend_summary("probe")
+        self.assertEqual(frame["alive"].tolist(), [True, True, False])
+        self.assertEqual(frame["stored replicas"].tolist(), [2, 2, 2])
+        self.assertEqual(frame["current-version replicas"].tolist(), [2, 2, 0])
+        self.assertEqual(frame["replica versions"].tolist(), ["2", "2", "1"])
 
 
 if __name__ == "__main__":

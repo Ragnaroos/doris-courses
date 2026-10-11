@@ -89,6 +89,134 @@ def scan_profile_excerpt(profile: str, *, detail: bool = False) -> str:
     return "\n".join(selected).strip("\n") or "No OLAP scan counters are present in this section."
 
 
+def distributed_scan_tasks(profile: str) -> pd.DataFrame:
+    """Return each raw DetailProfile OLAP scan task without merging its counters."""
+    if "DetailProfile" not in profile:
+        raise ValueError("DetailProfile is not present in this Query Profile.")
+    section = "DetailProfile" + profile.split("DetailProfile", 1)[1]
+    current_host = None
+    scan_indent = None
+    current = None
+    scans = []
+
+    def finish() -> None:
+        nonlocal current
+        if current is not None:
+            scans.append(current)
+            current = None
+
+    for line in section.splitlines():
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        host_match = re.match(
+            r"Pipeline\s+\d+\(host=TNetworkAddress\(hostname:([^,]+),", stripped
+        )
+        if host_match:
+            current_host = host_match.group(1)
+        if scan_indent is not None and stripped and indent <= scan_indent:
+            finish()
+            scan_indent = None
+        if stripped.startswith("OLAP_SCAN_OPERATOR("):
+            finish()
+            table_match = re.search(r"table_name=(.+?)\)\(id=", stripped)
+            current = {
+                "be_host": current_host or "unknown",
+                "table": table_match.group(1) if table_match else "unknown",
+                "tablet_ids": [],
+                "scan_rows": None,
+            }
+            scan_indent = indent
+        elif current is not None:
+            tablet_match = re.match(r"- TabletIds:\s*\[([^]]*)\]", stripped)
+            if tablet_match:
+                current["tablet_ids"] = [
+                    value.strip() for value in tablet_match.group(1).split(",") if value.strip()
+                ]
+            row_match = re.match(r"- ScanRows:\s*(.+)$", stripped)
+            if row_match:
+                value = row_match.group(1)
+                exact = re.search(r"\(([0-9,]+)\)\s*$", value)
+                plain = re.fullmatch(r"[0-9,]+", value.strip())
+                if exact:
+                    current["scan_rows"] = int(exact.group(1).replace(",", ""))
+                elif plain:
+                    current["scan_rows"] = int(value.replace(",", ""))
+    finish()
+    if not scans:
+        raise ValueError("No per-instance OLAP scan operators were found in DetailProfile.")
+    return pd.DataFrame(scans)
+
+
+def distributed_scan_summary(profile: str) -> pd.DataFrame:
+    """Summarize DetailProfile scan instances by BE without mixing merged counters.
+
+    Each DetailProfile OLAP scan belongs to one Pipeline on one BE. Tablet IDs
+    are deduplicated per host, while ScanRows is summed only across those
+    per-instance scan operators. The complete raw Profile remains the source of
+    truth and should be retained beside this learner-facing summary.
+    """
+    tasks = distributed_scan_tasks(profile)
+
+    rows = []
+    for (host, table), group in tasks.groupby(["be_host", "table"], sort=True):
+        tablets = sorted({tablet for values in group["tablet_ids"] for tablet in values})
+        scan_rows = group["scan_rows"].dropna()
+        rows.append({
+            "be_host": host,
+            "table": table,
+            "scan_instances": len(group.index),
+            "selected_tablets": len(tablets),
+            "scan_rows": int(scan_rows.sum()) if len(scan_rows.index) else "not shown",
+        })
+    return pd.DataFrame(rows)
+
+
+def distributed_scan_profile_excerpt(profile: str) -> str:
+    """Keep the raw DetailProfile hierarchy and only essential scan lines."""
+    if "DetailProfile" not in profile:
+        return "DetailProfile is not present in this Query Profile."
+    section = "DetailProfile" + profile.split("DetailProfile", 1)[1]
+    fragment = pipeline = task = None
+    emitted_fragment = emitted_pipeline = None
+    scan_indent = None
+    selected = []
+
+    for line in section.splitlines():
+        stripped = line.strip()
+        indent = len(line) - len(line.lstrip())
+        if scan_indent is not None and stripped and indent <= scan_indent:
+            scan_indent = None
+        if re.match(r"Fragment\s+\d+", stripped):
+            fragment = line
+            pipeline = task = None
+        elif re.match(r"Pipeline\s+\d+\(host=", stripped):
+            pipeline = line
+            task = None
+        elif stripped.startswith("PipelineTask("):
+            task = line
+
+        if stripped.startswith("OLAP_SCAN_OPERATOR("):
+            if fragment != emitted_fragment:
+                if selected:
+                    selected.append("")
+                selected.append(fragment or "Fragment unknown:")
+                emitted_fragment = fragment
+                emitted_pipeline = None
+            if pipeline != emitted_pipeline:
+                selected.append(pipeline or "  Pipeline(host=unknown):")
+                emitted_pipeline = pipeline
+            if task is not None:
+                selected.append(task)
+            selected.append(line)
+            scan_indent = indent
+        elif scan_indent is not None and (
+            stripped.startswith("- TabletIds:") or stripped.startswith("- ScanRows:")
+        ):
+            selected.append(line)
+
+    return "\n".join(selected) or "No OLAP scan operators are present in DetailProfile."
+
+
 def show_result_change(
     current: pd.DataFrame,
     title: str,
@@ -180,6 +308,37 @@ class QueryEvidence:
         """Backward-compatible alias for show_profile_scan_rows()."""
         self.show_profile_scan_rows(title)
 
+    def show_distributed_scans(self, title: str) -> None:
+        """Show the BE hosts and per-instance scan work from DetailProfile."""
+        show_frame(title, self.distributed_scans())
+        show_log(f"{title}: complete raw Query Profile · {self.profile_id}", self.profile)
+
+    def show_distributed_scan_profile(self, title: str) -> None:
+        """Show a cropped, structurally unchanged DetailProfile scan excerpt."""
+        show_log(title, distributed_scan_profile_excerpt(self.profile), opened=True)
+        show_log(f"{title}: complete raw Query Profile · {self.profile_id}", self.profile)
+
+    def distributed_scans(self) -> pd.DataFrame:
+        """Return the per-BE DetailProfile scan summary for assertions."""
+        return distributed_scan_summary(self.profile)
+
+    def distributed_scan_tasks(self) -> pd.DataFrame:
+        """Return individual DetailProfile scan tasks for controlled comparisons."""
+        return distributed_scan_tasks(self.profile)
+
+    def show_distributed_plan(self, title: str) -> None:
+        """Show the SQL-relevant distributed operators and scan scope from EXPLAIN."""
+        keep = re.compile(
+            r"^\s*(?:PLAN FRAGMENT\s+\d+|PARTITION:|VRESULT SINK|"
+            r"STREAM DATA SINK|EXCHANGE ID:|HASH_PARTITIONED:|UNPARTITIONED$|"
+            r"\d+:V(?:OlapScanNode|AGGREGATE|SORT|(?:MERGING-)?EXCHANGE)|"
+            r"output:|group by:|order by:|TABLE:|partitions=|tablets=|"
+            r"cardinality=.*numNodes=)"
+        )
+        excerpt = "\n".join(line for line in self.plan.splitlines() if keep.match(line))
+        show_log(title, excerpt or "Distributed plan lines are not shown.", opened=True)
+        show_log(f"{title}: complete EXPLAIN", self.plan)
+
     def show(self, title: str, *, detail: bool = False) -> None:
         show_frame(f"{title}: query result", self.rows)
         scans = [line for line in self.plan.splitlines() if re.match(r"\s*TABLE:", line)]
@@ -232,5 +391,6 @@ def capture_query(lab: Any, statement: str, *, settings=None) -> QueryEvidence:
 
 __all__ = [
     "compare_profiles", "capture_query", "session_settings", "QueryEvidence",
+    "distributed_scan_profile_excerpt", "distributed_scan_summary", "distributed_scan_tasks",
     "scan_profile_excerpt", "show_result_change",
 ]
