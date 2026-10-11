@@ -1,0 +1,19 @@
+{
+  "initial_rows": 10,
+  "initial_order_amount": "1400.00",
+  "raw_rows": 13,
+  "rejected_rows": 3,
+  "delivery_rows": 9,
+  "history_rows": 18,
+  "current_rows": 11,
+  "current_order_amount": "1510.00",
+  "paid_orders": 2,
+  "paid_gmv": "250.00",
+  "refund_amount": "150.00",
+  "statuses": {
+    "CREATED": 8,
+    "CANCELLED": 1,
+    "REFUNDED": 1,
+    "DELIVERED": 1
+  }
+}

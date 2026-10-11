@@ -1,0 +1,482 @@
+{
+  "provenance": {
+    "source": "Microsoft Wide World Importers v1.0",
+    "source_kind": "synthetic_official_sample",
+    "license": "MIT",
+    "selection": "OrderID IN (1,2,3,4,5,80,81,82,83,84); referenced dimensions plus IDs 1..11 for course simulation",
+    "transforms": "order_amount = SUM(OrderLines.Quantity * UnitPrice), excludes tax; no payment or status inferred"
+  },
+  "orders": [
+    {
+      "order_id": 1,
+      "customer_id": 832,
+      "order_date": "2013-01-01",
+      "order_amount": "2300.00",
+      "line_count": 1,
+      "data_source": "WWI"
+    },
+    {
+      "order_id": 2,
+      "customer_id": 803,
+      "order_date": "2013-01-01",
+      "order_amount": "405.00",
+      "line_count": 2,
+      "data_source": "WWI"
+    },
+    {
+      "order_id": 3,
+      "customer_id": 105,
+      "order_date": "2013-01-01",
+      "order_amount": "90.00",
+      "line_count": 1,
+      "data_source": "WWI"
+    },
+    {
+      "order_id": 4,
+      "customer_id": 57,
+      "order_date": "2013-01-01",
+      "order_amount": "445.20",
+      "line_count": 3,
+      "data_source": "WWI"
+    },
+    {
+      "order_id": 5,
+      "customer_id": 905,
+      "order_date": "2013-01-01",
+      "order_amount": "704.00",
+      "line_count": 3,
+      "data_source": "WWI"
+    },
+    {
+      "order_id": 80,
+      "customer_id": 543,
+      "order_date": "2013-01-02",
+      "order_amount": "1138.00",
+      "line_count": 3,
+      "data_source": "WWI"
+    },
+    {
+      "order_id": 81,
+      "customer_id": 456,
+      "order_date": "2013-01-02",
+      "order_amount": "376.00",
+      "line_count": 2,
+      "data_source": "WWI"
+    },
+    {
+      "order_id": 82,
+      "customer_id": 487,
+      "order_date": "2013-01-02",
+      "order_amount": "234.00",
+      "line_count": 2,
+      "data_source": "WWI"
+    },
+    {
+      "order_id": 83,
+      "customer_id": 154,
+      "order_date": "2013-01-02",
+      "order_amount": "6220.40",
+      "line_count": 4,
+      "data_source": "WWI"
+    },
+    {
+      "order_id": 84,
+      "customer_id": 111,
+      "order_date": "2013-01-02",
+      "order_amount": "308.00",
+      "line_count": 2,
+      "data_source": "WWI"
+    }
+  ],
+  "order_lines": [
+    {
+      "order_line_id": 2,
+      "order_id": 1,
+      "product_id": 67,
+      "quantity": 10,
+      "unit_price": "230.00"
+    },
+    {
+      "order_line_id": 3,
+      "order_id": 2,
+      "product_id": 50,
+      "quantity": 9,
+      "unit_price": "13.00"
+    },
+    {
+      "order_line_id": 6,
+      "order_id": 2,
+      "product_id": 10,
+      "quantity": 9,
+      "unit_price": "32.00"
+    },
+    {
+      "order_line_id": 9,
+      "order_id": 3,
+      "product_id": 114,
+      "quantity": 3,
+      "unit_price": "30.00"
+    },
+    {
+      "order_line_id": 11,
+      "order_id": 4,
+      "product_id": 206,
+      "quantity": 96,
+      "unit_price": "2.70"
+    },
+    {
+      "order_line_id": 12,
+      "order_id": 4,
+      "product_id": 130,
+      "quantity": 5,
+      "unit_price": "32.00"
+    },
+    {
+      "order_line_id": 13,
+      "order_id": 4,
+      "product_id": 50,
+      "quantity": 2,
+      "unit_price": "13.00"
+    },
+    {
+      "order_line_id": 14,
+      "order_id": 5,
+      "product_id": 128,
+      "quantity": 4,
+      "unit_price": "32.00"
+    },
+    {
+      "order_line_id": 17,
+      "order_id": 5,
+      "product_id": 121,
+      "quantity": 3,
+      "unit_price": "32.00"
+    },
+    {
+      "order_line_id": 18,
+      "order_id": 5,
+      "product_id": 155,
+      "quantity": 20,
+      "unit_price": "24.00"
+    },
+    {
+      "order_line_id": 158,
+      "order_id": 80,
+      "product_id": 214,
+      "quantity": 10,
+      "unit_price": "90.00"
+    },
+    {
+      "order_line_id": 161,
+      "order_id": 80,
+      "product_id": 36,
+      "quantity": 6,
+      "unit_price": "13.00"
+    },
+    {
+      "order_line_id": 162,
+      "order_id": 80,
+      "product_id": 118,
+      "quantity": 5,
+      "unit_price": "32.00"
+    },
+    {
+      "order_line_id": 163,
+      "order_id": 81,
+      "product_id": 120,
+      "quantity": 8,
+      "unit_price": "32.00"
+    },
+    {
+      "order_line_id": 165,
+      "order_id": 81,
+      "product_id": 112,
+      "quantity": 4,
+      "unit_price": "30.00"
+    },
+    {
+      "order_line_id": 166,
+      "order_id": 82,
+      "product_id": 30,
+      "quantity": 9,
+      "unit_price": "13.00"
+    },
+    {
+      "order_line_id": 167,
+      "order_id": 82,
+      "product_id": 46,
+      "quantity": 9,
+      "unit_price": "13.00"
+    },
+    {
+      "order_line_id": 168,
+      "order_id": 83,
+      "product_id": 172,
+      "quantity": 100,
+      "unit_price": "48.00"
+    },
+    {
+      "order_line_id": 169,
+      "order_id": 83,
+      "product_id": 148,
+      "quantity": 72,
+      "unit_price": "18.00"
+    },
+    {
+      "order_line_id": 170,
+      "order_id": 83,
+      "product_id": 28,
+      "quantity": 2,
+      "unit_price": "13.00"
+    },
+    {
+      "order_line_id": 171,
+      "order_id": 83,
+      "product_id": 194,
+      "quantity": 24,
+      "unit_price": "4.10"
+    },
+    {
+      "order_line_id": 172,
+      "order_id": 84,
+      "product_id": 130,
+      "quantity": 8,
+      "unit_price": "32.00"
+    },
+    {
+      "order_line_id": 173,
+      "order_id": 84,
+      "product_id": 22,
+      "quantity": 4,
+      "unit_price": "13.00"
+    }
+  ],
+  "customers": [
+    {
+      "customer_id": 1,
+      "customer_name": "Tailspin Toys (Head Office)"
+    },
+    {
+      "customer_id": 2,
+      "customer_name": "Tailspin Toys (Sylvanite, MT)"
+    },
+    {
+      "customer_id": 3,
+      "customer_name": "Tailspin Toys (Peeples Valley, AZ)"
+    },
+    {
+      "customer_id": 4,
+      "customer_name": "Tailspin Toys (Medicine Lodge, KS)"
+    },
+    {
+      "customer_id": 5,
+      "customer_name": "Tailspin Toys (Gasport, NY)"
+    },
+    {
+      "customer_id": 6,
+      "customer_name": "Tailspin Toys (Jessie, ND)"
+    },
+    {
+      "customer_id": 7,
+      "customer_name": "Tailspin Toys (Frankewing, TN)"
+    },
+    {
+      "customer_id": 8,
+      "customer_name": "Tailspin Toys (Bow Mar, CO)"
+    },
+    {
+      "customer_id": 9,
+      "customer_name": "Tailspin Toys (Netcong, NJ)"
+    },
+    {
+      "customer_id": 10,
+      "customer_name": "Tailspin Toys (Wimbledon, ND)"
+    },
+    {
+      "customer_id": 11,
+      "customer_name": "Tailspin Toys (Devault, PA)"
+    },
+    {
+      "customer_id": 57,
+      "customer_name": "Tailspin Toys (Lakemore, OH)"
+    },
+    {
+      "customer_id": 105,
+      "customer_name": "Tailspin Toys (Tomnolen, MS)"
+    },
+    {
+      "customer_id": 111,
+      "customer_name": "Tailspin Toys (Oriole Beach, FL)"
+    },
+    {
+      "customer_id": 154,
+      "customer_name": "Tailspin Toys (Eden Valley, MN)"
+    },
+    {
+      "customer_id": 456,
+      "customer_name": "Wingtip Toys (West Hempstead, NY)"
+    },
+    {
+      "customer_id": 487,
+      "customer_name": "Wingtip Toys (Elverson, PA)"
+    },
+    {
+      "customer_id": 543,
+      "customer_name": "Wingtip Toys (Lexington Heights, MI)"
+    },
+    {
+      "customer_id": 803,
+      "customer_name": "Bala Dixit"
+    },
+    {
+      "customer_id": 832,
+      "customer_name": "Aakriti Byrraju"
+    },
+    {
+      "customer_id": 905,
+      "customer_name": "Sara Huiting"
+    }
+  ],
+  "products": [
+    {
+      "product_id": 1,
+      "product_name": "USB missile launcher (Green)"
+    },
+    {
+      "product_id": 2,
+      "product_name": "USB rocket launcher (Gray)"
+    },
+    {
+      "product_id": 3,
+      "product_name": "Office cube periscope (Black)"
+    },
+    {
+      "product_id": 4,
+      "product_name": "USB food flash drive - sushi roll"
+    },
+    {
+      "product_id": 5,
+      "product_name": "USB food flash drive - hamburger"
+    },
+    {
+      "product_id": 6,
+      "product_name": "USB food flash drive - hot dog"
+    },
+    {
+      "product_id": 7,
+      "product_name": "USB food flash drive - pizza slice"
+    },
+    {
+      "product_id": 8,
+      "product_name": "USB food flash drive - dim sum 10 drive variety pack"
+    },
+    {
+      "product_id": 9,
+      "product_name": "USB food flash drive - banana"
+    },
+    {
+      "product_id": 10,
+      "product_name": "USB food flash drive - chocolate bar"
+    },
+    {
+      "product_id": 11,
+      "product_name": "USB food flash drive - cookie"
+    },
+    {
+      "product_id": 22,
+      "product_name": "DBA joke mug - it depends (White)"
+    },
+    {
+      "product_id": 28,
+      "product_name": "DBA joke mug - two types of DBAs (White)"
+    },
+    {
+      "product_id": 30,
+      "product_name": "Developer joke mug - Oct 31 = Dec 25 (White)"
+    },
+    {
+      "product_id": 36,
+      "product_name": "Developer joke mug - when your hammer is C++ (White)"
+    },
+    {
+      "product_id": 46,
+      "product_name": "Developer joke mug - a foo walks into a bar (White)"
+    },
+    {
+      "product_id": 50,
+      "product_name": "Developer joke mug - old C developers never die (White)"
+    },
+    {
+      "product_id": 67,
+      "product_name": "Ride on toy sedan car (Black) 1/12 scale"
+    },
+    {
+      "product_id": 112,
+      "product_name": "Superhero action jacket (Blue) L"
+    },
+    {
+      "product_id": 114,
+      "product_name": "Superhero action jacket (Blue) XXL"
+    },
+    {
+      "product_id": 118,
+      "product_name": "Dinosaur battery-powered slippers (Green) S"
+    },
+    {
+      "product_id": 120,
+      "product_name": "Dinosaur battery-powered slippers (Green) L"
+    },
+    {
+      "product_id": 121,
+      "product_name": "Dinosaur battery-powered slippers (Green) XL"
+    },
+    {
+      "product_id": 128,
+      "product_name": "Plush shark slippers (Gray) L"
+    },
+    {
+      "product_id": 130,
+      "product_name": "Furry gorilla with big eyes slippers (Black) S"
+    },
+    {
+      "product_id": 148,
+      "product_name": "Halloween skull mask (Gray) L"
+    },
+    {
+      "product_id": 155,
+      "product_name": "Large sized bubblewrap roll 50m"
+    },
+    {
+      "product_id": 172,
+      "product_name": "32 mm Anti static bubble wrap (Blue) 20m"
+    },
+    {
+      "product_id": 194,
+      "product_name": "Black and orange glass with care despatch tape  48mmx100m"
+    },
+    {
+      "product_id": 206,
+      "product_name": "Permanent marker black 5mm nib (Black) 5mm"
+    },
+    {
+      "product_id": 214,
+      "product_name": "Air cushion film 200mmx200mm 325m"
+    }
+  ],
+  "expected": {
+    "rows": 10,
+    "order_amount": "12220.60",
+    "by_date": [
+      [
+        "2013-01-01",
+        5,
+        "3944.20"
+      ],
+      [
+        "2013-01-02",
+        5,
+        "8276.40"
+      ]
+    ]
+  }
+}

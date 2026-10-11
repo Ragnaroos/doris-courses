@@ -1,0 +1,127 @@
+{
+  "data_source": "COURSE_SIMULATION",
+  "note": "New orders referencing WWI customer/product IDs. Prices, EAST/WEST regions and all events are teaching scenarios, not reconstructed WWI history.",
+  "order_lines": [
+    {
+      "order_line_id": 990001,
+      "order_id": 900001,
+      "product_id": 1,
+      "quantity": 1,
+      "unit_price": "100.00"
+    },
+    {
+      "order_line_id": 990002,
+      "order_id": 900002,
+      "product_id": 2,
+      "quantity": 1,
+      "unit_price": "200.00"
+    },
+    {
+      "order_line_id": 990003,
+      "order_id": 900003,
+      "product_id": 3,
+      "quantity": 1,
+      "unit_price": "150.00"
+    },
+    {
+      "order_line_id": 990004,
+      "order_id": 900004,
+      "product_id": 4,
+      "quantity": 1,
+      "unit_price": "80.00"
+    },
+    {
+      "order_line_id": 990005,
+      "order_id": 900005,
+      "product_id": 5,
+      "quantity": 1,
+      "unit_price": "120.00"
+    },
+    {
+      "order_line_id": 990006,
+      "order_id": 900006,
+      "product_id": 6,
+      "quantity": 1,
+      "unit_price": "60.00"
+    },
+    {
+      "order_line_id": 990007,
+      "order_id": 900007,
+      "product_id": 7,
+      "quantity": 1,
+      "unit_price": "300.00"
+    },
+    {
+      "order_line_id": 990008,
+      "order_id": 900008,
+      "product_id": 8,
+      "quantity": 1,
+      "unit_price": "90.00"
+    },
+    {
+      "order_line_id": 990009,
+      "order_id": 900009,
+      "product_id": 9,
+      "quantity": 1,
+      "unit_price": "50.00"
+    },
+    {
+      "order_line_id": 990010,
+      "order_id": 900010,
+      "product_id": 10,
+      "quantity": 1,
+      "unit_price": "250.00"
+    },
+    {
+      "order_line_id": 990011,
+      "order_id": 900011,
+      "product_id": 11,
+      "quantity": 1,
+      "unit_price": "110.00"
+    }
+  ],
+  "payments": [
+    {
+      "payment_id": "P01",
+      "order_id": 900001,
+      "event_id": "E01",
+      "amount": "100.00",
+      "event_time": "2026-01-02 09:00:00"
+    },
+    {
+      "payment_id": "P03",
+      "order_id": 900003,
+      "event_id": "E04",
+      "amount": "150.00",
+      "event_time": "2026-01-02 09:20:00"
+    }
+  ],
+  "refunds": [
+    {
+      "refund_id": "R03",
+      "payment_id": "P03",
+      "order_id": 900003,
+      "event_id": "E05",
+      "amount": "150.00",
+      "event_time": "2026-01-02 10:20:00"
+    }
+  ],
+  "shipments": [
+    {
+      "shipment_event_id": "H01",
+      "shipment_id": "H1",
+      "order_id": 900001,
+      "event_id": "E02",
+      "status": "SHIPPED",
+      "event_time": "2026-01-02 10:00:00"
+    },
+    {
+      "shipment_event_id": "H02",
+      "shipment_id": "H1",
+      "order_id": 900001,
+      "event_id": "E08",
+      "status": "DELIVERED",
+      "event_time": "2026-01-02 11:00:00"
+    }
+  ]
+}
