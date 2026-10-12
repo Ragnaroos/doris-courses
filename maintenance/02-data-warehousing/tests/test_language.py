@@ -54,6 +54,19 @@ class EnglishMaterialTest(unittest.TestCase):
                     self.assertTrue(dest.is_file())
                     self.assertIn(unquote(url.fragment), set(heading_ids(dest.read_text())))
 
+    def test_level2_local_links_resolve(self):
+        for path, text in authored_files():
+            if path.relative_to(ROOT).parts[0] != "level2":
+                continue
+            if path.suffix not in {".md", ".ipynb"}:
+                continue
+            for target in re.findall(r"\]\(([^\s)]+)\)", text):
+                url = urlsplit(target)
+                if url.scheme or url.netloc or not url.path:
+                    continue
+                with self.subTest(source=str(path), target=target):
+                    self.assertTrue((path.parent / unquote(url.path)).exists())
+
 
 if __name__ == "__main__":
     unittest.main()
