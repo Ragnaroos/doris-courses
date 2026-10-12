@@ -61,6 +61,8 @@ The optional [Lab 5A: Kafka / Routine Load](level1/module05-ingestion/optional5_
 see [Continuous Ingestion Environment](environments/streaming/README.md) for prerequisites, separate data, and shutdown instructions. They do not change the completion requirements for the seven main Labs.
 Module 4 starts two lake table helper containers on demand; see [Lake Table Environment](environments/lakehouse/README.md) for setup instructions.
 
+After Level 2, continue with the [Level 3 Learning Guide](level3/README.md) for publishing, access control, storage lifecycle, and resource isolation.
+
 ## Maintainer Resources
 
 [Course Maintenance Resources](../../maintenance/02-data-warehousing/README.md) document environment validation, testing methods, and integration lab preparation status.
