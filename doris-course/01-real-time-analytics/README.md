@@ -107,6 +107,10 @@ python -m pip install -r requirements.txt
 cp course_secrets.env.example course_secrets.env
 ```
 
+`requirements.txt` also installs `doris_labkit`, the notebook runtime shared by the
+courses, from `../common`. Run the command from this directory and keep the
+repository together.
+
 Use the same `.venv` for all levels. The environment itself is not portable;
 `pyproject.toml` and `requirements.txt` are the reproducible definitions.
 

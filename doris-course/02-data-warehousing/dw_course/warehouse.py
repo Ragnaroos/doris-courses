@@ -9,12 +9,11 @@ from pathlib import Path
 import pymysql
 import requests
 
-from ._shared import load_component
+from doris_labkit.profiles import normalize_statement, profile_metric, profile_row_sum
+
 from .runtime import expect, normalized
 from .streaming import wait_for
 from .ui import show_log, show_records
-
-_shared_lab = load_component('doris_client').DorisLab
 
 
 def case_fixture():
@@ -61,12 +60,12 @@ def compare_query_profiles(lab, cases, *, repeats=20):
                 reference = result
             else:
                 expect(result, reference, title='Optimization preserves all result rows')
-            fingerprint = _shared_lab._normalize_statement(statement)
+            fingerprint = normalize_statement(statement)
 
             def find_profile():
                 return [row for row in _profiles(lab)
                         if str(row['Profile ID']) not in excluded
-                        and _shared_lab._normalize_statement(str(row['Sql Statement'])) == fingerprint
+                        and normalize_statement(str(row['Sql Statement'])) == fingerprint
                         and row['Default Db'] == lab.database]
 
             profile_row = wait_for(find_profile, bool, description='Locate this query Profile', timeout=30)[0]
@@ -74,9 +73,9 @@ def compare_query_profiles(lab, cases, *, repeats=20):
             profile = _profile_text(lab, profile_id)
             merged = profile.split('MergedProfile:', 1)[-1].split('DetailProfile', 1)[0]
             observations.append({'query': label, 'profile_id': profile_id,
-                                 'scan_rows': _shared_lab._profile_metric(merged, 'ScanRows'),
-                                 'rows_read': _shared_lab._profile_row_sum(profile, 'RowsRead'),
-                                 'scan_bytes': _shared_lab._profile_metric(merged, 'ScanBytes')})
+                                 'scan_rows': profile_metric(merged, 'ScanRows'),
+                                 'rows_read': profile_row_sum(profile, 'RowsRead'),
+                                 'scan_bytes': profile_metric(merged, 'ScanBytes')})
             show_log(label + ': complete measured Profile', profile)
         show_records('Actual scan evidence; not an EXPLAIN estimate', observations)
         # Timing samples omit Profile collection. One warm-up is explicit; storage caches are not flushed.

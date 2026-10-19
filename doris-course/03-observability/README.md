@@ -14,6 +14,10 @@ source .venv/bin/activate
 python -m pip install -r requirements.txt
 ```
 
+`requirements.txt` also installs `doris_labkit`, the notebook runtime shared by the
+courses, from `../common`. Run the command from this directory and keep the
+repository together.
+
 Start JupyterLab from the same directory:
 
 ```bash

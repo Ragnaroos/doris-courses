@@ -1,6 +1,6 @@
 """Docker lifecycle primitives shared by course environments."""
 
-from .doris_client import (
+from doris_labkit.docker import (
     container_inspect,
     docker_exists,
     docker_preflight,

@@ -23,11 +23,11 @@ class RuntimeTests(unittest.TestCase):
     def test_running_container_is_reused(self):
         lab = object.__new__(ObservabilityLab)
         lab.DORIS_CONTAINER = "doris"
-        with patch("doris_course.doris_client.shutil.which", return_value="/usr/local/bin/docker"), \
-             patch("doris_course.doris_client.docker_preflight", return_value=(True, "ready")), \
-             patch("doris_course.doris_client.container_inspect", return_value=RUNNING), \
-             patch("doris_course.doris_client.wait_for_health") as wait, \
-             patch("doris_course.doris_client.run") as run:
+        with patch("doris_labkit.docker.shutil.which", return_value="/usr/local/bin/docker"), \
+             patch("doris_labkit.docker.docker_preflight", return_value=(True, "ready")), \
+             patch("doris_labkit.docker.container_inspect", return_value=RUNNING), \
+             patch("doris_labkit.docker.wait_for_health") as wait, \
+             patch("doris_labkit.docker.run") as run:
             state = lab.start_container()
         self.assertEqual(state["State"]["Status"], "running")
         wait.assert_called_once_with("doris", timeout_seconds=300)
@@ -37,11 +37,11 @@ class RuntimeTests(unittest.TestCase):
         lab = object.__new__(ObservabilityLab)
         lab.DORIS_CONTAINER = "doris"
         start_result = subprocess.CompletedProcess(["docker", "start", "doris"], 0, "doris", "")
-        with patch("doris_course.doris_client.shutil.which", return_value="/usr/local/bin/docker"), \
-             patch("doris_course.doris_client.docker_preflight", return_value=(True, "ready")), \
-             patch("doris_course.doris_client.container_inspect", side_effect=[STOPPED, RUNNING]), \
-             patch("doris_course.doris_client.wait_for_health"), \
-             patch("doris_course.doris_client.run", return_value=start_result) as run:
+        with patch("doris_labkit.docker.shutil.which", return_value="/usr/local/bin/docker"), \
+             patch("doris_labkit.docker.docker_preflight", return_value=(True, "ready")), \
+             patch("doris_labkit.docker.container_inspect", side_effect=[STOPPED, RUNNING]), \
+             patch("doris_labkit.docker.wait_for_health"), \
+             patch("doris_labkit.docker.run", return_value=start_result) as run:
             lab.start_container()
         run.assert_called_once_with(["docker", "start", "doris"], show=True)
 

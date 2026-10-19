@@ -1,4 +1,4 @@
-"""Reuse course 01's display components rather than duplicate its CSS."""
+"""Notebook display for the order-domain course, built on the shared doris_labkit components."""
 
 import json
 
@@ -6,17 +6,9 @@ import pandas as pd
 from IPython import get_ipython
 from IPython.display import display
 
-from ._shared import load_component
-
-_shared = load_component("doris_client")
-install_styles = _shared.install_styles
-card = _shared.card
-show_sql = _shared.show_sql
-show_frame = _shared.show_frame
-show_log = _shared.show_log
-result_frame = _shared.result_frame
-report_sql_error = _shared.report_sql_error
-workflow_html = _shared.DorisLab._workflow_html
+from doris_labkit.db import report_sql_error
+from doris_labkit.results import result_frame, show_frame
+from doris_labkit.ui import card, install_styles, show_log, show_sql, workflow_html
 
 
 def in_notebook():
@@ -89,3 +81,19 @@ def show_response(response, title="Stream Load response"):
         show_log("Complete JSON: " + title, content)
     else:
         print(content)
+
+
+__all__ = [
+    "WorkflowProgress",
+    "card",
+    "in_notebook",
+    "install_styles",
+    "report_sql_error",
+    "result_frame",
+    "show_frame",
+    "show_log",
+    "show_records",
+    "show_response",
+    "show_sql",
+    "workflow_html",
+]

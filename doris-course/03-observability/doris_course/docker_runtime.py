@@ -1,6 +1,6 @@
 """Docker lifecycle primitives shared by the observability labs."""
 
-from .doris_client import (
+from doris_labkit.docker import (
     container_inspect,
     docker_exists,
     docker_preflight,

@@ -1,5 +1,5 @@
-"""Reuse the existing repository quiz renderer without importing its cluster helper."""
+"""The knowledge-check widget, provided by the shared doris_labkit package."""
 
-from ._shared import load_component
+from doris_labkit.quiz import CourseQuiz
 
-CourseQuiz = load_component("quiz").CourseQuiz
+__all__ = ["CourseQuiz"]

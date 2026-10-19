@@ -564,13 +564,12 @@ class AlignmentTest(unittest.TestCase):
         self.assertIn("8276.40", source)
 
     def test_display_components_are_reused(self):
+        from doris_labkit import results, ui as labkit_ui
         from dw_course import ui
-        from dw_course._shared import load_component
-        shared = load_component("doris_client")
-        self.assertIs(ui.show_frame, shared.show_frame)
-        self.assertIs(ui.card, shared.card)
-        self.assertIs(ui.install_styles, shared.install_styles)
-        self.assertIs(ui.workflow_html, shared.DorisLab._workflow_html)
+        self.assertIs(ui.show_frame, results.show_frame)
+        self.assertIs(ui.card, labkit_ui.card)
+        self.assertIs(ui.install_styles, labkit_ui.install_styles)
+        self.assertIs(ui.workflow_html, labkit_ui.workflow_html)
 
     def test_sql_keeps_column_names(self):
         lab = WarehouseLab.__new__(WarehouseLab)

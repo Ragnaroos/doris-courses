@@ -7,6 +7,7 @@ import unittest
 
 import nbformat
 
+import doris_labkit.quiz
 from doris_course.quiz import CourseQuiz
 
 
@@ -162,9 +163,7 @@ class QuizTests(unittest.TestCase):
             os.chdir(original)
 
     def test_shared_quiz_typography_and_all_notebook_headers(self):
-        quiz_source = (ROOT / "doris_course" / "quiz.py").read_text(
-            encoding="utf-8"
-        )
+        quiz_source = Path(doris_labkit.quiz.__file__).read_text(encoding="utf-8")
         self.assertIn(".doris-quiz-kicker", quiz_source)
         self.assertIn(".doris-quiz-objective", quiz_source)
         self.assertIn(".doris-quiz-question", quiz_source)

@@ -12,7 +12,7 @@ python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
 ```
 
-Display and quiz functionality depend on shared components in the repository; do not copy this course directory on its own.
+`requirements.txt` installs the notebook runtime shared by the courses from `doris-course/common`; do not copy this course directory on its own.
 If Jupyter runs on a remote server, “local machine” below refers to the server, not the Mac running your browser.
 
 ## 2. Start the Course Sandbox

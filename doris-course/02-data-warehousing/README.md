@@ -30,7 +30,7 @@ Historical account receipts and simulated order payments are analyzed at their r
 
 ## Install and Open the Course
 
-Keep the entire repository; display and quiz functionality depend on shared components within it.
+Keep the entire repository: `requirements.txt` installs `doris_labkit`, the notebook runtime shared by the courses, from `../common`.
 Run the following from this course directory:
 
 ```bash
