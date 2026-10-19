@@ -33,8 +33,11 @@ GRAFANA_PORT = env_port("DORIS_OBS_GRAFANA_PORT", 23000)  # forwards to Grafana 
 OTLP_GRPC_PORT = env_port("DORIS_OBS_OTLP_GRPC_PORT", 24317)  # forwards to Collector port 4317
 OTLP_HTTP_PORT = env_port("DORIS_OBS_OTLP_HTTP_PORT", 24318)  # forwards to Collector port 4318
 
-# The Module 2 collectors, started with docker run on NETWORK.
-MODULE2_COLLECTORS = ("doris-obs-log2doris", "doris-obs-metric2doris", "doris-obs-traces2doris")
+# The Module 2 collectors, started with docker run on NETWORK. The trace collector
+# also publishes its OTLP/HTTP receiver, so Module 2 sends its spans to it.
+TRACE_COLLECTOR_CONTAINER = "doris-obs-traces2doris"
+MODULE2_COLLECTORS = ("doris-obs-log2doris", "doris-obs-metric2doris", TRACE_COLLECTOR_CONTAINER)
+TRACES_OTLP_HTTP_PORT = env_port("DORIS_OBS_TRACES_OTLP_HTTP_PORT", 24328)  # forwards to its port 4318
 
 # OpenTelemetry demo: Compose project doris-obs-demo (environments/dog-stack/compose.demo.yml).
 # Its Collector also joins NETWORK and forwards the demo's telemetry to COLLECTOR_CONTAINER.

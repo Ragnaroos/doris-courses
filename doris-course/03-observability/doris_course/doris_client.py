@@ -3,6 +3,7 @@ from __future__ import annotations
 import re
 import shlex
 import subprocess
+import time
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -39,6 +40,9 @@ CORE_PORTS = (
     (env.OTLP_HTTP_PORT, "DORIS_OBS_OTLP_HTTP_PORT", "Collector OTLP HTTP"),
 )
 DEMO_PORTS = ((env.DEMO_PORT, "DORIS_OBS_DEMO_PORT", "Demo storefront"),)
+TRACE_COLLECTOR_PORTS = (
+    (env.TRACES_OTLP_HTTP_PORT, "DORIS_OBS_TRACES_OTLP_HTTP_PORT", "Module 2 trace collector OTLP HTTP"),
+)
 
 # The override files replace upstream lists with the !override merge tag (Compose 2.24.4).
 MIN_COMPOSE_VERSION = (2, 24, 4)
@@ -59,7 +63,10 @@ fi
 
 
 class EnvironmentNotReady(RuntimeError):
-    """A preparation step stopped; the card shown before raising says why and what to do."""
+    """A step stopped because the environment or its data is not ready.
+
+    The card shown before raising says why and what to do.
+    """
 
     def _render_traceback_(self) -> list[str]:
         return [f"Stopped: {self}"]
@@ -128,6 +135,11 @@ class ObservabilityLab:
         return f"http://127.0.0.1:{env.OTLP_HTTP_PORT}"
 
     @property
+    def trace_collector_url(self) -> str:
+        """The OTLP/HTTP receiver of the Module 2 trace collector on this host."""
+        return f"http://127.0.0.1:{env.TRACES_OTLP_HTTP_PORT}"
+
+    @property
     def demo_url(self) -> str:
         """The demo storefront on this host."""
         return f"http://127.0.0.1:{env.DEMO_PORT}"
@@ -173,6 +185,39 @@ class ObservabilityLab:
         if rows and isinstance(rows[0], Mapping):
             columns = list(rows[0])
         return result_frame(rows, columns)
+
+    def wait_for_rows(
+        self,
+        statement: str,
+        *,
+        title: str,
+        hint: str,
+        min_rows: int = 1,
+        timeout_seconds: int = 60,
+    ) -> pd.DataFrame:
+        """Rerun a query until it returns at least ``min_rows`` rows, then show them.
+
+        Collectors export telemetry in batches, and Doris makes each load visible
+        a few seconds after it arrives, so a check right after sending can still
+        be empty. The statement is shown first so it can be rerun in any MySQL
+        client; ``hint`` says what to check when the rows do not arrive in time.
+        """
+        clean = statement.strip().rstrip(";")
+        show_sql(f"{title} (rerun every 2 seconds for up to {timeout_seconds} seconds)", clean)
+        started = time.monotonic()
+        while True:
+            frame = self.query(clean)
+            elapsed = time.monotonic() - started
+            if len(frame) >= min_rows:
+                show_frame(f"{title} · rows found after {elapsed:.0f} seconds", frame)
+                return frame
+            if elapsed >= timeout_seconds:
+                break
+            time.sleep(2)
+        show_frame(title, frame)
+        found = "No rows" if frame.empty else f"Only {len(frame)} of {min_rows} rows"
+        self._failure(f"{found} after {timeout_seconds} seconds", hint)
+        raise EnvironmentNotReady(f"{title} did not return {min_rows} row(s) within {timeout_seconds} seconds.")
 
     def connect(
         self,
@@ -347,6 +392,10 @@ demo_compose ps
         """Stop and remove the demo containers. The telemetry already in Doris stays."""
         # Compose finds a project's containers and networks by their labels, without the files.
         self.shell(f"docker compose -p {env.DEMO_PROJECT} down", title="Stop the OpenTelemetry demo")
+
+    def check_trace_collector_port(self) -> None:
+        """Show the host port of the Module 2 trace collector; stop when another program holds it."""
+        self._check_ports(TRACE_COLLECTOR_PORTS, (env.TRACE_COLLECTOR_CONTAINER,))
 
     def teardown(self, *, keep_data: bool = False) -> None:
         """Remove every container and network of this course, and its volumes unless keep_data.

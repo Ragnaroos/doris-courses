@@ -52,7 +52,7 @@ exporters:
     history_days: 14
     create_history_days: 10
     replication_num: 1
-    timezone: Asia/Shanghai
+    timezone: UTC
     timeout: 60s
     log_response: true
     label_prefix: otel

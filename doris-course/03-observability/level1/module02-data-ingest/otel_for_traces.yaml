@@ -7,6 +7,13 @@ receivers:
         endpoint: 0.0.0.0:4318
 
 processors:
+  # Adds a resource attribute to every span that passes through this collector.
+  # The lab finds it on the span in Doris; spans sent to another collector lack it.
+  resource:
+    attributes:
+      - key: deployment.environment.name
+        value: course-lab
+        action: upsert
   batch:
     send_batch_size: 10000
     timeout: 10s
@@ -23,7 +30,7 @@ exporters:
     mysql_endpoint: doris-obs:9030
     history_days: 10
     create_history_days: 10
-    timezone: Asia/Shanghai
+    timezone: UTC
     timeout: 60s
     log_response: true
     sending_queue:
@@ -41,5 +48,5 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: [resource, batch]
       exporters: [doris]

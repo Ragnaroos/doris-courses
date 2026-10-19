@@ -4,12 +4,15 @@ The shared behavior (empty results, NULL display, error cards) is tested in
 doris-course/common/tests.
 """
 
+import itertools
 import unittest
 from unittest.mock import Mock, patch
 
+import pandas as pd
 import pymysql
 
 from doris_course import ObservabilityLab
+from doris_course.doris_client import EnvironmentNotReady
 from doris_labkit import db
 
 
@@ -61,6 +64,40 @@ class LabErrorTests(unittest.TestCase):
             raised.exception._render_traceback_(),
             ["ProgrammingError: Unknown table 'otel_logs_missing'"],
         )
+
+
+class WaitForRowsTests(unittest.TestCase):
+    def test_rows_are_shown_once_enough_arrive(self):
+        lab = object.__new__(ObservabilityLab)
+        empty, one, two = pd.DataFrame({"n": []}), pd.DataFrame({"n": [1]}), pd.DataFrame({"n": [1, 2]})
+        with patch.object(ObservabilityLab, "query", side_effect=[empty, one, two]) as query, \
+             patch("doris_course.doris_client.time.sleep") as sleep, \
+             patch("doris_course.doris_client.show_sql") as statement, \
+             patch("doris_course.doris_client.show_frame") as shown:
+            frame = lab.wait_for_rows("SELECT n FROM t;", title="Rows", hint="Start it.", min_rows=2)
+        self.assertIs(frame, two)
+        query.assert_called_with("SELECT n FROM t")
+        self.assertEqual(sleep.call_count, 2)
+        # The learner sees the statement before the wait, and the rows once.
+        self.assertEqual(statement.call_args.args[1], "SELECT n FROM t")
+        shown.assert_called_once()
+        self.assertIs(shown.call_args.args[1], two)
+
+    def test_missing_rows_stop_with_the_hint(self):
+        lab = object.__new__(ObservabilityLab)
+        clock = itertools.count(0, 20)
+        with patch.object(ObservabilityLab, "query", return_value=pd.DataFrame({"n": [1]})) as query, \
+             patch("doris_course.doris_client.time.monotonic", side_effect=lambda: next(clock)), \
+             patch("doris_course.doris_client.time.sleep"), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.show_frame"), \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady) as raised:
+                lab.wait_for_rows("SELECT n FROM t", title="Rows", hint="Start it.", min_rows=2, timeout_seconds=60)
+        self.assertEqual(query.call_count, 3)
+        card.assert_called_once_with("Start it.", "fail", "Only 1 of 2 rows after 60 seconds")
+        self.assertEqual(raised.exception._render_traceback_(),
+                         ["Stopped: Rows did not return 2 row(s) within 60 seconds."])
 
 
 if __name__ == "__main__":

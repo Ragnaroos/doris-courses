@@ -83,10 +83,12 @@ starting Jupyter, for example `DORIS_OBS_GRAFANA_PORT=23001 .venv/bin/jupyter la
 | 23000 | Grafana (user `admin`, password `admin`) | `DORIS_OBS_GRAFANA_PORT` |
 | 24317 | Collector OTLP gRPC | `DORIS_OBS_OTLP_GRPC_PORT` |
 | 24318 | Collector OTLP HTTP | `DORIS_OBS_OTLP_HTTP_PORT` |
+| 24328 | Module 2 trace collector OTLP HTTP | `DORIS_OBS_TRACES_OTLP_HTTP_PORT` |
 | 28082 | Demo storefront | `DORIS_OBS_DEMO_PORT` |
 
 The Compose override files in `environments/dog-stack/` apply these names and
-ports on top of the upstream Compose files.
+ports on top of the upstream Compose files. The Module 2 trace collector
+publishes its port when the Module 2 lab starts it.
 
 ## Stop and clean up
 

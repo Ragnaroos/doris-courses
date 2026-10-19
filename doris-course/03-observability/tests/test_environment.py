@@ -8,10 +8,11 @@ from pathlib import Path
 import yaml
 
 from doris_course import environment
-from doris_course.doris_client import CORE_PORTS, DEMO_PORTS
+from doris_course.doris_client import CORE_PORTS, DEMO_PORTS, TRACE_COLLECTOR_PORTS
 
 ROOT = Path(__file__).resolve().parents[1]
 ENVIRONMENT_DIR = ROOT / "environments/dog-stack"
+MODULE2_LAB = ROOT / "level1/module02-data-ingest/lab02_ingest_observability_data.ipynb"
 DEFAULTS = dict(re.findall(r'env_port\("(DORIS_OBS_\w+)", (\d+)\)', (ROOT / "doris_course/environment.py").read_text()))
 SHELL_DEFAULT = re.compile(r"\$\{(DORIS_OBS_\w+):-(\d+)\}")
 UPSTREAM = ROOT / ".runtime/ai-observe-stack"
@@ -55,7 +56,7 @@ class EnvironmentTests(unittest.TestCase):
                     self.assertIn(name, DEFAULTS)
                     self.assertEqual(default, DEFAULTS[name])
                     seen.add(name)
-        # Every host port is published by one of the Compose override files.
+        # Every host port is published by a Compose override file or a notebook cell.
         self.assertEqual(seen, set(DEFAULTS))
 
     def test_names_use_the_course_prefix(self):
@@ -73,7 +74,7 @@ class EnvironmentTests(unittest.TestCase):
             self.assertTrue(20000 <= port < 30000, port)
 
     def test_port_checks_cover_every_host_port(self):
-        checked = {variable: port for port, variable, _purpose in CORE_PORTS + DEMO_PORTS}
+        checked = {variable: port for port, variable, _purpose in CORE_PORTS + DEMO_PORTS + TRACE_COLLECTOR_PORTS}
         self.assertEqual(checked, {name: int(value) for name, value in DEFAULTS.items()})
 
     def test_dog_override_uses_the_python_names(self):
@@ -113,17 +114,37 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(config["exporters"]["otlp/gateway"]["endpoint"], f"{environment.COLLECTOR_CONTAINER}:4317")
 
     def test_module2_collectors_use_the_course_network_and_names(self):
-        lab = ROOT / "level1/module02-data-ingest/lab02_ingest_observability_data.ipynb"
-        text = "\n".join(source for path, source in notebook_sources() if path == lab)
+        text = "\n".join(source for path, source in notebook_sources() if path == MODULE2_LAB)
         for name in environment.MODULE2_COLLECTORS:
             self.assertIn(f"--name {name} ", text)
         self.assertEqual(text.count(f"--network {environment.NETWORK} "), len(environment.MODULE2_COLLECTORS))
-        for path in sorted(lab.parent.glob("otel_for_*.yaml")):
+        for path in sorted(MODULE2_LAB.parent.glob("otel_for_*.yaml")):
             config = yaml.safe_load(path.read_text())
             exporter = config["exporters"]["doris"]
             with self.subTest(config=path.name):
                 self.assertEqual(exporter["endpoint"], f"http://{environment.DORIS_CONTAINER}:8040")
                 self.assertEqual(exporter["mysql_endpoint"], f"{environment.DORIS_CONTAINER}:9030")
+                # The DOG Collector writes UTC into the same tables, which partition by UTC days.
+                self.assertEqual(exporter["timezone"], "UTC")
+
+    def test_module2_spans_go_to_the_trace_collector(self):
+        """Lab 2 sends its span to doris-obs-traces2doris, not to the DOG Collector."""
+        cells = [source for path, source in notebook_sources() if path == MODULE2_LAB]
+        start = next(cell for cell in cells if f"--name {environment.TRACE_COLLECTOR_CONTAINER} " in cell)
+        self.assertIn('-p "127.0.0.1:${DORIS_OBS_TRACES_OTLP_HTTP_PORT:-24328}:4318"', start)
+        self.assertLess(start.index("lab.check_trace_collector_port()"), start.index("docker run"))
+        send = next(cell for cell in cells if "OTLPSpanExporter(" in cell)
+        self.assertIn('endpoint=f"{lab.trace_collector_url}/v1/traces"', send)
+        self.assertIn("provider.force_flush()", send)
+        text = "\n".join(cells)
+        self.assertNotIn("lab.otlp_http_url", text)
+        self.assertNotIn("%pip", text)
+        # The check in Doris reads the attribute that only the trace collector adds.
+        config = yaml.safe_load((MODULE2_LAB.parent / "otel_for_traces.yaml").read_text())
+        self.assertIn("resource", config["service"]["pipelines"]["traces"]["processors"])
+        added = [item["key"] for item in config["processors"]["resource"]["attributes"]]
+        self.assertEqual(added, ["deployment.environment.name"])
+        self.assertIn(f"resource_attributes['{added[0]}']", text)
 
     def test_notebooks_no_longer_name_the_old_resources(self):
         old = re.compile(r"docker_aiobs-net|--name (log2doris|metric2doris|traces2doris)\b|DORIS_CONTAINER:-doris\}"

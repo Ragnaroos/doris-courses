@@ -36,7 +36,7 @@ exporters:
     create_schema: true
     history_days: 10
     create_history_days: 10
-    timezone: Asia/Shanghai
+    timezone: UTC
     timeout: 60s
     log_response: true
     sending_queue:

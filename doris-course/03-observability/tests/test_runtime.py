@@ -86,6 +86,15 @@ class RuntimeTests(unittest.TestCase):
             with self.assertRaises(EnvironmentNotReady):
                 lab._check_ports(CORE_PORTS, (environment.GRAFANA_CONTAINER,))
 
+    def test_trace_collector_port_held_by_another_program_stops_the_step(self):
+        lab = object.__new__(ObservabilityLab)
+        busy = environment.TRACES_OTLP_HTTP_PORT
+        with patch("doris_course.doris_client.container_inspect", return_value=None) as inspect, \
+             patch("doris_course.doris_client.port_in_use", side_effect=lambda port: port == busy):
+            with self.assertRaises(EnvironmentNotReady):
+                lab.check_trace_collector_port()
+        inspect.assert_called_once_with(environment.TRACE_COLLECTOR_CONTAINER)
+
     def test_rerunning_the_checkout_keeps_the_pinned_commit(self):
         with tempfile.TemporaryDirectory() as temp:
             upstream = Path(temp) / "upstream"
