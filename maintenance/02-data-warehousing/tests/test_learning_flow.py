@@ -82,11 +82,11 @@ class LearningFlowTest(unittest.TestCase):
         cdc = reading.split("## 5.8 Streaming Job and CDC_STREAM", 1)[1].split("## 5.9", 1)[0]
         self.assertIn("Experimental", cdc.split("###", 1)[0])
         self.assertIn('DEFAULT "CREATED"', reading)
-        self.assertIn("optional_invoice_and_receipts.md", reading)
+        self.assertIn("optional05_invoice_and_receipts.md", reading)
         cells = self.notebook_cells("module05-ingestion")
         self.assertNotIn("TransactionTypeName", cells["historical-check"])
         self.assertIn("wwi_order_lines", cells["historical-check"])
-        optional = (ROOT / "level1/module05-ingestion/optional_invoice_and_receipts.md").read_text()
+        optional = (ROOT / "level1/module05-ingestion/optional05_invoice_and_receipts.md").read_text()
         self.assertIn("267011.44", optional)
         self.assertIn("TransactionTypeName", optional)
         for block in re.findall(r"```sql\n(.*?)```", optional, re.DOTALL):

@@ -10,7 +10,7 @@ Level 2 延续 Level 1 创建的 `doris_course` Database 和 `events` baseline d
 
 ## 模块 4：在 Apache Doris 中建模数据
 
-英文正文：[Module 4: Modeling Data in Apache Doris](module04-modeling/course4_modeling_data_in_apache_doris.md)
+英文正文：[Module 4: Modeling Data in Apache Doris](module04-modeling/course.md)
 
 ### 模块目标
 
@@ -157,7 +157,7 @@ Lab 4 重建前只清空自身四张 target tables，保留 `events` baseline。
 
 ## 模块 5：使用 Apache Doris 分析数据
 
-英文正文：[Module 5: Analyzing Data in Apache Doris](module05-analyzing/course5_analyzing_data_in_apache_doris.md)
+英文正文：[Module 5: Analyzing Data in Apache Doris](module05-analyzing/course.md)
 
 ### 模块目标
 
@@ -326,7 +326,7 @@ Module 3 已详细执行 S3 TVF，本 Lab 不再次读取完整 remote dataset�
 
 ## 模块 6：在 Apache Doris 中连接数据
 
-英文正文：[Module 6: Joining Data in Apache Doris](module06-joining/course6_joining_data_in_apache_doris.md)
+英文正文：[Module 6: Joining Data in Apache Doris](module06-joining/course.md)
 
 ### 模块目标
 
@@ -495,7 +495,7 @@ Course 与 Lab 的职责边界如下：
 
 ## 模块 7：在 Apache Doris 中更新和删除数据
 
-英文正文：[Module 7: Updating and Deleting Data in Apache Doris](module07-updating-deleting/course7_updating_and_deleting_data_in_apache_doris.md)
+英文正文：[Module 7: Updating and Deleting Data in Apache Doris](module07-updating-deleting/course.md)
 
 ### 模块目标
 
@@ -580,7 +580,7 @@ Course 7 先回答为什么分析系统仍然需要更新和删除：订单、�
 - 它与简单 upsert 的区别在于可以根据 match 与业务条件选择不同 action；与流式 load-based CDC 的区别在于它是一条基于 source relation 的 DML statement。
 - 必须保证一次 Merge 中 source matching 对 target Key 是确定的。Doris 4.x 文档指出 duplicate join rows 不会被检测，发生时行为未定义；应在 source stage 先按业务顺序去重或拒绝冲突。
 - **Course 写作要求：** 使用一组很小的 target/source rows 先预测 matched update、matched delete 和 not-matched insert 的最终状态，再给出一条紧凑的 `MERGE INTO` 示例；重点解释 action selection 与 source uniqueness，避免把它写成单纯的语法目录。
-- **Lab 衔接：** `lab7_update_delete_data.ipynb` 使用 Module 7 专用的本地 target 和 staging tables，先验证 source 对 target Key 唯一，再执行 matched update、matched delete 和 not-matched insert；不接入外部 CDC 系统。
+- **Lab 衔接：** `lab07_update_delete_data.ipynb` 使用 Module 7 专用的本地 target 和 staging tables，先验证 source 对 target Key 唯一，再执行 matched update、matched delete 和 not-matched insert；不接入外部 CDC 系统。
 
 官方参考：[MERGE INTO](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-modification/DML/MERGE-INTO/)。
 
@@ -637,9 +637,9 @@ Course 与 Lab 的职责边界如下：
 
 Each quiz contains six independent English single-choice questions and uses the shared `doris_course.quiz` interface. No running Lab or external service is required.
 
-- Module 4: [Notebook](module04-modeling/quiz4_schema_and_modeling_choices.ipynb) · [Question YAML](module04-modeling/quiz4_schema_and_modeling_choices.yaml)
-- Module 5: [Notebook](module05-analyzing/quiz5_analytical_query_semantics.ipynb) · [Question YAML](module05-analyzing/quiz5_analytical_query_semantics.yaml)
-- Module 6: [Notebook](module06-joining/quiz6_join_semantics_and_execution.ipynb) · [Question YAML](module06-joining/quiz6_join_semantics_and_execution.yaml)
-- Module 7: [Notebook](module07-updating-deleting/quiz7_state_changes_and_deletion.ipynb) · [Question YAML](module07-updating-deleting/quiz7_state_changes_and_deletion.yaml)
+- Module 4: [Notebook](module04-modeling/quiz04_schema_and_modeling_choices.ipynb) · [Question YAML](module04-modeling/quiz04_schema_and_modeling_choices.yaml)
+- Module 5: [Notebook](module05-analyzing/quiz05_analytical_query_semantics.ipynb) · [Question YAML](module05-analyzing/quiz05_analytical_query_semantics.yaml)
+- Module 6: [Notebook](module06-joining/quiz06_join_semantics_and_execution.ipynb) · [Question YAML](module06-joining/quiz06_join_semantics_and_execution.yaml)
+- Module 7: [Notebook](module07-updating-deleting/quiz07_state_changes_and_deletion.ipynb) · [Question YAML](module07-updating-deleting/quiz07_state_changes_and_deletion.yaml)
 
 [Question alignment and course review notes](quiz_alignment.md)

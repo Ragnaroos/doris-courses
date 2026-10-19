@@ -25,7 +25,7 @@ class Level2MaterialsTest(unittest.TestCase):
             path = LEVEL2 / module
             self.assertTrue((path / "course.md").is_file(), module)
             number = module[6:8]
-            self.assertTrue((path / f"lab{int(number)}_{slug if number != '11' else 'bi_and_ai_delivery'}.ipynb").is_file(), module)
+            self.assertTrue((path / f"lab{number}_{slug if number != '11' else 'bi_and_ai_delivery'}.ipynb").is_file(), module)
             quiz = next(path.glob("quiz*.yaml"))
             self.assertTrue((path / quiz.name.replace(".yaml", ".ipynb")).is_file(), module)
             payload = yaml.safe_load(quiz.read_text())

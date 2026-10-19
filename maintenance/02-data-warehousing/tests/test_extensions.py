@@ -133,10 +133,10 @@ class ExtensionsTest(unittest.TestCase):
     def test_readings_separate_main_scope_and_optional_integrations(self):
         level = REPO / "doris-course/02-data-warehousing/level1"
         expectations = {
-            "README.md": ("not required to set up external pipelines", "continuous ingestion Labs are all optional", "optional5_kafka_routine_load.ipynb", "optional5_flink_mysql_cdc.ipynb"),
-            "module05-ingestion/course5_batch_and_streaming_ingestion.md": (
+            "README.md": ("not required to set up external pipelines", "continuous ingestion Labs are all optional", "optional05_kafka_routine_load.ipynb", "optional05_flink_mysql_cdc.ipynb"),
+            "module05-ingestion/course.md": (
                 "Sections 5.6–5.9 are introductions", "continuous concurrency validation is not a completion requirement"),
-            "module07-state-changes/course7_updates_deletes_and_replay.md": (
+            "module07-state-changes/course.md": (
                 "does not require real CDC setup", "Lab 7 uses simulated events", "controlled Savepoint"),
         }
         for name, phrases in expectations.items():

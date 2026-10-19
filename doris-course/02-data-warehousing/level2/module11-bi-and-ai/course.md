@@ -202,7 +202,7 @@ A BI team now wants a customer-region filter. The current view cannot provide it
 - MCP access needs a separate service and a least-privilege Doris identity; tool filters do not replace database permissions.
 - Check schema, nulls, coverage, counts, amounts, freshness, and account scope before publishing.
 
-## Knowledge Quiz
+## Knowledge Quiz 11: BI and AI Applications
 
 Open [Quiz 11](quiz11_bi_and_ai.ipynb) to check semantic views, dimensions and measures, feature projections, publication checks, Doris/BI/AI boundaries, and least-privilege MCP access.
 

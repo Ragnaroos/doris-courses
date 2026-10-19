@@ -794,6 +794,15 @@ boundaries. Tiered storage can lower the cost of retained cold data only when
 the deployment provides real destination media and satisfies the current
 feature constraints.
 
+## Quiz 10: Controlling Storage Cost and Data Lifecycle in Apache Doris
+
+Complete the interactive knowledge check after finishing the module and
+Lab 10. It runs without a Doris sandbox.
+
+[Open Quiz 10 — Controlling Storage Cost and Data Lifecycle in Apache Doris](quiz10_data_lifecycle_and_recovery.ipynb)
+
+Next: this is the last module of the course.
+
 ## Official references
 
 - Compression: [Data Compression](https://doris.apache.org/docs/4.x/table-design/column-compression/), [FE Configuration](https://doris.apache.org/docs/4.x/admin-manual/config/fe-config/), and [`SHOW DATA`](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/table-and-view/data-and-status-management/SHOW-DATA/)

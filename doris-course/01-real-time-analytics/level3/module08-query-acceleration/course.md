@@ -707,7 +707,7 @@ can review the evidence and decide whether the tradeoff fits its workload.
 
 ## Lab 8: Accelerate Queries with Views and Indexes
 
-Open [Lab 8 — Accelerate Queries with Views and Indexes](lab8_accelerate_queries.ipynb)
+Open [Lab 8 — Accelerate Queries with Views and Indexes](lab08_accelerate_queries.ipynb)
 after completing Labs 4 and 6. It reads the query-ready event table and product
 dimension, then creates only Module 8 objects in the `doris_course` Database.
 The source tables remain unchanged.
@@ -762,6 +762,15 @@ Statistics help the optimizer estimate candidates; Query Profiles report one
 execution. Evaluate every structure against its storage, write, refresh, and
 operating costs. Module 9 next moves from local access choices to
 multi-BE placement, replica selection, and distributed execution.
+
+## Quiz 8: Accelerating Queries in Apache Doris
+
+Complete the interactive knowledge check after finishing the module and
+Lab 8. It runs without a Doris sandbox.
+
+[Open Quiz 8 — Accelerating Queries in Apache Doris](quiz08_acceleration_choices.ipynb)
+
+Next module: [Module 9: Sharding, Replication, and Distributed Execution in Apache Doris](../module09-sharding-replication/course.md).
 
 ## Official references
 

@@ -23,7 +23,7 @@ python3 -m venv .venv
 Start Jupyter with the course root:
 
 ```bash
-.venv/bin/jupyter lab level1/module01-introduction/lab1_connect_and_query.ipynb
+.venv/bin/jupyter lab level1/module01-introduction/lab01_connect_and_query.ipynb
 ```
 
 Select the matching `.venv` Python kernel if Jupyter offers more than one kernel.

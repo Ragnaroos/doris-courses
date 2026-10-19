@@ -195,7 +195,7 @@ class MaterialsTest(unittest.TestCase):
             reading = next(module.glob("course*.md")).read_text()
             quiz = yaml.safe_load(next(module.glob("quiz*.yaml")).read_text())
             self.assertTrue(reading.startswith(f"# Module {number}:"), module)
-            self.assertTrue(quiz["title"].startswith(f"Module {number}:"), module)
+            self.assertTrue(quiz["title"].startswith(f"Module {number} Quiz:"), module)
 
     def test_reading_schedule_titles_match_sections(self):
         for path in (COURSE_ROOT / "level1").glob("*/course*.md"):
@@ -357,9 +357,9 @@ class MaterialsTest(unittest.TestCase):
             module.name for module in modules if module.name != "module04-external-access"
         ])
         for module in (COURSE_ROOT / "level1").glob("module*"):
-            match = re.match(r"module(\d+)([a-z]?)", module.name)
-            number = str(int(match[1])) + match[2]
-            self.assertEqual(len(list(module.glob(f"course{number}_*.md"))), 1)
+            number = re.match(r"module(\d{2})-", module.name)[1]
+            self.assertTrue((module / "course.md").is_file())
+            self.assertEqual(list(module.glob("course?*.md")), [])
             self.assertEqual(len(list(module.glob(f"lab{number}_*.ipynb"))), 1)
             self.assertEqual(len(list(module.glob(f"quiz{number}_*.yaml"))), 1)
             self.assertEqual(len(list(module.glob(f"quiz{number}_*.ipynb"))), 1)
@@ -367,7 +367,6 @@ class MaterialsTest(unittest.TestCase):
             quiz_source = "\n".join(cell.source for cell in nbformat.read(quiz_path, as_version=4).cells)
             yaml_path = next(module.glob(f"quiz{number}_*.yaml"))
             self.assertIn(str(yaml_path.relative_to(COURSE_ROOT)), quiz_source)
-            self.assertFalse((module / "course.md").exists())
             self.assertFalse((module / "quiz.ipynb").exists())
 
     def test_notebooks_are_valid_clean_and_compilable(self):
@@ -512,7 +511,7 @@ class AlignmentTest(unittest.TestCase):
         self.assertNotIn("maintenance", config.ContentsManager.hide_globs)
 
     def test_d01_teaches_explicit_sql_matching_order_contract(self):
-        path = COURSE_ROOT / "level1/module01-introduction/lab1_connect_and_query.ipynb"
+        path = COURSE_ROOT / "level1/module01-introduction/lab01_connect_and_query.ipynb"
         notebook = nbformat.read(path, as_version=4)
         statements = []
         for cell in notebook.cells:
@@ -546,7 +545,7 @@ class AlignmentTest(unittest.TestCase):
         self.assertEqual([tuple(r[col] for col in HISTORY_COLUMNS) for r in actual], history_rows())
 
     def test_d01_initialization_is_separate_from_connection(self):
-        path = COURSE_ROOT / "level1/module01-introduction/lab1_connect_and_query.ipynb"
+        path = COURSE_ROOT / "level1/module01-introduction/lab01_connect_and_query.ipynb"
         notebook = nbformat.read(path, as_version=4)
         initialize, = [cell for cell in notebook.cells if cell.id == "initialize"]
         calls = [

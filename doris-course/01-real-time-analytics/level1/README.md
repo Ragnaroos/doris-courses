@@ -6,13 +6,13 @@ methods. All notebooks reuse the same persistent single-node integrated Doris
 sandbox.
 
 Module 1 also includes
-[`quiz1_doris_fundamentals.ipynb`](module01-introduction/quiz1_doris_fundamentals.ipynb),
+[`quiz01_doris_fundamentals.ipynb`](module01-introduction/quiz01_doris_fundamentals.ipynb),
 a five-question interactive knowledge check that runs without Docker or Doris.
 Module 2 includes
-[`quiz2_doris_architecture_and_physical_design.ipynb`](module02-architecture/quiz2_doris_architecture_and_physical_design.ipynb),
+[`quiz02_doris_architecture_and_physical_design.ipynb`](module02-architecture/quiz02_doris_architecture_and_physical_design.ipynb),
 another five-question knowledge check using the same interaction model.
 Module 3 includes
-[`quiz3_load_methods_and_retry_safety.ipynb`](module03-loading-data/quiz3_load_methods_and_retry_safety.ipynb),
+[`quiz03_load_methods_and_retry_safety.ipynb`](module03-loading-data/quiz03_load_methods_and_retry_safety.ipynb),
 a five-question knowledge check covering load-method selection, quality
 evidence, persistence boundaries, and retry safety.
 

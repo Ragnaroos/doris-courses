@@ -9,9 +9,9 @@ from IPython.display import HTML, display
 
 COURSE_ROOT = Path(__file__).resolve().parents[1]
 LABS = {
-    1: "level1/module01-introduction/lab1_connect_and_query.ipynb",
-    5: "level1/module05-ingestion/lab5_stream_load.ipynb",
-    6: "level1/module06-data-quality/lab6_validate_orders.ipynb",
+    1: "level1/module01-introduction/lab01_connect_and_query.ipynb",
+    5: "level1/module05-ingestion/lab05_stream_load.ipynb",
+    6: "level1/module06-data-quality/lab06_validate_orders.ipynb",
 }
 
 

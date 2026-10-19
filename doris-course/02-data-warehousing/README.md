@@ -36,7 +36,7 @@ Run the following from this course directory:
 ```bash
 python3 -m venv .venv
 .venv/bin/python -m pip install -r requirements.txt
-.venv/bin/jupyter lab level1/module01-introduction/lab1_connect_and_query.ipynb
+.venv/bin/jupyter lab level1/module01-introduction/lab01_connect_and_query.ipynb
 ```
 
 Start Docker first, then initialize the tools and start the course's single-container sandbox in Lab 1; read the lab table reset notice before running it.
@@ -56,8 +56,8 @@ Level 1 provides seven modules, each containing a lesson, a Lab, and five intera
 
 The course image is apache/doris:all-in-one-4.1.3. The Module 5 Lab practices Stream Load,
 while the lesson also introduces the use cases and workings of continuous ingestion with Kafka, CDC, and object storage.
-The optional [Lab 5A: Kafka / Routine Load](level1/module05-ingestion/optional5_kafka_routine_load.ipynb) and
-[Lab 5B: MySQL / Flink CDC](level1/module05-ingestion/optional5_flink_mysql_cdc.ipynb) provide real pipelines you can start;
+The optional [Lab 5A: Kafka / Routine Load](level1/module05-ingestion/optional05_kafka_routine_load.ipynb) and
+[Lab 5B: MySQL / Flink CDC](level1/module05-ingestion/optional05_flink_mysql_cdc.ipynb) provide real pipelines you can start;
 see [Continuous Ingestion Environment](environments/streaming/README.md) for prerequisites, separate data, and shutdown instructions. They do not change the completion requirements for the seven main Labs.
 Module 4 starts two lake table helper containers on demand; see [Lake Table Environment](environments/lakehouse/README.md) for setup instructions.
 

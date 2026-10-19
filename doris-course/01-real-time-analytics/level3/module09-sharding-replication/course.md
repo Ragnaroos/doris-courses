@@ -759,7 +759,7 @@ eligible mistaken deletion?
 
 ## Lab 9: Observe Sharding, Replication, and Distributed Execution
 
-Open [Lab 9 — Observe Sharding, Replication, and Distributed Execution](lab9_observe_sharding_and_replication.ipynb)
+Open [Lab 9 — Observe Sharding, Replication, and Distributed Execution](lab09_observe_sharding_and_replication.ipynb)
 after completing Lab 8. It uses an isolated Module 9 Compose project rather
 than the single-node `doris` container from Modules 1–8.
 
@@ -846,6 +846,15 @@ Join input to it. Colocate makes both physical layouts compatible and stable in
 advance. These strategies change where rows meet, not which rows belong in the
 logical answer. Module 10 next defines how long those rows remain online and
 what recovery boundary exists after data is deliberately removed.
+
+## Quiz 9: Sharding, Replication, and Distributed Execution in Apache Doris
+
+Complete the interactive knowledge check after finishing the module and
+Lab 9. It runs without a Doris sandbox.
+
+[Open Quiz 9 — Sharding, Replication, and Distributed Execution in Apache Doris](quiz09_distribution_and_availability.ipynb)
+
+Next module: [Module 10: Controlling Storage Cost and Data Lifecycle in Apache Doris](../module10-managing-data/course.md).
 
 ## Official references
 

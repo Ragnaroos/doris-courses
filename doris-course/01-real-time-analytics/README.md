@@ -34,52 +34,52 @@ doris-course/
     ├── level1/
     │   ├── README.md
     │   ├── module01-introduction/
-    │   │   ├── course1_introduction_to_apache_doris.md
-    │   │   ├── lab1_start_doris_and_build_baseline.ipynb
-    │   │   ├── optional_metabase_dashboard.ipynb
-    │   │   ├── quiz1_doris_fundamentals.ipynb
-    │   │   └── quiz1_doris_fundamentals.yaml
+    │   │   ├── course.md
+    │   │   ├── lab01_start_doris_and_build_baseline.ipynb
+    │   │   ├── optional01_metabase_dashboard.ipynb
+    │   │   ├── quiz01_doris_fundamentals.ipynb
+    │   │   └── quiz01_doris_fundamentals.yaml
     │   ├── module02-architecture/
-    │   │   ├── course2_deep_dive_into_apache_doris_architecture.md
-    │   │   ├── lab2_scan_less_data.ipynb
-    │   │   ├── quiz2_doris_architecture_and_physical_design.ipynb
-    │   │   └── quiz2_doris_architecture_and_physical_design.yaml
+    │   │   ├── course.md
+    │   │   ├── lab02_scan_less_data.ipynb
+    │   │   ├── quiz02_doris_architecture_and_physical_design.ipynb
+    │   │   └── quiz02_doris_architecture_and_physical_design.yaml
     │   └── module03-loading-data/
-    │       ├── course3_loading_data_into_apache_doris.md
-    │       ├── lab3_load_data.ipynb
+    │       ├── course.md
+    │       ├── lab03_load_data.ipynb
     │       ├── compose.kafka.yml
-    │       ├── quiz3_load_methods_and_retry_safety.ipynb
-    │       └── quiz3_load_methods_and_retry_safety.yaml
+    │       ├── quiz03_load_methods_and_retry_safety.ipynb
+    │       └── quiz03_load_methods_and_retry_safety.yaml
     ├── level2/
     │   ├── README.md
     │   ├── module04-modeling/
-    │   │   ├── course4_modeling_data_in_apache_doris.md
-    │   │   ├── lab4_model_data.ipynb
-    │   │   ├── quiz4_schema_and_modeling_choices.ipynb
-    │   │   └── quiz4_schema_and_modeling_choices.yaml
+    │   │   ├── course.md
+    │   │   ├── lab04_model_data.ipynb
+    │   │   ├── quiz04_schema_and_modeling_choices.ipynb
+    │   │   └── quiz04_schema_and_modeling_choices.yaml
     │   ├── module05-analyzing/
-    │   │   ├── course5_analyzing_data_in_apache_doris.md
-    │   │   ├── lab5_analyze_data.ipynb
-    │   │   ├── quiz5_analytical_query_semantics.ipynb
-    │   │   └── quiz5_analytical_query_semantics.yaml
+    │   │   ├── course.md
+    │   │   ├── lab05_analyze_data.ipynb
+    │   │   ├── quiz05_analytical_query_semantics.ipynb
+    │   │   └── quiz05_analytical_query_semantics.yaml
     │   ├── module06-joining/
-    │   │   ├── course6_joining_data_in_apache_doris.md
-    │   │   ├── lab6_join_data.ipynb
-    │   │   ├── quiz6_join_semantics_and_execution.ipynb
-    │   │   └── quiz6_join_semantics_and_execution.yaml
+    │   │   ├── course.md
+    │   │   ├── lab06_join_data.ipynb
+    │   │   ├── quiz06_join_semantics_and_execution.ipynb
+    │   │   └── quiz06_join_semantics_and_execution.yaml
     │   └── module07-updating-deleting/
-    │       ├── course7_updating_and_deleting_data_in_apache_doris.md
-    │       ├── lab7_update_delete_data.ipynb
-    │       ├── quiz7_state_changes_and_deletion.ipynb
-    │       └── quiz7_state_changes_and_deletion.yaml
+    │       ├── course.md
+    │       ├── lab07_update_delete_data.ipynb
+    │       ├── quiz07_state_changes_and_deletion.ipynb
+    │       └── quiz07_state_changes_and_deletion.yaml
     └── level3/
         ├── README.md
         ├── module08-query-acceleration/
         │   ├── course.md
-        │   └── lab8_accelerate_queries.ipynb
+        │   └── lab08_accelerate_queries.ipynb
         ├── module09-sharding-replication/
         │   ├── course.md
-        │   ├── lab9_observe_sharding_and_replication.ipynb
+        │   ├── lab09_observe_sharding_and_replication.ipynb
         │   └── compose.multinode.yml
         └── module10-managing-data/
             ├── course.md
@@ -168,28 +168,28 @@ Start JupyterLab from this directory so all module-relative commands share the
 same course root:
 
 ```bash
-.venv/bin/jupyter lab level1/module01-introduction/lab1_start_doris_and_build_baseline.ipynb
+.venv/bin/jupyter lab level1/module01-introduction/lab01_start_doris_and_build_baseline.ipynb
 ```
 
 Then run:
 
 ```text
-level1/module02-architecture/lab2_scan_less_data.ipynb
-level1/module03-loading-data/lab3_load_data.ipynb
+level1/module02-architecture/lab02_scan_less_data.ipynb
+level1/module03-loading-data/lab03_load_data.ipynb
 ```
 
 The optional Metabase lab is:
 
 ```text
-level1/module01-introduction/optional_metabase_dashboard.ipynb
+level1/module01-introduction/optional01_metabase_dashboard.ipynb
 ```
 
 The Level 1 knowledge checks are independent of Docker, Doris, Kafka, and S3:
 
 ```text
-level1/module01-introduction/quiz1_doris_fundamentals.ipynb
-level1/module02-architecture/quiz2_doris_architecture_and_physical_design.ipynb
-level1/module03-loading-data/quiz3_load_methods_and_retry_safety.ipynb
+level1/module01-introduction/quiz01_doris_fundamentals.ipynb
+level1/module02-architecture/quiz02_doris_architecture_and_physical_design.ipynb
+level1/module03-loading-data/quiz03_load_methods_and_retry_safety.ipynb
 ```
 
 Lab 1 loads 10,158,080 ecommerce event rows from the read-only course S3

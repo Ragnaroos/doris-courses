@@ -44,8 +44,8 @@ CDC_STREAM、对象存储持续文件和生产并发仍未实测。
 
 ### 交付与实测环境
 
-- `optional5_kafka_routine_load.ipynb`：Kafka JSON → Routine Load → 独立 MoW 表。
-- `optional5_flink_mysql_cdc.ipynb`：真实 MySQL Binlog → Flink SQL CDC → Doris Connector；Module 7 可复用。
+- `optional05_kafka_routine_load.ipynb`：Kafka JSON → Routine Load → 独立 MoW 表。
+- `optional05_flink_mysql_cdc.ipynb`：真实 MySQL Binlog → Flink SQL CDC → Doris Connector；Module 7 可复用。
 - `environments/streaming` 提供 Compose profiles、固定 JAR 版本的 Dockerfile、MySQL 初始化及启动/停止/排查说明；无 JAR 二进制入库。
 - 共用原单 FE/BE 沙箱，实际 BE 版本 `doris-4.1.3-rc02-7126cf65d96`，BackendId `1789708590884`，注册地址仍为 `127.0.0.1`。连接器显式使用 `benodes=doris:8040`，不修改 BE 注册身份。
 - Kafka 3.9.0；MySQL 8.0.33（ROW/FULL、+08:00）；Flink 1.20.1 / Java 11；CDC SQL JAR 3.4.0；Doris Connector 25.0.0；MySQL JDBC 8.0.27。
@@ -141,7 +141,7 @@ Kafka、Flink CDC、CDC_STREAM、持续文件、真实位点恢复及持续并�
   新增标记的材料检查限制可写目标，不将讲义写入混入默认只读查询；外部连接仍使用占位符。
 - Module 5 保留九小节，将 5.8 的实验性与版本前提提前，合并重复 CDC 概念；
   增加省略字段的 DEFAULT 示例及金额单位映射解释。详细账务查询从 Lab 主流程移到
-  optional_invoice_and_receipts.md；十表导入、订单关联、重试及独立练习保留。
+  optional05_invoice_and_receipts.md；十表导入、订单关联、重试及独立练习保留。
 - 建议学习时间调整为 Module 2/4/5/6 的 60/50/110/65 分钟，目录表与总时长相符；
   这是内容估算，不是学员试讲计时。
 

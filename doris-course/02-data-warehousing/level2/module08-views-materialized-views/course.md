@@ -7,7 +7,7 @@
 | Prerequisites | Level 1 Lab 5 and its `orders_imported` table |
 | Suggested time | About 118 minutes: reading 45, Lab 65, Quiz 8; first-start image downloads/builds are additional |
 
-[Level 2 contents](../README.md) · [Open Lab 8](lab8_views_and_materialized_views.ipynb) · [Open Quiz 8](quiz8_views_and_materialized_views.ipynb)
+[Level 2 contents](../README.md) · [Open Lab 8](lab08_views_and_materialized_views.ipynb) · [Open Quiz 8](quiz08_views_and_materialized_views.ipynb)
 
 ## Module Goal
 
@@ -186,7 +186,7 @@ A replaced partition can retain the same visible version number. Compare partiti
 
 ## Hands-on Lab: From Shared Definition to Verified Materialization
 
-Open [Lab 8](lab8_views_and_materialized_views.ipynb). It connects to the course database, creates `orders_service_view_l2` and `orders_daily_mv_l2`, checks `mv_infos`, compares direct MV values with a canonical aggregation, and records the `EXPLAIN` plan. A second, isolated `_l2` source then receives a new order: its regular view changes immediately, while its manual-trigger MV changes only after an explicit refresh. It then compares synchronous write maintenance, fact-partition refresh, and a full refresh after an unpartitioned dimension change. The Lab never writes to the Level 1 source table.
+Open [Lab 8](lab08_views_and_materialized_views.ipynb). It connects to the course database, creates `orders_service_view_l2` and `orders_daily_mv_l2`, checks `mv_infos`, compares direct MV values with a canonical aggregation, and records the `EXPLAIN` plan. A second, isolated `_l2` source then receives a new order: its regular view changes immediately, while its manual-trigger MV changes only after an explicit refresh. It then compares synchronous write maintenance, fact-partition refresh, and a full refresh after an unpartitioned dimension change. The Lab never writes to the Level 1 source table.
 
 | Check | Expected observation |
 | --- | --- |
@@ -209,9 +209,11 @@ A consumer now wants to filter the daily result by customer. Is the existing MV 
 - `CREATE`, refresh, direct query, and transparent rewriting are separate checks.
 - A view contract includes grain, filters, units, and ownership; physical optimization must not silently change it.
 
-## Knowledge Quiz
+## Knowledge Quiz 8: Views and Materialized Views
 
-Open [Quiz 8](quiz8_views_and_materialized_views.ipynb) after the reading and Lab. Its six scenario questions cover view types, refresh trade-offs, result checks, rewrite evidence, contract stability, and when precomputation pays off.
+Open [Quiz 8](quiz08_views_and_materialized_views.ipynb) after the reading and Lab. Its six scenario questions cover view types, refresh trade-offs, result checks, rewrite evidence, contract stability, and when precomputation pays off.
+
+Next module: [Module 9: Warehouse Modeling and Joins](../module09-modeling-and-joins/course.md).
 
 ## Official References
 

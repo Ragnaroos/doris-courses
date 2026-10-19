@@ -245,7 +245,7 @@ class StreamingTest(unittest.TestCase):
                 self.assertIn(str(ROOT / "environments/streaming/doris-resources.yml"), command)
 
     def test_optional_notebooks_are_english_and_use_checked_waits(self):
-        for path in (ROOT / "level1/module05-ingestion").glob("optional5_*.ipynb"):
+        for path in (ROOT / "level1/module05-ingestion").glob("optional05_*.ipynb"):
             notebook = nbformat.read(path, 4)
             source = "\n".join(cell.source for cell in notebook.cells)
             self.assertNotRegex(source, r"[\u4e00-\u9fff]")
@@ -259,7 +259,7 @@ class StreamingTest(unittest.TestCase):
     def test_mysql_timezone_matches_cdc_notebook(self):
         config = yaml.safe_load(streaming.COMPOSE.read_text())
         self.assertIn("--default-time-zone=+08:00", config["services"]["mysql"]["command"])
-        notebook = nbformat.read(ROOT / "level1/module05-ingestion/optional5_flink_mysql_cdc.ipynb", 4)
+        notebook = nbformat.read(ROOT / "level1/module05-ingestion/optional05_flink_mysql_cdc.ipynb", 4)
         self.assertIn("'server-time-zone'='Asia/Shanghai'", "\n".join(c.source for c in notebook.cells))
 
     def test_savepoint_requires_job_id_and_completed_path(self):
@@ -287,7 +287,7 @@ class StreamingTest(unittest.TestCase):
         self.assertEqual(config["services"]["jobmanager"]["ports"], ["127.0.0.1::8081"])
 
     def test_notebooks_are_clean_and_teaching_sql_visible(self):
-        paths = sorted((ROOT / "level1/module05-ingestion").glob("optional5_*.ipynb"))
+        paths = sorted((ROOT / "level1/module05-ingestion").glob("optional05_*.ipynb"))
         self.assertEqual(len(paths), 2)
         sources = []
         for path in paths:

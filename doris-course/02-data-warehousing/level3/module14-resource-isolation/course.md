@@ -336,9 +336,11 @@ For rollback, remove Workload Policies referencing the groups, change account de
 - SQL Block Rules reject before execution; Workload Policy and timeouts cancel ongoing work.
 - A resource runbook records groups, routing, protection, observations, and dependency-aware rollback.
 
-## Knowledge Quiz
+## Knowledge Quiz 14: Resource Isolation and Query Protection
 
 [Quiz 14](quiz14_resource_isolation.ipynb) contains six scenario-based single-choice questions covering routing precedence, concurrency, queues, BE limits, queue bypass, query protection, and rollback.
+
+Next: this is the last module of the course.
 
 ## Official References
 

@@ -294,9 +294,11 @@ For recovery, recreate the month and reload a verified archive or upstream batch
 - Compaction merges rowsets and applies delete predicates independently of truncation.
 - Verify the recovery path before performing the change.
 
-## Knowledge Quiz
+## Knowledge Quiz 13: Storage and Lifecycle Management
 
 [Quiz 13](quiz13_storage_lifecycle.ipynb) contains six scenario-based single-choice questions covering retention boundaries, physical-layout evidence, partition operations, logical visibility, physical reclamation, and maintenance runbooks.
+
+Next module: [Module 14: Resource Isolation and Query Protection](../module14-resource-isolation/course.md).
 
 ## Official References
 

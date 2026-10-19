@@ -20,10 +20,10 @@ If Jupyter runs on a remote server, “local machine” below refers to the serv
 Start Docker Desktop (macOS) or Docker Engine (Linux) first, and install the Compose plugin.
 We recommend reserving 4 CPUs, 8 GB of memory, and 20 GB of free disk space.
 
-Open [Lab 1](../../level1/module01-introduction/lab1_connect_and_query.ipynb) directly:
+Open [Lab 1](../../level1/module01-introduction/lab01_connect_and_query.ipynb) directly:
 
 ```bash
-.venv/bin/jupyter lab level1/module01-introduction/lab1_connect_and_query.ipynb
+.venv/bin/jupyter lab level1/module01-introduction/lab01_connect_and_query.ipynb
 ```
 
 Run “Initialize Lab Tools” first, then run the startup code under “Start the Single-Container Lab Environment.”

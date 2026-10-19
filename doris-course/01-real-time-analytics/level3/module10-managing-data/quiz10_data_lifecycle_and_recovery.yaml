@@ -1,4 +1,4 @@
-title: "Module 10 Quiz: Data Lifecycle and Recovery"
+title: "Module 10 Quiz: Controlling Storage Cost and Data Lifecycle in Apache Doris"
 description: >-
   Six independent scenarios check whether you can choose compression and
   Partition lifecycle policies, interpret time windows, and apply the correct

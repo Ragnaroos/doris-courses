@@ -292,9 +292,11 @@ For rollback, inspect memberships and other consumers first. If only the newly p
 - Column privileges, a Row Policy, and masking address different restrictions.
 - A release procedure includes revocation and cleanup as well as grants.
 
-## Knowledge Quiz
+## Knowledge Quiz 12: Publishing, Permissions, and Audit
 
 [Quiz 12](quiz12_publishing_permissions_audit.ipynb) contains six scenario-based single-choice questions covering consumer contracts, privilege scope, evidence, shared-role revocation, and fine-grained access.
+
+Next module: [Module 13: Storage and Lifecycle Management](../module13-storage-lifecycle/course.md).
 
 ## Official References
 

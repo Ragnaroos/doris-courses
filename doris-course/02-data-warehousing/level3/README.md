@@ -47,9 +47,9 @@ Complete each module in the order **Course → Lab → Quiz**. The Course explai
 
 | Module | Topic | Materials |
 | --- | --- | --- |
-| 12 | Publishing, permissions, and audit | [Course](module12-publishing-permissions-audit/course.md) · [Lab](module12-publishing-permissions-audit/lab12_publishing_permissions_audit.ipynb) · [Quiz](module12-publishing-permissions-audit/quiz12_publishing_permissions_audit.ipynb) |
-| 13 | Storage and lifecycle management | [Course](module13-storage-lifecycle/course.md) · [Lab](module13-storage-lifecycle/lab13_storage_and_lifecycle.ipynb) · [Quiz](module13-storage-lifecycle/quiz13_storage_lifecycle.ipynb) |
-| 14 | Resource isolation and query protection | [Course](module14-resource-isolation/course.md) · [Lab](module14-resource-isolation/lab14_resource_isolation.ipynb) · [Quiz](module14-resource-isolation/quiz14_resource_isolation.ipynb) |
+| 12 | Publishing, Permissions, and Audit | [Course](module12-publishing-permissions-audit/course.md) · [Lab](module12-publishing-permissions-audit/lab12_publishing_permissions_audit.ipynb) · [Quiz](module12-publishing-permissions-audit/quiz12_publishing_permissions_audit.ipynb) |
+| 13 | Storage and Lifecycle Management | [Course](module13-storage-lifecycle/course.md) · [Lab](module13-storage-lifecycle/lab13_storage_and_lifecycle.ipynb) · [Quiz](module13-storage-lifecycle/quiz13_storage_lifecycle.ipynb) |
+| 14 | Resource Isolation and Query Protection | [Course](module14-resource-isolation/course.md) · [Lab](module14-resource-isolation/lab14_resource_isolation.ipynb) · [Quiz](module14-resource-isolation/quiz14_resource_isolation.ipynb) |
 
 ## Lab Setup
 

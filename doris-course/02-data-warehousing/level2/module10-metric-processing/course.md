@@ -229,9 +229,11 @@ Run a new date-by-customer query over `orders_imported` and reconcile it indepen
 - Bitmap and exact distinct counts differ from HLL approximation; `EXPLAIN` and Query Profile provide different evidence.
 - Establish correctness before performance optimization.
 
-## Knowledge Quiz
+## Knowledge Quiz 10: Metric Processing and Delivery
 
 Open [Quiz 10](quiz10_metric_processing.ipynb) to check metric contracts, service tables, reconciliation, window functions, consumer queries, and exact versus approximate distinct counts.
+
+Next module: [Module 11: BI and AI Applications](../module11-bi-and-ai/course.md).
 
 ## Official References
 
