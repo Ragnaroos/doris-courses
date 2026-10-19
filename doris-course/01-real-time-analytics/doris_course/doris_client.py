@@ -92,6 +92,7 @@ def install_styles() -> None:
       table.doris-table th {background:#eef2f6;border:1px solid #cbd5e1;color:#1f2937;
         padding:7px 10px;text-align:left}
       table.doris-table td {border:1px solid #d9dee5;padding:7px 10px}
+      table.doris-table td.doris-empty {color:#64748b;font-style:italic}
       table.doris-table tbody tr:nth-child(even) {background:#f8fafc}
       .doris-code {margin:8px 0 16px;max-width:920px}
       .doris-code-title {font-size:14px;font-weight:650;margin:0 0 6px;color:#18212f}
@@ -196,12 +197,56 @@ def show_sql(title: str, statement: str) -> None:
     ))
 
 
+def is_null(value: object) -> bool:
+    """Return True for SQL NULL in every form pandas may have converted it to."""
+    if value is None or value is pd.NA or value is pd.NaT:
+        return True
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def result_frame(rows: Sequence, columns: Sequence[str]) -> pd.DataFrame:
+    """Build a result DataFrame that keeps SQL NULL and integer values intact.
+
+    pandas stores an integer column that contains NULL as float64, so 10 would
+    display as 10.0. Such columns use the nullable Int64 dtype instead.
+    """
+    names = list(columns)
+    records = [
+        [row.get(name) for name in names] if isinstance(row, Mapping) else list(row)
+        for row in rows
+    ]
+    data = {}
+    for position in range(len(names)):
+        values = [record[position] for record in records]
+        present = [value for value in values if value is not None]
+        if (
+            present
+            and len(present) < len(values)
+            and all(type(value) is int and -2**63 <= value < 2**63 for value in present)
+        ):
+            data[position] = pd.array(values, dtype="Int64")
+        else:
+            data[position] = values
+    frame = pd.DataFrame(data, index=pd.RangeIndex(len(records)))
+    frame.columns = names
+    return frame
+
+
 def show_frame(title: str, frame: pd.DataFrame, *, final: bool = False) -> None:
     headings = "".join(f"<th>{html.escape(str(column))}</th>" for column in frame.columns)
     body_rows = []
     for row in frame.itertuples(index=False, name=None):
-        cells = "".join(f"<td>{html.escape('NULL' if value is None else str(value))}</td>" for value in row)
+        cells = "".join(
+            f"<td>{html.escape('NULL' if is_null(value) else str(value))}</td>" for value in row
+        )
         body_rows.append(f"<tr>{cells}</tr>")
+    if not body_rows and len(frame.columns):
+        body_rows.append(
+            f'<tr><td class="doris-empty" colspan="{len(frame.columns)}">No rows returned.</td></tr>'
+        )
     final_class = " doris-result-final" if final else ""
     display(HTML(
         f'<div class="doris-result{final_class}">'
@@ -319,23 +364,84 @@ def connect_doris(host: str = "127.0.0.1", port: int = 9030):
                            cursorclass=pymysql.cursors.DictCursor)
 
 
+class ReturnLater(RuntimeError):
+    """Stop a cell whose observation needs the real clock to advance first.
+
+    The card shown before raising says when to come back. Raising keeps
+    "Run All" from continuing into checks that cannot pass yet, and IPython
+    renders this exception as one line instead of a traceback.
+    """
+
+    def _render_traceback_(self) -> list[str]:
+        return [f"Stopped on purpose: {self}"]
+
+
+def mask_secrets(text: str, secrets: Sequence[str] = ()) -> str:
+    for secret in secrets:
+        if secret:
+            text = text.replace(secret, "••••••••")
+    return text
+
+
+def report_sql_error(title: str | None, statement: str, error: Exception, *,
+                     secrets: Sequence[str] = ()) -> str:
+    """Show a failed statement as a short card and shorten its notebook traceback.
+
+    The full statement and server response stay available in a collapsed log.
+    IPython renders an exception through ``_render_traceback_`` when the
+    exception provides one, so the learner sees one line instead of the
+    PyMySQL call stack. The original exception is still raised by the caller.
+    """
+    message = str(error.args[1]) if len(error.args) > 1 else str(error)
+    # Doris wraps server messages as "errCode = 2, detailMessage = <message>".
+    summary = mask_secrets(message.split("detailMessage =", 1)[-1].strip(), secrets)
+    summary = summary or type(error).__name__
+    card(summary, "fail", f"{title or 'SQL statement'} failed")
+    show_log(
+        "Statement and full error",
+        mask_secrets(f"{statement.strip()}\n\n{type(error).__name__}: {error}", secrets),
+    )
+    error._render_traceback_ = lambda: [f"{type(error).__name__}: {summary}"]
+    return summary
+
+
 def sql(connection, statement: str, *, title: str | None = None,
         show_statement: bool = True, final: bool = False,
-        columns: Sequence[str] | None = None, quiet_success: bool = False):
+        columns: Sequence[str] | None = None, quiet_success: bool = False,
+        display_statement: str | None = None, show_errors: bool = True,
+        secrets: Sequence[str] = ()):
+    """Run one statement and display its result.
+
+    A statement that returns a result set gives a DataFrame, also when the
+    result has no rows; any other statement gives the affected-row count.
+    ``display_statement`` replaces the executed text in error details, so
+    credentials expanded into ``statement`` are never shown.
+    """
     clean = statement.strip()
     if show_statement:
         show_sql(title or "SQL", clean)
     with connection.cursor() as cursor:
-        cursor.execute(clean)
-        rows = cursor.fetchall() if cursor.description else []
+        try:
+            cursor.execute(clean)
+            rows = cursor.fetchall() if cursor.description else []
+        except pymysql.MySQLError as error:
+            if show_errors:
+                report_sql_error(title, display_statement or clean, error, secrets=secrets)
+            raise
+        description = cursor.description
         affected = cursor.rowcount
-    if rows:
-        frame = pd.DataFrame(rows)
+    if description:
+        names = (
+            list(rows[0]) if rows and isinstance(rows[0], Mapping)
+            else [column[0] for column in description]
+        )
+        frame = result_frame(rows, names)
         if columns:
             available = [column for column in columns if column in frame.columns]
             if available:
                 frame = frame.loc[:, available]
-        show_frame(title or "Query result", frame, final=final)
+        if len(frame) or not quiet_success:
+            show_frame(title or "Query result", frame, final=final)
         return frame
     if not quiet_success:
         card(f"Statement succeeded; affected rows reported by the client: {affected:,}", "ok", title)
@@ -455,6 +561,10 @@ class DorisLab:
         if log:
             show_log("Diagnostic details", log, opened=True)
 
+    def _secrets(self) -> tuple[str, ...]:
+        keys = (getattr(self, "_s3_access_key", None), getattr(self, "_s3_secret_key", None))
+        return tuple(key for key in keys if key)
+
     def _require_connection(self):
         if self.connection is None:
             try:
@@ -537,7 +647,7 @@ class DorisLab:
                 return self.tablet_layout_summary(table_name, title=title)
             raise ValueError(f"Unknown metadata view: {metadata_view!r}")
         connection = self._require_connection()
-        executable, _visible = self._expand_sql(statement.strip())
+        executable, visible = self._expand_sql(statement.strip())
         normalized = " ".join(statement.upper().split())
         if columns is None and normalized == "SHOW FRONTENDS":
             columns = ["Name", "Host", "Role", "IsMaster", "Join", "Alive", "Version"]
@@ -552,19 +662,27 @@ class DorisLab:
             show_statement=False,
             final=final,
             columns=columns,
+            display_statement=visible,
+            secrets=self._secrets(),
         )
 
     def query(self, statement: str):
         """Execute a SQL query and return all rows without displaying them."""
         connection = self._require_connection()
-        executable, _visible = self._expand_sql(statement.strip())
+        executable, visible = self._expand_sql(statement.strip())
         with connection.cursor() as cursor:
-            cursor.execute(executable)
+            try:
+                cursor.execute(executable)
+                rows = cursor.fetchall() if cursor.description else []
+            except pymysql.MySQLError as error:
+                report_sql_error(None, visible, error, secrets=self._secrets())
+                raise
             if cursor.description is None:
                 raise ValueError("query() requires a statement that returns rows.")
-            rows = cursor.fetchall()
             columns = [column[0] for column in cursor.description]
-        return pd.DataFrame(rows, columns=columns)
+        if rows and isinstance(rows[0], Mapping):
+            columns = list(rows[0])
+        return result_frame(rows, columns)
 
     def compare_queries(
         self,
@@ -630,14 +748,17 @@ class DorisLab:
         show_frame(title, pd.DataFrame(rows))
         return left, right
 
-    def execute(self, statement: str) -> int:
+    def execute(self, statement: str, *, show_errors: bool = True) -> int:
         connection = self._require_connection()
-        executable, _visible = self._expand_sql(statement.strip())
+        executable, visible = self._expand_sql(statement.strip())
         return sql(
             connection,
             executable,
             show_statement=False,
             quiet_success=True,
+            display_statement=visible,
+            show_errors=show_errors,
+            secrets=self._secrets(),
         )
 
     def insert(
@@ -4003,10 +4124,12 @@ LIMIT 10
             minutes = max(1, int(remaining.total_seconds() // 60) + 1)
             card(f"Return at or after {expiry_at:%Y-%m-%d %H:%M:%S} "
                  f"(Asia/Shanghai); about {minutes} minute(s) remain until the "
-                 "whole hour becomes ineligible.",
+                 "whole hour becomes ineligible. Keep the container running and "
+                 "rerun this cell then; do not rerun Section 2.",
                  "info", "The hourly retention boundary has not arrived")
-            raise RuntimeError("The marked Partition is still inside the hourly window. "
-                               "Return after the displayed hour boundary.")
+            raise ReturnLater(
+                f"rerun this cell at or after {expiry_at:%Y-%m-%d %H:%M} (Asia/Shanghai)."
+            )
 
         partitions = self._metadata_rows(
             f"SHOW PARTITIONS FROM `{table_name}` ORDER BY PartitionName"
@@ -4102,7 +4225,7 @@ LIMIT 10
     ) -> str:
         """Require a statement to fail for a specific, learner-visible reason."""
         try:
-            self.execute(statement)
+            self.execute(statement, show_errors=False)
         except Exception as exc:
             message = str(exc)
             if contains.lower() not in message.lower():

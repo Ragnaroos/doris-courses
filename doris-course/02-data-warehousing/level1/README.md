@@ -26,7 +26,7 @@ SQL, APIs, and product names remain unchanged; the course topics and learning or
 | Module 6 | [Data Quality and Schema Validation](module06-data-quality/course6_data_quality_and_schema_validation.md) | [Lab 6](module06-data-quality/lab6_validate_orders.ipynb) | [Quiz 6](module06-data-quality/quiz6_data_quality_and_rejection.ipynb) |
 | Module 7 | [Data Updates, Deletes, and Event Replay](module07-state-changes/course7_updates_deletes_and_replay.md) | [Lab 7](module07-state-changes/lab7_current_state_and_replay.ipynb) | [Quiz 7](module07-state-changes/quiz7_state_changes_and_replay.ipynb) |
 
-Follow Modules 1–7 in order. Module 6 completes data quality validation, and Module 7 uses the valid orders to handle state changes and event replay.
+Follow Modules 1–7 in order. Module 6 completes data quality validation, and Module 7 uses the valid orders to handle state changes and event replay. If you need to skip or repeat a Lab, [First-time setup](../GETTING_STARTED.md#follow-the-data-dependencies) lists which tables each Lab needs.
 
 ## Completion Requirements
 
@@ -80,7 +80,9 @@ without modifying the current orders table. Each Lab rebuilds only the tables it
 
 ## What Should You Prepare Before Starting?
 
-- Be able to read basic SQL such as SELECT, WHERE, and GROUP BY.
+- Be able to read basic SQL such as SELECT, WHERE, GROUP BY, and JOIN.
+- Be able to read short Python functions (including `try`/`finally`) and change a value in a dictionary or a function call; Lab 5 sends an HTTP request, so know what a URL, a request header, and a status code are.
+- Be able to run basic Docker commands such as `docker ps` and `docker logs` to check whether a container is running.
 - Install Python dependencies following [Environment Setup](../environments/single-node/README.md).
 - Prepare Docker Desktop / Engine and the Compose plugin; the course uses a single-container Doris sandbox.
 - Module 1 starts the sandbox; subsequent Labs automatically connect to the same environment. Read each Lab's table reset scope before running it.
@@ -111,3 +113,7 @@ Connections remain available after you finish a Lab, so you can continue queryin
 ## Supplementary Activities
 
 After completing the main sequence, you can continue with the [Level 1 Extension Labs](extensions/README.md): scaling up data and Profile, batch file ingestion, defaults/generated columns, batch commit acknowledgment, schema changes, and deletes through ingestion. Extensions do not increase the video count; their dependencies and reset scopes are documented separately.
+
+## Next: Level 2
+
+After Lab 7 and Quiz 7, continue to [Level 2](../level2/README.md). It starts with [Module 8: Views and Materialized Views](../level2/module08-views-materialized-views/course.md).

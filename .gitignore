@@ -1,0 +1,23 @@
+# Local files that must never be committed, wherever a learner creates them.
+# Course directories keep their own .gitignore for course-specific files.
+
+# Editor and AI-client configuration (can contain absolute local paths)
+.cursor/
+.vscode/
+.idea/
+
+# Credentials and local environment files
+course_secrets.env
+.env
+.env.*
+!.env*.example
+
+# Python and Jupyter
+.venv/
+.venv*/
+__pycache__/
+*.egg-info/
+.ipynb_checkpoints/
+
+# Operating system
+.DS_Store

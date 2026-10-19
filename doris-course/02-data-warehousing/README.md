@@ -4,7 +4,7 @@ From order data to trustworthy business analysis: learn how to ingest data, hand
 then progress through data warehouse modeling, analytics services, and operational governance.
 
 This course is for data engineers and analytics engineers preparing to build a data warehouse with Doris.
-You need to be able to read basic SQL; the first module walks you through connecting to the environment and creating your first order table.
+You should be able to read basic SQL (`SELECT`, `WHERE`, `GROUP BY`, `JOIN`), read short Python functions (including `try`/`finally`) and change a value in a dictionary or a function call, recognize the parts of an HTTP request (method, URL, headers, status code), and run basic Docker commands such as `docker ps` and `docker logs`. The first module walks you through connecting to the environment and creating your first order table.
 
 ## Start Here
 

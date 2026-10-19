@@ -69,6 +69,7 @@ def install_styles() -> None:
       table.doris-table th {background:#eef2f6;border:1px solid #cbd5e1;color:#1f2937;
         padding:7px 10px;text-align:left}
       table.doris-table td {border:1px solid #d9dee5;padding:7px 10px}
+      table.doris-table td.doris-empty {color:#64748b;font-style:italic}
       table.doris-table tbody tr:nth-child(even) {background:#f8fafc}
       @media (max-width:700px) {.doris-workflow-list{grid-template-columns:1fr}}
     </style>
@@ -103,15 +104,57 @@ def show_sql(title: str, statement: str) -> None:
     ))
 
 
+def is_null(value: object) -> bool:
+    """Return True for SQL NULL in every form pandas may have converted it to."""
+    if value is None or value is pd.NA or value is pd.NaT:
+        return True
+    try:
+        return bool(pd.isna(value))
+    except (TypeError, ValueError):
+        return False
+
+
+def result_frame(rows: Sequence, columns: Sequence[str]) -> pd.DataFrame:
+    """Build a result DataFrame that keeps SQL NULL and integer values intact.
+
+    pandas stores an integer column that contains NULL as float64, so 10 would
+    display as 10.0. Such columns use the nullable Int64 dtype instead.
+    """
+    names = list(columns)
+    records = [
+        [row.get(name) for name in names] if isinstance(row, Mapping) else list(row)
+        for row in rows
+    ]
+    data = {}
+    for position in range(len(names)):
+        values = [record[position] for record in records]
+        present = [value for value in values if value is not None]
+        if (
+            present
+            and len(present) < len(values)
+            and all(type(value) is int and -2**63 <= value < 2**63 for value in present)
+        ):
+            data[position] = pd.array(values, dtype="Int64")
+        else:
+            data[position] = values
+    frame = pd.DataFrame(data, index=pd.RangeIndex(len(records)))
+    frame.columns = names
+    return frame
+
+
 def show_frame(title: str, frame: pd.DataFrame, *, final: bool = False) -> None:
     headings = "".join(f"<th>{html.escape(str(column))}</th>" for column in frame.columns)
     body_rows = []
     for row in frame.itertuples(index=False, name=None):
         cells = "".join(
-            f"<td>{html.escape('NULL' if value is None else str(value))}</td>"
+            f"<td>{html.escape('NULL' if is_null(value) else str(value))}</td>"
             for value in row
         )
         body_rows.append(f"<tr>{cells}</tr>")
+    if not body_rows and len(frame.columns):
+        body_rows.append(
+            f'<tr><td class="doris-empty" colspan="{len(frame.columns)}">No rows returned.</td></tr>'
+        )
     final_class = " doris-result-final" if final else ""
     display(HTML(
         f'<div class="doris-result{final_class}">'
@@ -230,6 +273,23 @@ def connect_doris(
     )
 
 
+def report_sql_error(title: str | None, statement: str, error: Exception) -> str:
+    """Show a failed statement as a short card and shorten its notebook traceback.
+
+    The full statement and server response stay available in a collapsed log.
+    IPython renders an exception through ``_render_traceback_`` when the
+    exception provides one, so the learner sees one line instead of the
+    PyMySQL call stack. The original exception is still raised by the caller.
+    """
+    message = str(error.args[1]) if len(error.args) > 1 else str(error)
+    # Doris wraps server messages as "errCode = 2, detailMessage = <message>".
+    summary = message.split("detailMessage =", 1)[-1].strip() or type(error).__name__
+    card(summary, "fail", f"{title or 'SQL statement'} failed")
+    show_log("Statement and full error", f"{statement.strip()}\n\n{type(error).__name__}: {error}")
+    error._render_traceback_ = lambda: [f"{type(error).__name__}: {summary}"]
+    return summary
+
+
 def sql(
     connection,
     statement: str,
@@ -238,12 +298,21 @@ def sql(
     show_statement: bool = True,
     final: bool = False,
 ):
+    """Run one statement and display its result.
+
+    A statement that returns a result set gives a DataFrame, also when the
+    result has no rows; any other statement gives the affected-row count.
+    """
     clean = statement.strip().rstrip(";")
     if show_statement:
         show_sql(title or "SQL", clean)
     with connection.cursor() as cursor:
-        cursor.execute(clean)
-        rows = cursor.fetchall() if cursor.description else []
+        try:
+            cursor.execute(clean)
+            rows = cursor.fetchall() if cursor.description else []
+        except pymysql.MySQLError as error:
+            report_sql_error(title, clean, error)
+            raise
         columns = (
             [column[0] for column in cursor.description]
             if cursor.description
@@ -251,7 +320,9 @@ def sql(
         )
         affected = cursor.rowcount
     if columns:
-        frame = pd.DataFrame(rows, columns=columns)
+        if rows and isinstance(rows[0], Mapping):
+            columns = list(rows[0])
+        frame = result_frame(rows, columns)
         show_frame(title or "Query result", frame, final=final)
         return frame
     if not final:
@@ -334,13 +405,20 @@ class ObservabilityLab:
 
     def query(self, statement: str) -> pd.DataFrame:
         connection = self._require_connection()
+        clean = statement.strip().rstrip(";")
         with connection.cursor() as cursor:
-            cursor.execute(statement.strip().rstrip(";"))
+            try:
+                cursor.execute(clean)
+                rows = cursor.fetchall() if cursor.description else []
+            except pymysql.MySQLError as error:
+                report_sql_error(None, clean, error)
+                raise
             if cursor.description is None:
                 raise ValueError("query() requires a statement that returns rows.")
-            rows = cursor.fetchall()
             columns = [column[0] for column in cursor.description]
-        return pd.DataFrame(rows, columns=columns)
+        if rows and isinstance(rows[0], Mapping):
+            columns = list(rows[0])
+        return result_frame(rows, columns)
 
     def connect(
         self,

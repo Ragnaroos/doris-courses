@@ -10,9 +10,8 @@ from pathlib import Path
 
 import pymysql
 import requests
-import pandas as pd
 
-from .ui import card, in_notebook, install_styles, show_frame, show_sql
+from .ui import card, in_notebook, install_styles, report_sql_error, result_frame, show_frame, show_sql
 
 COURSE_ROOT = Path(__file__).resolve().parents[1]
 
@@ -122,12 +121,19 @@ class WarehouseLab:
     def sql(self, statement, params=None, *, title="Query result"):
         """Display named columns like course 01; query() remains assertion-friendly."""
         with self.connection.cursor() as cursor:
+            visible = statement
             if in_notebook():
-                show_sql(title, cursor.mogrify(statement, params))
-            cursor.execute(statement, params)
-            rows = list(cursor.fetchall())
+                visible = cursor.mogrify(statement, params)
+                show_sql(title, visible)
+            try:
+                cursor.execute(statement, params)
+                rows = list(cursor.fetchall())
+            except pymysql.MySQLError as error:
+                if in_notebook():
+                    report_sql_error(title, visible, error)
+                raise
             columns = [column[0] for column in cursor.description]
-        frame = pd.DataFrame(rows, columns=columns)
+        frame = result_frame(rows, columns)
         if in_notebook():
             show_frame(title, frame)
         else:

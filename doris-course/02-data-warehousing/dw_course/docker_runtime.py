@@ -154,6 +154,11 @@ def connect_sandbox(*, module=None):
     return lab
 
 
+# Labs 6 and 7 load these WWI tables from the bundled Parquet package when
+# they are absent, so only an existing but incomplete copy blocks the lab.
+RELOADABLE_TABLES = {"wwi_customers", "wwi_products"}
+
+
 def _check_prerequisites(lab, module):
     requirements = {
         6: {"wwi_customers": (663, 5)},
@@ -165,13 +170,17 @@ def _check_prerequisites(lab, module):
     missing = []
     upstream = set()
     for table, (count, source) in requirements.items():
+        if table not in existing and table in RELOADABLE_TABLES:
+            continue
         if table not in existing or lab.query(f"SELECT COUNT(*) FROM {table}")[0][0] != count:
             missing.append(table)
             upstream.add(source)
     if missing:
+        steps = {5: "Lab 5 (historical import)", 6: "Lab 6 (quality checks)"}
+        verb = "is" if len(missing) == 1 else "are"
         raise SetupRequired(
-            f"Lab {module} needs data in {lab.database}: {', '.join(missing)} is missing or incomplete. "
-            "Complete Lab 5 (historical import), then Lab 6 (quality checks) if needed, "
+            f"Lab {module} needs data in {lab.database}: {', '.join(missing)} {verb} missing or incomplete. "
+            f"Complete {', then '.join(steps[number] for number in sorted(upstream))} "
             "in this same database. Return here and rerun this cell. No lab tables have been reset.",
             labs=tuple(sorted(upstream)),
         )

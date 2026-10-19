@@ -7,7 +7,9 @@
 # Adapted for Module 9 from Apache Doris's official 4.1 multi-node Compose:
 # docker/runtime/all-in-one/4.1/compose/multi-node.yml
 # Changes are limited to a course-specific project name, private subnet, and
-# localhost-only host ports that do not conflict with the Level 1-8 sandbox.
+# localhost-only host ports that do not conflict with the Modules 1-8 sandbox.
+# The official client service is omitted: the Lab never started it and checks
+# FE and BE registration from the notebook instead.
 
 name: doris-course-m09
 
@@ -122,27 +124,6 @@ services:
     networks:
       doris:
         ipv4_address: ${SUBNET:-172.31.91}.60
-
-  client:
-    <<: *node
-    environment:
-      DORIS_ROLE: client
-      FE_MASTER: fe-1,fe-2,fe-3
-      EXPECT_FE: 3
-      EXPECT_BE: 3
-    depends_on:
-      fe-2:
-        condition: service_healthy
-      fe-3:
-        condition: service_healthy
-      be-1:
-        condition: service_healthy
-      be-2:
-        condition: service_healthy
-      be-3:
-        condition: service_healthy
-    networks:
-      doris:
 
 networks:
   doris:

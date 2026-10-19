@@ -5,7 +5,7 @@
 | Course | Data Warehousing with Apache Doris · Level 2 |
 | Product scope | Apache Doris 4.x; examples use the course's 4.1.3 sandbox |
 | Prerequisites | Module 8 views, Module 9 grain, and Module 10 metric contracts |
-| Suggested time | About 123 minutes: reading 45, Lab 70, Quiz 8; first-start image downloads/builds are additional |
+| Suggested time | About 128 minutes: reading 50, Lab 70, Quiz 8; first-start image downloads/builds are additional |
 
 [Level 2 contents](../README.md) · [Open Lab 11](lab11_bi_and_ai_delivery.ipynb) · [Open Quiz 11](quiz11_bi_and_ai.ipynb)
 
@@ -33,7 +33,8 @@ After this module, you should be able to:
 | 11.3 AI feature inputs | What can a data projection prove? | 10 min |
 | 11.4 MCP access | How can an AI tool read Doris safely? | 10 min |
 | 11.5 Publication checks | How do we validate the interface? | 5 min |
-| Lab 11 / Quiz 11 | Existing foundations and extended core evidence | 70 / 8 min |
+| 11.6 Optional: real BI consumer | What does a real dashboard add, and what does it need? | 5 min |
+| Lab 11 / Quiz 11 | Sections 0–4 are required; Sections 5–6 (local Superset) are optional | 70 / 8 min |
 
 ## 11.1 Publish a Consumer Contract, Not Just a Query
 
@@ -93,7 +94,7 @@ A useful service-level agreement separates three outcomes:
 | Freshness | Latest successful refresh and maximum event time | Scheduler, late data, and BI cache |
 | Accuracy | Fixed expectations, independent detail reconciliation, null and count checks | Metric owner and chart filters |
 
-A 200 ms response does **not** prove that the data is fresh. A displayed number does **not** prove that the business definition is correct. The Lab does not install Superset; it first verifies the consumer query in Doris:
+A 200 ms response does **not** prove that the data is fresh. A displayed number does **not** prove that the business definition is correct. Before any BI tool is involved, the Lab verifies the consumer query in Doris:
 
 ```sql
 SELECT order_date, order_count, gross_amount, average_order_amount
@@ -161,17 +162,33 @@ FROM bi_order_metrics_l2;
 
 Before production publication, also check schema and grain, critical nulls, independent count and amount totals, maximum event time, latest successful refresh, source batches, and read-only account scope. An unexpected result should lead back to its source and definition before any dashboard is released.
 
-## 11.5 Follow the Contract into a Real BI Consumer
+## 11.6 Optional: Follow the Contract into a Real BI Consumer
 
-The extended Lab does not stop at a semantic view. It starts a pinned local Apache Superset service, registers the Doris SQLAlchemy dialect, creates three charts and queries them through the actual BI connection. The input is the payment/cohort contract from Module 10, not a relabeled initial-order total. See the official [Superset integration](https://doris.apache.org/docs/4.x/connection-integration/data-integration/superset/) for supported connection setup.
+Lab 11 Sections 5–6 are optional. They take the reviewed contract beyond a semantic view: they start a pinned local Apache Superset service, register the Doris SQLAlchemy dialect, create three charts and query them through the actual BI connection. The input is the payment/cohort contract from Module 10, not a relabeled initial-order total. See the official [Superset integration](https://doris.apache.org/docs/4.x/connection-integration/data-integration/superset/) for supported connection setup.
 
 The UI administrator and Doris reader serve different purposes. The local UI account configures dashboards; the generated database account receives only `SELECT_PRIV` on the reviewed view. A successful chart query and a denied direct-detail query establish this experiment's database boundary. They do not prove Superset's own user/role isolation or production hardening.
 
 Inspect paid GMV, paid orders, and created-cohort conversion in the generated dashboard. Follow the metric SQL back to its numerator, denominator and explicit business-time cutoff. Refreshing a chart reruns its query; it does not extend the source contract's fixed reporting window. API result checks validate actual returned values, while browser review validates presentation. The local SQLite metadata, public teaching UI credentials and fixed secret are intentionally non-production.
 
+**Before you run Sections 5–6:** the first run needs internet access to download Apache Superset 4.1.2 and build the course image `doris-course-superset:4.1.2-pydoris1.1.0`, which can take several minutes. The service needs about 2 GiB of additional Docker memory (its container is capped at 2 GiB and two CPUs) and port 51888 on 127.0.0.1. It creates the Docker Compose project `doris-warehousing-bi` with a metadata volume, the local UI account `course_admin` / `course_local_only`, and a Doris account `course_bi_<suffix>` that can read only `bi_paid_kpis_l2`; Section 5 shows its exact name as `doris_reader`. These objects stay after the Lab so that the dashboard keeps working. Skipping Sections 5–6 does not affect Quiz 11 or Level 3.
+
+When you no longer need the dashboard, remove what the optional part created. From the course directory, detach the course Doris container from the BI network first; otherwise the network cannot be removed:
+
+```bash
+docker network disconnect doris-warehousing-bi_default doris-warehousing-course-doris-1
+docker compose --project-name doris-warehousing-bi --file environments/bi/compose.yml down --volumes
+docker image rm doris-course-superset:4.1.2-pydoris1.1.0
+```
+
+Then drop the Doris account, using the name that Section 5 showed:
+
+```sql
+DROP USER 'course_bi_<suffix>'@'%';
+```
+
 ## Hands-on Lab: Publish a Stable Consumer Interface
 
-Complete Lab 10, then open [Lab 11](lab11_bi_and_ai_delivery.ipynb). It rebuilds `bi_order_metrics_l2`, queries reviewed dashboard fields and feature projections, and performs integrity checks. A temporary broken view proves that a missing published column is detectable; fixed teaching reference dates show a one-day freshness rule passing and then failing. The input is Module 10's service table; Modules 8–9 are conceptual context but not direct Lab 11 inputs. Results appear as tables. The Lab neither launches Superset nor connects to an external MCP Server.
+Complete Lab 10, then open [Lab 11](lab11_bi_and_ai_delivery.ipynb). It rebuilds `bi_order_metrics_l2`, queries reviewed dashboard fields and feature projections, and performs integrity checks. A temporary broken view proves that a missing published column is detectable; fixed teaching reference dates show a one-day freshness rule passing and then failing. The input is Module 10's service table; Modules 8–9 are conceptual context but not direct Lab 11 inputs. Results appear as tables. Optional Sections 5–6 also start a local Superset dashboard (see 11.6). The Lab does not connect to an external MCP Server.
 
 ### Independent exercise
 
@@ -188,6 +205,8 @@ A BI team now wants a customer-region filter. The current view cannot provide it
 ## Knowledge Quiz
 
 Open [Quiz 11](quiz11_bi_and_ai.ipynb) to check semantic views, dimensions and measures, feature projections, publication checks, Doris/BI/AI boundaries, and least-privilege MCP access.
+
+Next: this is the last module of Level 2. Level 3 starts with [Module 12: Publishing, Permissions, and Audit](../../level3/module12-publishing-permissions-audit/course.md).
 
 ## Official References
 

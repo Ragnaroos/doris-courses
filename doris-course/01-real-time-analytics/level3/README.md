@@ -314,9 +314,9 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 
 - `fe-1` 初始引导集群，`fe-2`、`fe-3` 默认作为 Follower 加入；基础实验不把 `fe-3` 改成 Observer，以保留三个参与选举的 FE。
 - `be-1`、`be-2` 先运行，`be-3` 留给在线扩容实验。双副本事件基线在两个 BE 阶段使每个 BE 各存放每个 Tablet 的一份副本，加入第三个 BE 后再观察放置是否变化。三副本事件小表只在三个 BE 就绪后创建。默认副本数不能代替实验中明确的建表配置。
-- 当前 `client` 容器的健康检查期望三个 BE；若沿用此条件，初始阶段只启动三 FE + 两 BE，扩容后再启动 `client`。实际 Lab 需核对官方镜像对新增 BE 的注册方式，使用有界就绪检查，不用固定 `sleep` 代替。
+- Compose 文件不再包含官方 `multi-node.yml` 中的 `client` 服务（Lab 从未启动它）。FE、BE 是否完成注册，由 Lab 中的有界就绪检查确认，不用固定 `sleep` 代替。
 - Module 9 使用独立 Compose project、私有子网和不与现有单节点沙箱冲突的主机端口。官方 Compose 支持 `FE_PORT`、`FE2_PORT`、`FE3_PORT`、`FE_HTTP_PORT`、`FE2_HTTP_PORT`、`FE3_HTTP_PORT`、`BE_HTTP_PORT` 和 `SUBNET`。课程候选值为 MySQL 端口 `9130`–`9132`、FE HTTP 端口 `8130`–`8132`、BE HTTP 端口 `8140` 和子网前缀 `172.31.91`，采用前必须检查占用。容器内部仍使用 Doris 默认端口。
-- 在 Docker Desktop 上，主机不能直接路由到容器私网地址。需要跟随 FE 重定向到 BE 的操作应从 `client` 容器执行。当前 Notebook 的 `DorisLab.connect` 固定连接 `127.0.0.1:9130`，即 `fe-1`，停掉 Master 后才手动切换到另一个 FE；这不是 FE 负载均衡。新版实验先识别当前 Master 及其发布端口并明确直连，再停止该 FE，证明原 TCP 连接不会自动迁移；随后按官方方案加入带健康检查的轻量 HAProxy TCP 入口，让新连接避开故障 FE，并用代理统计或等价证据核对连接目标。恢复原 FE 后确认它重新加入，再为后续 Lab 保持完整 FE 拓扑。代理仍位于同一 Docker 宿主机，本身也不是冗余入口。[FE 负载均衡](https://doris.apache.org/docs/4.x/admin-manual/cluster-management/load-balancing/)。
+- 在 Docker Desktop 上，主机不能直接路由到容器私网地址。当前 Notebook 的 `DorisLab.connect` 固定连接 `127.0.0.1:9130`，即 `fe-1`，停掉 Master 后才手动切换到另一个 FE；这不是 FE 负载均衡。新版实验先识别当前 Master 及其发布端口并明确直连，再停止该 FE，证明原 TCP 连接不会自动迁移；随后按官方方案加入带健康检查的轻量 HAProxy TCP 入口，让新连接避开故障 FE，并用代理统计或等价证据核对连接目标。恢复原 FE 后确认它重新加入，再为后续 Lab 保持完整 FE 拓扑。代理仍位于同一 Docker 宿主机，本身也不是冗余入口。[FE 负载均衡](https://doris.apache.org/docs/4.x/admin-manual/cluster-management/load-balancing/)。
 - 官方 Compose 默认不提供跨 `down` 的持久化。`stop/start`、`kill/start` 或再次 `up` 保留现有容器状态；`down` 删除容器、网络和其中的数据。故障实验不能用 `down` 代替停止单个节点。
 
 官方依据：[All-in-One 镜像与多节点 Compose](https://doris.apache.org/community/developer-guide/all-in-one-image)。
@@ -326,7 +326,7 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 完成本模块后，学员应能够：
 
 1. 区分为容量和并行工作服务的分片、为数据冗余服务的 Tablet 副本，以及为元数据服务可用性服务的 FE Follower。
-2. 说明三个 FE、从两个扩展到三个的 BE、`client` 和负载均衡入口各自的职责及连接路径。
+2. 说明三个 FE、从两个扩展到三个的 BE 和负载均衡入口各自的职责及连接路径。
 3. 说明 Partition、Bucket、Tablet 标识和物理副本之间的关系。
 4. 根据数据量和查询条件选择分布列与 Bucket 数量，并解释低基数分布列可能带来的风险。
 5. 区分期望副本配置、BE 上的实际放置、查询选择的副本，以及版本完整的健康副本。
@@ -516,7 +516,7 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 
 ### 证据边界与清理约定
 
-- 初始阶段对三 FE、两 BE 的服务级就绪检查与扩容后 `client` healthy，只证明各阶段预期节点在该时刻完成注册，不代表后续每个 Tablet 都健康。
+- 初始阶段对三 FE、两 BE 的就绪检查与扩容后对第三个 BE 的就绪检查，只证明各阶段预期节点在该时刻完成注册，不代表后续每个 Tablet 都健康。
 - `SHOW FRONTENDS`、`SHOW BACKENDS`、`SHOW REPLICA DISTRIBUTION` 和 Tablet 元数据说明控制面观察到的节点与副本状态；代理侧连接记录用于检查 FE 入口分配，SQL 结果用于检查逻辑数据，`EXPLAIN` 用于检查计划，Query Profile 用于检查实际执行位置。
 - 新增 BE 后看到副本数变化可支持“副本在移动”，不能据此断言新增 Bucket、逻辑行发生迁移或自动扩容已经达到生产均衡。新增节点不等于原节点副本已恢复；停机恢复实验必须分别检查版本。
 - 单次正在执行的请求可能在节点停止时失败；后续重连成功不能改写为“零中断”。

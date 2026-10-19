@@ -761,7 +761,20 @@ eligible mistaken deletion?
 
 Open [Lab 9 — Observe Sharding, Replication, and Distributed Execution](lab9_observe_sharding_and_replication.ipynb)
 after completing Lab 8. It uses an isolated Module 9 Compose project rather
-than the Level 1–8 single-node `doris` container.
+than the single-node `doris` container from Modules 1–8.
+
+Check the environment before you start:
+
+- The Lab runs three FEs, three BEs, and an HAProxy container on one Docker
+  host. Docker needs at least 4 CPUs, 8 GB of memory, and 20 GiB of free disk
+  space. The first Lab cell checks these values before it starts any Module 9
+  container and stops with an explanation if one is too low. The running
+  cluster uses about 1 GiB of memory per FE and 1.2 GiB per BE.
+- Stop the single-node sandbox first with `docker stop doris`. The Lab checks
+  for it and stops instead of stopping it for you.
+- With the Doris image already downloaded, the first start takes about one
+  minute, including the HAProxy image download. On a new machine, downloading
+  the Doris image takes longer.
 
 The first complete run imports a read-only, bounded seven-hour course sample
 when no reusable local baseline exists. Later runs can preserve only the 12,062
@@ -793,7 +806,20 @@ Read Lab 9 evidence in four layers:
 
 The Stop and Restart controls preserve the isolated containers and verify the
 persisted event baseline, user dimension, and outage purchase. They are not a
-backup test. Avoid `down` if you intend to continue using the cluster.
+backup test. Do not run `down` while you still need the cluster.
+
+If the Module 9 cluster reaches a state that the Lab cannot recover from, for
+example after a container was deleted or the FEs lost their majority, reset
+it. From the course directory, run:
+
+```bash
+docker compose --file level3/module09-sharding-replication/compose.multinode.yml down
+```
+
+Then rerun the Lab from Section 1.1. The command deletes only the Module 9
+containers, the data stored in them, and their network; the single-node
+`doris` container is not affected. The next run imports the seven-hour sample
+again. Use the same command to remove the cluster when you finish the course.
 
 ## Module summary
 

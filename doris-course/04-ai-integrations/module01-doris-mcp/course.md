@@ -15,8 +15,8 @@ want to ask an AI agent about the same data without copying schemas into a
 prompt, giving the model an administrator account, or exposing the local
 database over a new network service.
 
-This module connects four installed AI agents to the official Apache Doris MCP
-Server:
+This module connects an AI agent to the official Apache Doris MCP Server. You
+need **one** of these Hosts; connecting more of them is optional:
 
 - Claude Desktop;
 - Cursor;
@@ -25,9 +25,9 @@ Server:
 
 Each Host starts a local MCP Server process over standard input and output.
 Every process connects to the same single-Frontend (FE), single-Backend (BE)
-Doris teaching environment. The complete verification runs once in Codex. The
-other three Hosts perform a connection smoke test rather than repeating the
-same analysis.
+Doris teaching environment. The complete verification runs once, in any one
+connected Host; the examples and screenshots use Codex. An additional Host only
+needs a connection smoke test rather than repeating the same analysis.
 
 This module is a guided Markdown workflow. There is no separate Jupyter
 Notebook or Lab document. Commands and configuration blocks are intended for
@@ -42,11 +42,12 @@ After completing this module, you will be able to:
    Apache Doris.
 2. Summarize the eight built-in Doris MCP tool domains without treating the
    complete tool catalog as one lesson.
-3. Prepare one protected local stdio launcher for four different Hosts.
-4. Connect Claude Desktop, Cursor, VS Code, and Codex to the same local Doris
-   target.
-5. Use Codex to inspect real table context before executing a bounded read-only
-   query.
+3. Prepare one protected local stdio launcher that any number of Hosts can
+   share.
+4. Connect an MCP Host such as Claude Desktop, Cursor, VS Code, or Codex to the
+   local Doris target.
+5. Use the connected Host to inspect real table context before executing a
+   bounded read-only query.
 6. Retrieve one bounded memory view from the `doris_cluster` domain while
    preserving source, partial-availability, and warning evidence.
 7. Separate a successful MCP call, a Doris fact, and an agent interpretation.
@@ -62,8 +63,8 @@ time:
 confirm the existing Doris baseline
     -> create a least-privilege Doris identity
     -> prepare one protected stdio launcher
-    -> register that launcher in four MCP Hosts
-    -> verify the active connection in Codex
+    -> register that launcher in at least one MCP Host
+    -> verify the active connection in that Host
     -> ground the conversation in the real events schema
     -> execute one bounded read-only aggregation
     -> inspect one bounded BE memory view
@@ -77,9 +78,9 @@ Each section turns a requirement into a decision:
 | **1.1 Separate the four responsibilities** | The model, tool protocol, server process, and database are easy to collapse into one component. | Assign planning, transport, validation, and execution to the correct layer. | A local process and data-flow diagram. |
 | **1.2 Read the capability map** | The Server exposes more capabilities than one lesson should demonstrate. | Introduce all eight domains, then select three children for the guided path. | A bounded domain map and selected-tool table. |
 | **1.3 Confirm the course environment** | The repository contains both single-node and multi-node Doris environments. | Use the persistent Level 1–8 single-node baseline for this MCP module. | One FE, one BE, three loopback ports, and the verified `events` table. |
-| **1.4 Prepare the stdio entry point** | Four Host files must not contain four copies of a database password. | Put the route in one ignored local environment file and expose one launcher path. | A protected environment file and launcher contract. |
-| **1.5 Connect four Hosts** | Each product stores local MCP configuration differently. | Register the same launcher and verify only product-specific connection state. | One connected-state screenshot per Host. |
-| **1.6 Verify with Codex** | A connection alone does not prove useful or bounded tool behavior. | Ground in metadata, query read-only data, then inspect one memory view. | Three tool traces and a directly reproducible SQL result. |
+| **1.4 Prepare the stdio entry point** | Each Host configuration would otherwise need its own copy of the database password. | Put the route in one ignored local environment file and expose one launcher path. | A protected environment file and launcher contract. |
+| **1.5 Connect a Host** | Each product stores local MCP configuration differently. | Register the shared launcher in at least one Host and verify only its product-specific connection state. | A connected state in each Host you use. |
+| **1.6 Verify in one Host** | A connection alone does not prove useful or bounded tool behavior. | Ground in metadata, query read-only data, then inspect one memory view. | Three tool traces and a directly reproducible SQL result. |
 | **1.7 Interpret the trace** | A polished answer can hide missing or partial evidence. | Read domain discovery, child execution, source, and warning fields separately. | An annotated trace and an evidence checklist. |
 | **1.8 Keep the boundary safe** | Path, port, permission, and capability errors can look similar. | Troubleshoot from Doris outward without broadening privileges. | A symptom-to-check matrix. |
 
@@ -300,7 +301,7 @@ cannot repair a stopped container, missing table, or incorrect baseline.
 
 ## 1.4 Prepare One Protected Local Stdio Entry Point
 
-Four Host configurations should not contain four copies of the same Doris
+Host configurations should not each contain a copy of the same Doris
 password. This module uses one ignored local environment file and one launcher.
 Every Host stores only the absolute launcher path.
 
@@ -411,10 +412,11 @@ The launcher has four important properties:
 4. It leaves standard output exclusively for MCP protocol frames; diagnostic
    logging belongs on standard error or in a configured log file.
 
-### Understand what the four Hosts share
+### Understand what several Hosts share
 
-The Hosts share the launcher, package version, and Doris target. They do not
-share one persistent stdio process. If all four Hosts are open, each Host may
+If you connect more than one Host, they share the launcher, package version,
+and Doris target. They do not share one persistent stdio process. If several
+Hosts are open, each Host may
 start its own `doris-mcp-server` child process with the same route.
 
 One running process also does not switch automatically between the single-node
@@ -422,11 +424,13 @@ and Module 9 environments. A future dual-target design would need two launcher
 and server entries, such as `doris_single` and `doris_multinode`, each with its
 own FE and BE routes. That design is outside this module.
 
-## 1.5 Connect Four MCP Hosts to the Same Doris Target
+## 1.5 Connect an MCP Host to the Doris Target
 
-The four clients below use the same absolute launcher path. Complete only the
-product-specific registration and connection check in this section. Do not run
-the analytical workflow four times; Section 1.6 performs it once in Codex.
+Connect at least one of the four Hosts below. One is enough to finish the
+module; the others are optional. All of them use the same absolute launcher
+path. Complete only the product-specific registration and connection check in
+this section. Do not repeat the analytical workflow in every Host; Section 1.6
+performs it once, in one Host.
 
 Before capturing any screen:
 
@@ -593,19 +597,23 @@ does not send an analytical prompt.*
 
 ### Connection smoke-test boundary
 
-At the end of this section, all four Hosts should be able to initialize their
-own local Server process. Only Codex continues into the complete tool workflow.
+At the end of this section, every Host you connected should initialize its own
+local Server process. Choose one of them for the complete tool workflow in
+Section 1.6.
 
-| Host | Required evidence now | Deferred to Codex |
-| --- | --- | --- |
-| Claude Desktop | `doris` shows **Running** in Developer settings | Metadata, SQL, and memory calls |
-| Cursor | Project source enabled; **Local Connected**; tools listed | Metadata, SQL, and memory calls |
-| VS Code | **Running**; eight tools discovered; chat left empty | Metadata, SQL, and memory calls |
-| Codex | `doris: connected (8 tools)` in `/mcp` | Complete guided verification |
+| Host | Connected-state evidence |
+| --- | --- |
+| Claude Desktop | `doris` shows **Running** in Developer settings |
+| Cursor | Project source enabled; **Local Connected**; tools listed |
+| VS Code | **Running**; eight tools discovered; chat left empty |
+| Codex | `doris: connected (8 tools)` in `/mcp` |
 
-## 1.6 Verify the Complete Path in Codex
+## 1.6 Verify the Complete Path in One Host
 
-Use one continuous Codex conversation for the three requests in this section.
+Use one continuous conversation in one connected Host for the three requests in
+this section. The examples and screenshots come from Codex. Other Hosts show the
+tool calls, their arguments, and their results in their own chat view; the
+checks below do not depend on the product.
 The prompts describe the analytical intent. They do not tell the learner to
 name an MCP domain or dictate a child tool. Tool selection is the Host's job;
 the trace provides evidence of what it selected.
@@ -656,7 +664,7 @@ matched every returned column, type, nullability flag, key flag, and default.
 child tool, and sanitized arguments used for the table-context execution.*
 
 The screenshot proves which tool path supplied the context. The answer text
-proves only how Codex summarized that context.
+proves only how the agent summarized that context.
 
 ### Step 2: execute a bounded read-only aggregation
 
@@ -765,7 +773,7 @@ environment has one BE. The useful questions are:
 - Which FE, BE, SQL, or HTTP source produced the evidence?
 - Did the response declare itself complete or partial?
 - Did it include a warning or unavailable section?
-- Did Codex preserve those limitations in its prose?
+- Did the agent preserve those limitations in its answer?
 
 The live snapshot returned these leading values for BE node `configured_0`:
 
@@ -915,11 +923,9 @@ gallery of transient error dialogs.
 - [ ] `mcp_reader` can read the course database and does not have Doris
   administrator, node, load, alter, create, or drop privileges.
 - [ ] The protected environment file is ignored by version control.
-- [ ] Claude Desktop, Cursor, VS Code, and Codex all start the same launcher
-  path and target the same Doris ports.
-- [ ] Each Host has one connected-state screenshot with secrets and unrelated
-  account information removed.
-- [ ] Codex reads table context before generating the analytical SQL.
+- [ ] At least one Host starts the shared launcher and shows a connected
+  state; any additional Host uses the same launcher path and Doris ports.
+- [ ] The agent reads table context before generating the analytical SQL.
 - [ ] The generated SQL uses the required time range, grouping, order, and
   `LIMIT 10`.
 - [ ] The Agent's query rows match the same SQL executed through the MySQL
@@ -950,9 +956,9 @@ gallery of transient error dialogs.
 | --- | --- | --- |
 | **Environment** | Reuse the verified Lab 1 container and event baseline. | MCP failures can be separated from missing Doris prerequisites. |
 | **Identity** | Create `mcp_reader` with database-level read permission only. | Doris RBAC remains the final data boundary. |
-| **Launcher** | Read one protected local environment file and start stdio with absolute paths. | Four Host files avoid duplicated secrets and GUI `PATH` assumptions. |
-| **Host smoke tests** | Register the launcher in Claude Desktop, Cursor, VS Code, and Codex. | Each product can initialize the same local integration shape. |
-| **Catalog grounding** | Ask Codex to inspect `doris_course.events`. | The answer begins from live schema evidence. |
+| **Launcher** | Read one protected local environment file and start stdio with absolute paths. | Host files avoid duplicated secrets and GUI `PATH` assumptions. |
+| **Host connection** | Register the launcher in at least one Host: Claude Desktop, Cursor, VS Code, or Codex. | The Host can initialize the local integration; other Hosts reuse the same shape. |
+| **Catalog grounding** | Ask the agent to inspect `doris_course.events`. | The answer begins from live schema evidence. |
 | **Bounded query** | Ask for a fixed-window aggregation and reproduce it directly. | Agent output can be checked against Doris rows. |
 | **Memory evidence** | Ask for current memory trackers and keep source and warnings. | One `doris_cluster` path demonstrates bounded operational evidence. |
 | **Trace review** | Inspect discovery, manifest, child arguments, and result fields. | Product UI, protocol evidence, and prose interpretation remain distinct. |

@@ -14,6 +14,8 @@ card = _shared.card
 show_sql = _shared.show_sql
 show_frame = _shared.show_frame
 show_log = _shared.show_log
+result_frame = _shared.result_frame
+report_sql_error = _shared.report_sql_error
 workflow_html = _shared.DorisLab._workflow_html
 
 

@@ -2,7 +2,7 @@
 
 ## From Level 1 to Level 2
 
-In Level 1, you loaded ten orders into `orders_imported`, checked data quality, handled state changes and replay, and queried an external Iceberg table through a table-valued function (TVF).
+In Level 1, you queried an Iceberg table through an Iceberg REST Catalog, loaded ten orders into `orders_imported` and 701,846 rows of Wide World Importers (WWI) history into ten `wwi_*` tables, checked data quality, and handled state changes and replay.
 
 Now imagine that ten orders have become one million. Operations needs daily order counts and amounts; Finance applies a different filter; and a BI dashboard refreshes every five minutes. New requests for sales by customer region, average order value, and stable BI access make the problem more than a collection of SQL queries. **Level 2 teaches you to design data services that BI and AI consumers can use safely and predictably.**
 
@@ -45,7 +45,7 @@ Start the sandbox explicitly in Level 1 Lab 1 before connecting from a Level 2 N
 
 **Suggested sequence:** Lab 5 → Lab 6 → Lab 8 → Lab 9 → Lab 10 → Lab 11.
 
-The single-node sandbox demonstrates the core path. The reading discusses, but the Notebooks do not claim to complete, Superset chart configuration, MCP Server installation and tool calls, multi-node join comparisons, or large-scale performance tests.
+The single-node sandbox demonstrates the core path. The reading discusses, but the Notebooks do not perform, MCP Server installation and tool calls, multi-node join comparisons, or large-scale performance tests. Lab 11 Sections 5–6 optionally build a local Superset dashboard; see below.
 
 ## How the modules connect
 
@@ -90,10 +90,10 @@ An Aggregate Key `SUM` column accumulates repeated inserts. In this isolated Lab
 - [ ] Publish a semantic view and check freshness, nulls, row counts, and amounts.
 - [ ] Use an anti-join, `EXPLAIN`, and Query Profile to investigate incorrect or slow results.
 
-After Level 2, continue to Level 3 for publishing, access control, audit, and storage lifecycle management—or revisit Level 1 with a larger dataset.
+After Level 2, continue to [Level 3](../level3/README.md) for publishing, access control, audit, storage lifecycle management, and resource isolation—or revisit Level 1 with a larger dataset.
 
 ## Extended Core Case and Consumer
 
-Lab 8 now observes synchronous maintenance and partition-aware/full asynchronous refresh. Labs 9–11 carry one independent order/payment/refund fixture through ODS, DWD, DWS and ADS, then into a real three-chart Superset dashboard. Run **Lab 9 Sections 6–8 → Lab 10 Sections 6–9 → Lab 11 Sections 5–6** in order, including the existing foundations. This case does not rewrite Level 1 inputs or claim to be WWI history.
+Lab 8 now observes synchronous maintenance and partition-aware/full asynchronous refresh. Labs 9–11 carry one independent order/payment/refund fixture through ODS, DWD, DWS and ADS, then into a real three-chart Superset dashboard. Run **Lab 9 Sections 6–8 → Lab 10 Sections 6–9** in order, including the existing foundations. **Lab 11 Sections 5–6 are optional**: they need the local Superset service below (internet access for the first build, about 2 GiB of additional Docker memory, port 51888). This case does not rewrite Level 1 inputs or claim to be WWI history.
 
 Lab 10 includes a 100,000-row measured Profile comparison and 20 sequential timing samples per query, not a production benchmark. Lab 11 explicitly starts a loopback-only local BI service with a 2 GiB memory cap and persistent metadata. See [the local Superset environment](../environments/bi/README.md); first-start downloads/builds are outside the suggested learning time. The database reader is restricted to the reviewed view. Local UI administrator credentials and deployment settings are for teaching only.

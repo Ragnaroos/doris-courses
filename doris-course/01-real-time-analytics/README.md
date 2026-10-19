@@ -130,6 +130,12 @@ single-node integrated sandbox created by Module 1. Docker named volumes retain
 FE metadata and BE data when the container stops.
 
 Sharding and replication require a separately named multi-node environment.
+Lab 9 starts it as the Compose project `doris-course-m09`: three FEs, three
+BEs, and HAProxy. Docker needs at least 4 CPUs, 8 GB of memory, and 20 GiB of
+free disk space, and the single-node `doris` container must be stopped first
+(`docker stop doris`). To reset or remove the Module 9 cluster, run
+`docker compose --file level3/module09-sharding-replication/compose.multinode.yml down`
+from the course directory.
 Destructive management exercises should also use an isolated or resettable
 environment. A module may clean up only the containers, volumes, topics, jobs,
 and tables it owns.

@@ -589,6 +589,30 @@ class AlignmentTest(unittest.TestCase):
         self.assertEqual(frame.iloc[0]["amount"], Decimal("100.00"))
         show.assert_called_once()
 
+    def test_sql_keeps_nullable_integers_and_reports_errors(self):
+        import pymysql
+
+        lab = WarehouseLab.__new__(WarehouseLab)
+        cursor = Mock()
+        cursor.description = [("customer_id",)]
+        cursor.fetchall.return_value = [(42,), (None,)]
+        manager = Mock()
+        manager.__enter__ = Mock(return_value=cursor)
+        manager.__exit__ = Mock(return_value=False)
+        lab.connection = Mock()
+        lab.connection.cursor.return_value = manager
+        with patch("dw_course.runtime.in_notebook", return_value=True), patch("dw_course.runtime.show_sql"), patch("dw_course.runtime.show_frame"):
+            frame = lab.sql("SELECT customer_id FROM orders_clean")
+        self.assertEqual(str(frame["customer_id"].dtype), "Int64")
+        self.assertEqual(frame["customer_id"].iloc[0], 42)
+        cursor.execute.side_effect = pymysql.err.ProgrammingError(1105, "errCode = 2, detailMessage = Unknown table 'missing'")
+        with patch("dw_course.runtime.in_notebook", return_value=True), patch("dw_course.runtime.show_sql"), \
+             patch("dw_course.runtime.report_sql_error") as report:
+            with self.assertRaises(pymysql.err.ProgrammingError):
+                lab.sql("SELECT * FROM missing", title="Missing table")
+        report.assert_called_once()
+        self.assertEqual(report.call_args.args[0], "Missing table")
+
     def test_compose_scope_and_persistence(self):
         from dw_course.docker_runtime import COMPOSE_FILE, CONNECTION, PROJECT
         config = yaml.safe_load(COMPOSE_FILE.read_text())
@@ -652,6 +676,38 @@ class AlignmentTest(unittest.TestCase):
                 constructor.assert_called_once_with(allow_writes=True)
                 self.assertEqual({key: os.environ[key] for key in CONNECTION}, CONNECTION)
                 run.assert_not_called()
+
+    def test_prerequisites_let_labs_reload_missing_wwi_tables(self):
+        from dw_course.docker_runtime import _check_prerequisites
+        from dw_course.onboarding import SetupRequired
+
+        def lab_with(tables):
+            lab = Mock()
+            lab.database = "dw_course_l1_test"
+
+            def query(statement):
+                if statement == "SHOW TABLES":
+                    return [(name,) for name in tables]
+                return [(tables[statement.rsplit(" ", 1)[-1]],)]
+
+            lab.query.side_effect = query
+            return lab
+
+        # A missing WWI table is reloaded by the lab's own setup cell.
+        _check_prerequisites(lab_with({}), 6)
+        _check_prerequisites(lab_with({"customers": 663, "orders_clean": 10}), 7)
+        # An incomplete copy is reused without modification, so it must stop the lab.
+        for module, tables, blocked, steps in (
+            (6, {"wwi_customers": 600}, "wwi_customers is", "Complete Lab 5 (historical import) in"),
+            (7, {"wwi_products": 200, "customers": 663, "orders_clean": 10}, "wwi_products is",
+             "Complete Lab 5 (historical import) in"),
+            (7, {"wwi_products": 227}, "customers, orders_clean are", "Complete Lab 6 (quality checks) in"),
+        ):
+            with self.subTest(module=module, tables=tables):
+                with self.assertRaises(SetupRequired) as raised:
+                    _check_prerequisites(lab_with(tables), module)
+                self.assertIn(blocked, str(raised.exception))
+                self.assertIn(steps, str(raised.exception))
 
     def test_explicit_sandbox_start_and_be_readiness(self):
         from dw_course.docker_runtime import prepare_environment

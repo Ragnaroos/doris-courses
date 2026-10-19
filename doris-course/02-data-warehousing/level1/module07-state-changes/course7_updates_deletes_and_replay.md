@@ -325,6 +325,8 @@ For additional operations, see [Level 1 Extension Labs](../extensions/README.md)
 After completing the course notes and lab, open [Quiz 7](quiz7_state_changes_and_replay.ipynb).
 The quiz contains five single-choice questions and requires no Doris or external services; read the explanations after submitting.
 
+Next: this is the last module of Level 1. Level 2 starts with [Module 8: Views and Materialized Views](../../level2/module08-views-materialized-views/course.md).
+
 ## Official References
 
 - [Unique Key primary key model](https://doris.apache.org/docs/4.x/table-design/data-model/unique/)
