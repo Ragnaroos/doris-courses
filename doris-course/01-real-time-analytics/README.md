@@ -134,12 +134,42 @@ single-node integrated sandbox created by Module 1. Docker named volumes retain
 FE metadata and BE data when the container stops.
 
 Sharding and replication require a separately named multi-node environment.
-Lab 9 starts it as the Compose project `doris-course-m09`: three FEs, three
+Lab 9 starts it as the Compose project `doris-rta-m09`: three FEs, three
 BEs, and HAProxy. Docker needs at least 4 CPUs, 8 GB of memory, and 20 GiB of
-free disk space, and the single-node `doris` container must be stopped first
-(`docker stop doris`). To reset or remove the Module 9 cluster, run
+free disk space, and the single-node `doris-rta` container must be stopped first
+(`docker stop doris-rta`). To reset or remove the Module 9 cluster, run
 `docker compose --file level3/module09-sharding-replication/compose.multinode.yml down`
 from the course directory.
+
+## Container names and host ports
+
+Every Docker resource of this course starts with `doris-rta`, and every host
+port is bound to `127.0.0.1` in the 1xxxx range, so this course can run next to
+the other courses in this repository. To use a different host port, set its
+variable before starting Jupyter; the notebooks, shell cells, and Compose files
+read the same variables.
+
+| What | Name | Host port (variable) |
+| --- | --- | --- |
+| Single-node sandbox, Modules 1-8 and 10 | container `doris-rta`, network `doris-rta`, volumes `doris-rta-fe-meta` and `doris-rta-be-storage` | FE query 19030 (`DORIS_RTA_QUERY_PORT`), FE HTTP 18030 (`DORIS_RTA_HTTP_PORT`), BE HTTP 18040 (`DORIS_RTA_BE_HTTP_PORT`) |
+| Kafka broker, Module 3 | Compose project `doris-rta-kafka`, container `doris-rta-kafka` | 19092 (`DORIS_RTA_KAFKA_PORT`) |
+| Optional Metabase, Module 1 | container `doris-rta-metabase`, volume `doris-rta-metabase-data` | 13000 (`DORIS_RTA_METABASE_PORT`) |
+| Multi-node cluster, Module 9 | Compose project `doris-rta-m09` | FE query 19130-19132, FE HTTP 18130-18132, BE HTTP 18140, HAProxy 19230 and stats 18230 (`DORIS_RTA_M09_*`, see `doris_course/environment.py`) |
+
+Inside the sandbox, FE still listens on its default ports 9030 and 8030; the
+host ports forward to them. BE's web server listens on 18040 inside the
+container as well, because FE redirects Stream Load requests to the address BE
+registers, and that address must also work from your computer.
+
+To remove everything this course created (this deletes the course data):
+
+```bash
+docker compose --file level3/module09-sharding-replication/compose.multinode.yml down --volumes
+docker compose --file level1/module03-loading-data/compose.kafka.yml down --volumes
+docker rm -f doris-rta doris-rta-metabase
+docker volume rm doris-rta-fe-meta doris-rta-be-storage doris-rta-metabase-data
+docker network rm doris-rta
+```
 Destructive management exercises should also use an isolated or resettable
 environment. A module may clean up only the containers, volumes, topics, jobs,
 and tables it owns.

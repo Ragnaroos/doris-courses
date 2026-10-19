@@ -761,7 +761,7 @@ eligible mistaken deletion?
 
 Open [Lab 9 — Observe Sharding, Replication, and Distributed Execution](lab09_observe_sharding_and_replication.ipynb)
 after completing Lab 8. It uses an isolated Module 9 Compose project rather
-than the single-node `doris` container from Modules 1–8.
+than the single-node `doris-rta` container from Modules 1–8.
 
 Check the environment before you start:
 
@@ -770,7 +770,7 @@ Check the environment before you start:
   space. The first Lab cell checks these values before it starts any Module 9
   container and stops with an explanation if one is too low. The running
   cluster uses about 1 GiB of memory per FE and 1.2 GiB per BE.
-- Stop the single-node sandbox first with `docker stop doris`. The Lab checks
+- Stop the single-node sandbox first with `docker stop doris-rta`. The Lab checks
   for it and stops instead of stopping it for you.
 - With the Doris image already downloaded, the first start takes about one
   minute, including the HAProxy image download. On a new machine, downloading
@@ -818,7 +818,7 @@ docker compose --file level3/module09-sharding-replication/compose.multinode.yml
 
 Then rerun the Lab from Section 1.1. The command deletes only the Module 9
 containers, the data stored in them, and their network; the single-node
-`doris` container is not affected. The next run imports the seven-hour sample
+`doris-rta` container is not affected. The next run imports the seven-hour sample
 again. Use the same command to remove the cluster when you finish the course.
 
 ## Module summary

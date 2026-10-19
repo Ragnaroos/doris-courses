@@ -1,17 +1,17 @@
-name: doris-course-kafka
+name: doris-rta-kafka
 
 services:
   kafka:
     image: apache/kafka:3.9.1
-    container_name: kafka
+    container_name: doris-rta-kafka
     hostname: kafka
     ports:
-      - "127.0.0.1:9092:9092"
+      - "127.0.0.1:${DORIS_RTA_KAFKA_PORT:-19092}:${DORIS_RTA_KAFKA_PORT:-19092}"
     environment:
       KAFKA_NODE_ID: 1
       KAFKA_PROCESS_ROLES: broker,controller
-      KAFKA_LISTENERS: PLAINTEXT://:29092,CONTROLLER://:29093,PLAINTEXT_HOST://:9092
-      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:9092
+      KAFKA_LISTENERS: PLAINTEXT://:29092,CONTROLLER://:29093,PLAINTEXT_HOST://:${DORIS_RTA_KAFKA_PORT:-19092}
+      KAFKA_ADVERTISED_LISTENERS: PLAINTEXT://kafka:29092,PLAINTEXT_HOST://localhost:${DORIS_RTA_KAFKA_PORT:-19092}
       KAFKA_LISTENER_SECURITY_PROTOCOL_MAP: CONTROLLER:PLAINTEXT,PLAINTEXT_HOST:PLAINTEXT,PLAINTEXT:PLAINTEXT
       KAFKA_CONTROLLER_LISTENER_NAMES: CONTROLLER
       KAFKA_INTER_BROKER_LISTENER_NAME: PLAINTEXT
@@ -26,9 +26,9 @@ services:
     volumes:
       - kafka-data:/var/lib/kafka/data
     networks:
-      - doris-course
+      - doris-rta
     healthcheck:
-      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server localhost:9092 --list >/dev/null"]
+      test: ["CMD-SHELL", "/opt/kafka/bin/kafka-topics.sh --bootstrap-server kafka:29092 --list >/dev/null"]
       interval: 5s
       timeout: 10s
       retries: 30
@@ -38,5 +38,5 @@ volumes:
   kafka-data:
 
 networks:
-  doris-course:
+  doris-rta:
     external: true

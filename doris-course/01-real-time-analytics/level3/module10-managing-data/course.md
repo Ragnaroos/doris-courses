@@ -727,7 +727,7 @@ and [Backup and Restore](https://doris.apache.org/docs/4.x/admin-manual/data-adm
 ## Lab 10: Compare Compression and Verify a Partition Lifecycle
 
 Open [Lab 10 — Manage Data](lab10_manage_data.ipynb) after completing Lab 9.
-The Lab returns to the Level 1–8 single-node `doris` container and the
+The Lab returns to the single-node `doris-rta` container from Modules 1–8 and the
 `doris_course` Database. It reads one bounded day from `events_modelled`, does
 not modify that source, and creates only Module 10 objects. It does not access
 Amazon S3.

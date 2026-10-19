@@ -301,8 +301,10 @@ include:
 - managing SQL-layer metadata such as databases, tables, and schemas;
 - coordinating distributed execution and node management.
 
-When a MySQL client connects to port `9030` in the course sandbox, it connects
-to the FE. “Frontend” does not mean a graphical web interface.
+FE accepts MySQL-protocol connections on its query port, `9030` by default. In
+the course sandbox, host port `19030` forwards to that port, so a MySQL client
+that connects to `127.0.0.1:19030` is talking to the FE. “Frontend” does not
+mean a graphical web interface.
 
 ### Backend (BE)
 
@@ -314,7 +316,7 @@ BEs can scan and aggregate different pieces of a table in parallel.
 ```text
 MySQL-compatible client
           |
-          | SQL over port 9030
+          | SQL over the FE query port (9030; host port 19030 in the sandbox)
           v
 Frontend (FE)
   parse -> analyze -> optimize -> coordinate

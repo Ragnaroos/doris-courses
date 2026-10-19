@@ -177,7 +177,7 @@ Level 3 不按“功能定义→语法清单”组织 Course。每个 Module 使
 
 ### 模块 8 实验：验证查询加速方案
 
-实验文件：[Lab 8 Notebook](module08-query-acceleration/lab08_accelerate_queries.ipynb)。实验复用 Level 1–8 的单节点 `doris` 容器和 `doris_course` Database；只读取 `events_modelled` 与 `dim_products`，所有可变对象均使用 `m08_*` 名称。以下编号严格对应 Notebook 的执行顺序。
+实验文件：[Lab 8 Notebook](module08-query-acceleration/lab08_accelerate_queries.ipynb)。实验复用 Level 1–8 的单节点 `doris-rta` 容器和 `doris_course` Database；只读取 `events_modelled` 与 `dim_products`，所有可变对象均使用 `m08_*` 名称。以下编号严格对应 Notebook 的执行顺序。
 
 0. **Initialize the Lab。**
    - **目的与数据环境：** 从课程根目录或模块目录定位 `doris_course/`，加载共享 `DorisLab` 并创建 `lab`；该单元格不启动 Docker、不连接 Doris、也不修改任何表。内核重启后只需先重跑这里。
@@ -185,7 +185,7 @@ Level 3 不按“功能定义→语法清单”组织 Course。每个 Module 使
    - **说明：** Notebook 的路径解析与共享 helper 可从课程根目录启动 Jupyter，也可从 VS Code 直接打开模块 Notebook。
 
 1. **Section 1A：检查上游事件和产品数据。**
-   - **目的与数据环境：** 连接已有的单节点 `doris`，要求 Lab 4 已创建 `events_modelled`、Lab 6 已创建且填充 `dim_products`；只检查 `[2020-03-01, 2020-03-02)` 左闭右开范围和产品表非空，不下载数据。
+   - **目的与数据环境：** 连接已有的单节点 `doris-rta`，要求 Lab 4 已创建 `events_modelled`、Lab 6 已创建且填充 `dim_products`；只检查 `[2020-03-01, 2020-03-02)` 左闭右开范围和产品表非空，不下载数据。
    - **期望结果：** `events_modelled` 在该范围内为 **75,259** 行，`dim_products` 行数大于零；不满足时立即提示先完成对应前置 Lab。
    - **说明：** 这一步只确认后续实验所需的最小数据环境，不把行数检查说成逐字段完整性验证。
 
@@ -270,7 +270,7 @@ Level 3 不按“功能定义→语法清单”组织 Course。每个 Module 使
     - **说明：** `EXPLAIN` 中的基表索引名不能单独证明二级索引过滤；`RowsInvertedIndexFiltered`、索引时间和 cache hit/miss 必须按算子与任务解释，不能把 `ScanBytes` 直接称为避免的物理磁盘 I/O，也不能承诺固定加速倍数。
 
 18. **Stop、Restart 与 Lab complete。**
-    - **目的与数据环境：** 可选停止单节点 `doris` 释放资源，但保留容器、镜像和命名卷；重启单元格可在容器已停止、启动中或已运行时幂等执行，并重新连接检查 `m08_events`。
+    - **目的与数据环境：** 可选停止单节点 `doris-rta` 释放资源，但保留容器、镜像和命名卷；重启单元格可在容器已停止、启动中或已运行时幂等执行，并重新连接检查 `m08_events`。
     - **期望结果：** 停止后状态为 `exited`；重启后容器回到 `healthy`，完整实验后的 `m08_events` 为 **75,260** 行，且 `event_id=-8001` 恰有一行。
     - **说明：** 停止/重启不会清空 Module 8 对象；结尾 `Lab complete` 用一段话回顾普通 View、同步/异步物化视图、改写边界与倒排索引证据，不再使用“证明事项”表格。
 
@@ -315,8 +315,8 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 - `fe-1` 初始引导集群，`fe-2`、`fe-3` 默认作为 Follower 加入；基础实验不把 `fe-3` 改成 Observer，以保留三个参与选举的 FE。
 - `be-1`、`be-2` 先运行，`be-3` 留给在线扩容实验。双副本事件基线在两个 BE 阶段使每个 BE 各存放每个 Tablet 的一份副本，加入第三个 BE 后再观察放置是否变化。三副本事件小表只在三个 BE 就绪后创建。默认副本数不能代替实验中明确的建表配置。
 - Compose 文件不再包含官方 `multi-node.yml` 中的 `client` 服务（Lab 从未启动它）。FE、BE 是否完成注册，由 Lab 中的有界就绪检查确认，不用固定 `sleep` 代替。
-- Module 9 使用独立 Compose project、私有子网和不与现有单节点沙箱冲突的主机端口。官方 Compose 支持 `FE_PORT`、`FE2_PORT`、`FE3_PORT`、`FE_HTTP_PORT`、`FE2_HTTP_PORT`、`FE3_HTTP_PORT`、`BE_HTTP_PORT` 和 `SUBNET`。课程候选值为 MySQL 端口 `9130`–`9132`、FE HTTP 端口 `8130`–`8132`、BE HTTP 端口 `8140` 和子网前缀 `172.31.91`，采用前必须检查占用。容器内部仍使用 Doris 默认端口。
-- 在 Docker Desktop 上，主机不能直接路由到容器私网地址。当前 Notebook 的 `DorisLab.connect` 固定连接 `127.0.0.1:9130`，即 `fe-1`，停掉 Master 后才手动切换到另一个 FE；这不是 FE 负载均衡。新版实验先识别当前 Master 及其发布端口并明确直连，再停止该 FE，证明原 TCP 连接不会自动迁移；随后按官方方案加入带健康检查的轻量 HAProxy TCP 入口，让新连接避开故障 FE，并用代理统计或等价证据核对连接目标。恢复原 FE 后确认它重新加入，再为后续 Lab 保持完整 FE 拓扑。代理仍位于同一 Docker 宿主机，本身也不是冗余入口。[FE 负载均衡](https://doris.apache.org/docs/4.x/admin-manual/cluster-management/load-balancing/)。
+- Module 9 使用独立 Compose project、私有子网和不与现有单节点沙箱冲突的主机端口。官方 Compose 支持 `FE_PORT`、`FE2_PORT`、`FE3_PORT`、`FE_HTTP_PORT`、`FE2_HTTP_PORT`、`FE3_HTTP_PORT`、`BE_HTTP_PORT` 和 `SUBNET`。课程的 compose 文件把端口变量改名为 `DORIS_RTA_M09_*`，默认值见 `doris_course/environment.py`（R-05）。课程候选值为 MySQL 端口 `9130`–`9132`、FE HTTP 端口 `8130`–`8132`、BE HTTP 端口 `8140` 和子网前缀 `172.31.91`，采用前必须检查占用。容器内部仍使用 Doris 默认端口。
+- 在 Docker Desktop 上，主机不能直接路由到容器私网地址。当前 Notebook 的 `DorisLab.connect` 固定连接 `127.0.0.1:19130`，即 `fe-1`，停掉 Master 后才手动切换到另一个 FE；这不是 FE 负载均衡。新版实验先识别当前 Master 及其发布端口并明确直连，再停止该 FE，证明原 TCP 连接不会自动迁移；随后按官方方案加入带健康检查的轻量 HAProxy TCP 入口，让新连接避开故障 FE，并用代理统计或等价证据核对连接目标。恢复原 FE 后确认它重新加入，再为后续 Lab 保持完整 FE 拓扑。代理仍位于同一 Docker 宿主机，本身也不是冗余入口。[FE 负载均衡](https://doris.apache.org/docs/4.x/admin-manual/cluster-management/load-balancing/)。
 - 官方 Compose 默认不提供跨 `down` 的持久化。`stop/start`、`kill/start` 或再次 `up` 保留现有容器状态；`down` 删除容器、网络和其中的数据。故障实验不能用 `down` 代替停止单个节点。
 
 官方依据：[All-in-One 镜像与多节点 Compose](https://doris.apache.org/community/developer-guide/all-in-one-image)。
@@ -437,7 +437,7 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 
 ### 模块 9 实验：从 3 FE + 2 BE 扩展并观察分布式行为
 
-实验文件：[Lab 9 Notebook](module09-sharding-replication/lab09_observe_sharding_and_replication.ipynb)。实验使用模块目录的 `compose.multinode.yml`、固定镜像 `apache/doris:all-in-one-4.1.3`、独立 Compose project、私有子网和 localhost 端口；不与 Level 1–8 的单节点 `doris` 同时运行。首次缺少本地 baseline 时只读课程 S3 的 `[2020-03-01 00:00:00, 2020-03-01 07:00:00)`，不修改 S3。以下编号严格对应 Notebook 的 1.1–3.2 与结尾控制步骤。
+实验文件：[Lab 9 Notebook](module09-sharding-replication/lab09_observe_sharding_and_replication.ipynb)。实验使用模块目录的 `compose.multinode.yml`、固定镜像 `apache/doris:all-in-one-4.1.3`、独立 Compose project、私有子网和 localhost 端口；不与 Level 1–8 的单节点 `doris-rta` 同时运行。首次缺少本地 baseline 时只读课程 S3 的 `[2020-03-01 00:00:00, 2020-03-01 07:00:00)`，不修改 S3。以下编号严格对应 Notebook 的 1.1–3.2 与结尾控制步骤。
 
 0. **Initialize the Lab。**
    - **目的与数据环境：** 定位课程根目录，加载共享 `DorisLab`，记录 Compose 文件、HAProxy 统计地址、代理端口、固定 FE 服务/IP/主机端口映射和期望事件行数；不启动或停止任何容器。初始 helper 指向直连 `fe-1`，后续步骤会按实验目的切换连接。
@@ -445,7 +445,7 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
    - **说明：** 内核重启不会删除容器和数据，但必须重新运行初始化以恢复本地 Python 状态。
 
 1. **Section 1.1：建立恰好两个存活 BE 的起点。**
-   - **目的与数据环境：** 检查 Docker、Compose、隔离端口和固定镜像；若 Level 1–8 的 `doris` 正在运行则停止并提示，不自动操作它。Module 9 保留已有容器 writable layer、FE 元数据和 Doris 数据，只重启 `be-1`、`be-2` 进程释放旧 RSS，显式停止 `be-3`、`client` 与 HAProxy；已有三 FE 容器同时启动以满足持久化 FE 元数据的多数派要求。这里不重建业务表。
+   - **目的与数据环境：** 检查 Docker、Compose、隔离端口和固定镜像；若单节点 `doris-rta` 正在运行则停止并提示，不自动操作它。Module 9 保留已有容器 writable layer、FE 元数据和 Doris 数据，只重启 `be-1`、`be-2` 进程释放旧 RSS，显式停止 `be-3`、`client` 与 HAProxy；已有三 FE 容器同时启动以满足持久化 FE 元数据的多数派要求。这里不重建业务表。
    - **期望结果：** 三个 FE 均 `Alive=true`、角色均为 Follower 且恰有一个 Master；仅 `be-1`、`be-2` 存活，固定地址为 `.50`、`.51`，版本一致；已注册的 `be-3` 可以仍在 FE 元数据中但必须 `Alive=false`；HAProxy 保持停止。
    - **说明：** “已注册”不等于“正在提供放置”；重启 BE 进程会释放进程内存，但不会删除节点注册、容器层或已有 Doris 数据。
 
@@ -465,7 +465,7 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
    - **说明：** FE 选举可让另一个 Follower 成为 Master，但不能把已经断开的 MySQL TCP 会话迁移到它；FE 高可用与客户端入口高可用是两个问题。
 
 5. **Section 1.3B：在故障 FE 仍停止时启动 HAProxy 并建立新连接。**
-   - **目的与数据环境：** 用 `--no-deps` 启动 HAProxy，避免 Compose 顺带恢复故障 FE；读取代理健康状态，建立四个独立的新 MySQL session，并比较各 FE 目标的累计连接增量；再通过代理端口 `9230` 查询事件表。
+   - **目的与数据环境：** 用 `--no-deps` 启动 HAProxy，避免 Compose 顺带恢复故障 FE；读取代理健康状态，建立四个独立的新 MySQL session，并比较各 FE 目标的累计连接增量；再通过代理端口 `19230` 查询事件表。
    - **期望结果：** 至少四个新连接只分配到两个 `UP` 的 FE，停止目标增量为零；Doris 侧仍是两个存活 FE、恰有一个 Master；代理查询返回 12,062 行。
    - **说明：** HAProxy 的 L4 健康检查和 round-robin 负责新连接入口，Doris FE 选举负责元数据服务；代理不能恢复旧会话，应用仍需重新连接或重试。
 
@@ -682,7 +682,7 @@ ClickHouse 参考：[Real-time Analytics with ClickHouse](https://learn.clickhou
 
 ### 模块 10 实验：比较压缩并验证分区生命周期
 
-实验文件：[Lab 10 Notebook](module10-managing-data/lab10_manage_data.ipynb)。实验使用 Level 1–8 的单节点 `doris` 和 `doris_course`，不要求 Module 9 多节点集群运行；只读 `events_modelled` 的一天范围，其他数据均在本地生成。所有可变对象使用 `m10_*` 名称，不访问 AWS S3。以下编号严格对应 Notebook 的执行顺序。
+实验文件：[Lab 10 Notebook](module10-managing-data/lab10_manage_data.ipynb)。实验使用 Level 1–8 的单节点 `doris-rta` 和 `doris_course`，不要求 Module 9 多节点集群运行；只读 `events_modelled` 的一天范围，其他数据均在本地生成。所有可变对象使用 `m10_*` 名称，不访问 AWS S3。以下编号严格对应 Notebook 的执行顺序。
 
 0. **Initialize the Lab。**
    - **目的与数据环境：** 定位课程根目录并加载 `DorisLab` 与 UI helper；不启动 Docker、不连接 Doris、不修改表。内核重启后只需重新运行这里。
@@ -690,7 +690,7 @@ ClickHouse 参考：[Real-time Analytics with ClickHouse](https://learn.clickhou
    - **说明：** Python 会话状态与 Doris 容器/命名卷状态彼此独立。
 
 1. **Section 1A：启动单节点环境并检查压缩输入。**
-   - **目的与数据环境：** 启动或复用 `doris`，连接 `doris_course`，只读 Lab 4 的 `events_modelled` 在 `[2020-03-01, 2020-03-02)` 的行数；不修改源表。
+   - **目的与数据环境：** 启动或复用 `doris-rta`，连接 `doris_course`，只读 Lab 4 的 `events_modelled` 在 `[2020-03-01, 2020-03-02)` 的行数；不修改源表。
    - **期望结果：** 完整一天为 **75,259** 行，否则提示先完成 Lab 4。
    - **说明：** 这建立三种压缩表共同的数据范围，只验证已知行数，不把它当作逐字段一致性证明。
 
@@ -730,7 +730,7 @@ ClickHouse 参考：[Real-time Analytics with ClickHouse](https://learn.clickhou
    - **说明：** 已满三小时的事件仍可在线到其整个小时 Partition 越过窗口且调度器完成检查，证明 Dynamic Partition 是整段生命周期管理。
 
 9. **Section 3A：跨整点后有界等待自动删除。**
-   - **目的与数据环境：** 学员可关闭 Notebook 或重启内核，但必须保留容器/卷且不能重跑 Section 2；回来后启动或复用 `doris`、重新连接并恢复时区。若尚未到 `eligible_at`，helper 显示准确返回时间并停止；越过边界后最多等待 900 秒，显示实时计时器，不修改 FE 检查间隔、不改 `start`、不手动 DROP。
+   - **目的与数据环境：** 学员可关闭 Notebook 或重启内核，但必须保留容器/卷且不能重跑 Section 2；回来后启动或复用 `doris-rta`、重新连接并恢复时区。若尚未到 `eligible_at`，helper 显示准确返回时间并停止；越过边界后最多等待 900 秒，显示实时计时器，不修改 FE 检查间隔、不改 `start`、不手动 DROP。
    - **期望结果：** 已删除时立即成功；尚未删除时计时器在调度器移除最旧 Partition 后结束；超时会给出最后状态而不是无限阻塞。
    - **说明：** 计时测的是整点后等待调度器运行的时间，不是三小时行级 TTL，也不是物理空间回收耗时。
 
@@ -760,7 +760,7 @@ ClickHouse 参考：[Real-time Analytics with ClickHouse](https://learn.clickhou
     - **说明：** “不知道 ID 也可能恢复”依赖目标恰是最近删除且条目仍有效；若同名历史复杂，应使用回收站 ID 精确选择。`DROP ... FORCE`、行级 DELETE、自动淘汰和整集群丢失不能套用此恢复结论，回收站也不是独立备份。
 
 15. **Stop、Restart 与 Lab complete。**
-    - **目的与数据环境：** 可选停止单节点 `doris` 释放资源，同时保留容器、镜像、FE/BE 命名卷和全部 `m10_*` 对象；幂等重启后重新连接并检查三张压缩表与恢复表。
+    - **目的与数据环境：** 可选停止单节点 `doris-rta` 释放资源，同时保留容器、镜像、FE/BE 命名卷和全部 `m10_*` 对象；幂等重启后重新连接并检查三张压缩表与恢复表。
     - **期望结果：** 停止后为 `exited`；重启后为 `healthy`，三张压缩表各 **75,259** 行，`m10_recovery_events` 为 **3** 行。
     - **说明：** 停止/重启验证本地命名卷持久化，不证明备份、跨集群恢复或冷热介质迁移；结尾 `Lab complete` 用一段话回顾压缩选择、小时保留、迟到数据和回收站恢复，不使用证据汇总表格。
 
@@ -829,9 +829,9 @@ ClickHouse 参考：[Real-time Analytics with ClickHouse](https://learn.clickhou
 | 领域 | 已检查的现有支持 | 执行前需要补齐的能力 |
 | --- | --- | --- |
 | 根目录定位与界面 | 向上查找 `COURSE_ROOT`、`DorisLab`、统一青绿色样式、原始日志展示 | 继续支持从根目录启动 Jupyter 和直接在 VS Code 打开 Notebook |
-| SQL 连接 | 显式 `connect` 接受主机与端口；自动 `_require_connection` 默认 localhost:9030；假定 root 和空密码 | Module 9 需区分直连 FE、代理入口与实际协调查询的 FE；重连绑定选定环境并核实身份，不能静默回退到基线环境 |
-| Docker | 网络、存储卷、健康检查基础函数、单容器 All-in-One 生命周期和 Module 9 多节点 Compose 支持 | Module 9 需支持服务级 2 BE → 3 BE 启动、代理健康与可观测连接分配；Module 10 复用单节点 `doris` 的 Stop/Restart 模式；不新建模块级 Python 文件 |
-| Profile 获取 | `profiles.py` 转调 `DorisLab`；支持原始计划和 Join Runtime Filter 片段 | FE HTTP 地址不能固定为单节点 localhost:8030；经代理连接时需定位实际协调查询的 FE，并保留查询、算子、BE host 和实例身份 |
+| SQL 连接 | 显式 `connect` 接受主机与端口；自动 `_require_connection` 默认 localhost:19030；假定 root 和空密码 | Module 9 需区分直连 FE、代理入口与实际协调查询的 FE；重连绑定选定环境并核实身份，不能静默回退到基线环境 |
+| Docker | 网络、存储卷、健康检查基础函数、单容器 All-in-One 生命周期和 Module 9 多节点 Compose 支持 | Module 9 需支持服务级 2 BE → 3 BE 启动、代理健康与可观测连接分配；Module 10 复用单节点 `doris-rta` 的 Stop/Restart 模式；不新建模块级 Python 文件 |
+| Profile 获取 | `profiles.py` 转调 `DorisLab`；支持原始计划和 Join Runtime Filter 片段 | FE HTTP 地址不能固定为单节点 localhost:18030；经代理连接时需定位实际协调查询的 FE，并保留查询、算子、BE host 和实例身份 |
 | 扫描摘要 | `compare_profiles` 提取少量计数及固定结果别名 | 保留原始索引、物化视图、聚合、Exchange 证据，避免只取首个匹配或跨无关算子汇总全文 |
 | 元数据 | 已有 Partition/Tablet 摘要 | 保留副本放置行；不能沿用将元数据 `RowCount` 标成 `Logical rows` 的做法；精确行数使用 SQL |
 | 后台任务 | 已有 Routine Load 专用等待逻辑 | 为物化视图、索引、结构变更、保留策略和副本健康提供有界等待，显示错误及最后状态 |
@@ -880,7 +880,7 @@ ClickHouse 参考：[Real-time Analytics with ClickHouse](https://learn.clickhou
 
 #### 实验 9 当前实现及已验证范围（截至 2026-09-28）
 
-- 基于 Apache Doris 官方 4.1 All-in-One 多节点环境使用三个 FE，并把数据节点从两个存活 BE 扩展到三个存活 BE；Module 9 使用独立 Compose project、固定私有子网和 localhost 发布端口。初始化显式停止单节点 `doris` 与 HAProxy，避免端口、内存和入口状态混淆。
+- 基于 Apache Doris 官方 4.1 All-in-One 多节点环境使用三个 FE，并把数据节点从两个存活 BE 扩展到三个存活 BE；Module 9 使用独立 Compose project、固定私有子网和 localhost 发布端口。初始化显式停止单节点 `doris-rta` 与 HAProxy，避免端口、内存和入口状态混淆。
 - `m09_events` 固定为 12,062 行、两个 Partition、每 Partition 六 Bucket、双副本。重建时只复用这批已提交的逻辑事件作为本地来源；旧物理表及其他 Module 9 业务对象按各自步骤重建。首次没有完整本地来源时才读取只读 S3。
 - 在 `be-3` 停止时，12 个 Tablet 的 24 个副本位于 `be-1` 和 `be-2`；启动 `be-3` 后，不重载数据也不发出手动迁移命令即可观察到已有副本进入新 BE，总副本数和逻辑答案保持不变。
 - 停止当前直连 Master FE 后，原 MySQL TCP 会话失败；两个存活 FE 完成选举。HAProxy 只向健康 FE 建立新连接，通过代理可以重新查询 12,062 行。恢复旧 FE 后，它重新加入但不要求重新成为 Master；`L4OK` 仅表示 FE MySQL 端口的 TCP 检查成功。
@@ -891,7 +891,7 @@ ClickHouse 参考：[Real-time Analytics with ClickHouse](https://learn.clickhou
 
 #### 实验 10 已验证范围（截至 2026-09-22）
 
-- 在单节点 `doris` 环境中只读 `events_modelled` 的 `[2020-03-01, 2020-03-02)`：75,259 行、收入 5,670,241.29；三张 `m10_*` 压缩表的完整行数与收入一致。
+- 在单节点 `doris-rta` 环境中只读 `events_modelled` 的 `[2020-03-01, 2020-03-02)`：75,259 行、收入 5,670,241.29；三张 `m10_*` 压缩表的完整行数与收入一致。
 - 当前构建拒绝 `compression = NONE`，接受并回显 `NO_COMPRESSION`；`LZ4F` 显式回显，显式创建的 `ZSTD` 因等于 FE `default_compression_type` 而在规范化后的 `SHOW CREATE TABLE` 中省略，helper 使用 FE 默认值解析有效算法。
 - 原先只复制事件列时，相同一个 Partition、四个 Tablet 和单副本样本的一次报告值分别为 `NO_COMPRESSION` 849.246 KB、`LZ4F` 848.231 KB 和 `ZSTD` 797.770 KB；这一组小差异是修改教学数据设计的原因，已不再作为当前 Notebook 的预期结果。
 - 用当前 Notebook 相同的 DDL 和 `INSERT ... SELECT`（只替换为临时测试表名）在本地 4.1.3 验证：每张表仍为 75,259 行，`event_context` 有 75,259 个不同的完整字符串；`SHOW DATA` 的一次报告值分别为 `NO_COMPRESSION` 18.022 MB、`LZ4F` 2.415 MB、`ZSTD` 1.856 MB。测试表已清理。Notebook 不固定这些大小，不把教学构造文本的压缩效果推广到生产，也不比较单次查询时间。

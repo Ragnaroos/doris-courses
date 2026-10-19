@@ -157,8 +157,12 @@ curl --location-trusted -u root: \
   -H "max_filter_ratio:0" \
   -H "columns:event_time,event_id,user_id,event_type,region,product_id,revenue" \
   -T stream_events.csv \
-  -X PUT http://127.0.0.1:8030/api/doris_course/events_stream/_stream_load
+  -X PUT http://127.0.0.1:18030/api/doris_course/events_stream/_stream_load
 ```
+
+The request goes to FE's HTTP port (`8030` in Doris; host port `18030` in the
+course sandbox). FE answers with a redirect to a BE, and `--location-trusted`
+lets curl follow it with the same credentials.
 
 | Header | Responsibility |
 | --- | --- |

@@ -119,8 +119,8 @@ applies RBAC and executes metadata, SQL, and monitoring requests
 > **Diagram placeholder — local MCP responsibility boundary**
 > Replace this block with `assets/mcp-local-architecture.svg`. Show the four
 > layers vertically. Use a solid arrow from the Host to the MCP Server labeled
-> `stdio`, and separate arrows from the Server to `127.0.0.1:9030`, `:8030`,
-> and `:8040`. Add a boundary around the learner's computer. Do not draw a
+> `stdio`, and separate arrows from the Server to `127.0.0.1:19030`, `:18030`,
+> and `:18040`. Add a boundary around the learner's computer. Do not draw a
 > public Internet endpoint between the Host and Server.
 
 ### The Host decides when to request a tool
@@ -223,12 +223,12 @@ the isolated multi-node environment from Module 9.
 
 | Environment property | Required value |
 | --- | --- |
-| Docker container | `doris` |
+| Docker container | `doris-rta` |
 | Image baseline | `apache/doris:all-in-one-4.1.3` |
 | Topology | One FE and one BE |
-| FE MySQL protocol | `127.0.0.1:9030` |
-| FE HTTP | `127.0.0.1:8030` |
-| BE web server | `127.0.0.1:8040` |
+| FE MySQL protocol | `127.0.0.1:19030` |
+| FE HTTP | `127.0.0.1:18030` |
+| BE web server | `127.0.0.1:18040` |
 | Database | `doris_course` |
 | Shared table | `events` |
 | Expected rows | `10,158,080` |
@@ -254,8 +254,8 @@ Use the following decision table before changing MCP configuration:
 
 | Current state | Required action |
 | --- | --- |
-| The `doris` container or `doris_course.events` does not exist | Complete [Lab 1: Start Doris and Build a Baseline Dataset](../../../01-real-time-analytics/level1/module01-introduction/lab01_start_doris_and_build_baseline.ipynb). Run its initialization, environment preparation, database creation, table creation, and baseline reload sections in order. |
-| The `doris` container exists but is stopped | Run **Restart the Doris sandbox** at the end of Lab 1. The named volumes preserve the baseline. |
+| The `doris-rta` container or `doris_course.events` does not exist | Complete [Lab 1: Start Doris and Build a Baseline Dataset](../../../01-real-time-analytics/level1/module01-introduction/lab01_start_doris_and_build_baseline.ipynb). Run its initialization, environment preparation, database creation, table creation, and baseline reload sections in order. |
+| The `doris-rta` container exists but is stopped | Run **Restart the Doris sandbox** at the end of Lab 1. The named volumes preserve the baseline. |
 | The Module 9 multi-node environment is running | Run **Stop the Module 9 cluster** in [Lab 9](../../../01-real-time-analytics/level3/module09-sharding-replication/lab09_observe_sharding_and_replication.ipynb), then run **Restart the Doris sandbox** in Lab 1. |
 | The `events` count or time range differs | Rerun **Reload and validate the baseline dataset** in Lab 1. Do not repair the baseline inside this MCP module. |
 
@@ -268,16 +268,16 @@ First confirm that the three loopback ports accept connections. Use a local
 port-checking command available on your operating system, for example:
 
 ```bash
-nc -z 127.0.0.1 9030
-nc -z 127.0.0.1 8030
-nc -z 127.0.0.1 8040
+nc -z 127.0.0.1 19030
+nc -z 127.0.0.1 18030
+nc -z 127.0.0.1 18040
 ```
 
 Then use the administrative identity only for this preflight and for creating
 the lower-privilege account in the next section:
 
 ```bash
-mysql -h 127.0.0.1 -P 9030 -u root -e '
+mysql -h 127.0.0.1 -P 19030 -u root -e '
 SHOW FRONTENDS;
 SHOW BACKENDS;
 SELECT
@@ -333,7 +333,7 @@ boundary; they do not replace Doris RBAC.
 Verify the new identity before introducing an Agent:
 
 ```bash
-mysql -h 127.0.0.1 -P 9030 -u mcp_reader -p -e '
+mysql -h 127.0.0.1 -P 19030 -u mcp_reader -p -e '
 SELECT COUNT(*) AS row_count FROM doris_course.events;
 '
 ```
@@ -358,15 +358,15 @@ applicable `.gitignore`:
 
 ```dotenv
 DORIS_HOST=127.0.0.1
-DORIS_PORT=9030
+DORIS_PORT=19030
 DORIS_USER=mcp_reader
 DORIS_PASSWORD='<GENERATED_LOCAL_PASSWORD>'
 DORIS_DATABASE=doris_course
 
 DORIS_FE_HTTP_HOST=127.0.0.1
-DORIS_FE_HTTP_PORT=8030
+DORIS_FE_HTTP_PORT=18030
 DORIS_BE_HOSTS=127.0.0.1
-DORIS_BE_WEBSERVER_PORT=8040
+DORIS_BE_WEBSERVER_PORT=18040
 
 MCP_TOOL_EXPOSURE_MODE=hierarchical
 ```
@@ -703,7 +703,7 @@ The exact result values come from the current verified baseline. Reproduce the
 same SQL outside the Agent before accepting its numbers:
 
 ```bash
-mysql -h 127.0.0.1 -P 9030 -u mcp_reader -p \
+mysql -h 127.0.0.1 -P 19030 -u mcp_reader -p \
   --database doris_course \
   --execute "
 SELECT
@@ -897,13 +897,13 @@ Changing several layers at once makes evidence harder to interpret.
 
 | Symptom | First check | Correct direction |
 | --- | --- | --- |
-| `9030` refuses the connection | Is the `doris` container running and healthy? | Recover the Lab 1 sandbox before changing MCP files. |
+| `19030` refuses the connection | Is the `doris-rta` container running and healthy? | Recover the Lab 1 sandbox before changing MCP files. |
 | The baseline table is absent or has unexpected rows | Does the Lab 1 validation pass? | Rerun the Lab 1 baseline section; do not create a replacement table here. |
 | The Host reports that the Server failed to start | Does the absolute launcher path exist and have execute permission? | Run the launcher under the same local user and inspect stderr. |
 | CLI works but a GUI Host fails | Does the GUI inherit the same `PATH` and environment? | Keep absolute launcher, environment-file, and virtual-environment paths. |
 | The Server starts but Doris authentication fails | Can `mcp_reader` run the direct count query? | Correct the protected password or account grant; do not switch the Agent to `root`. |
 | Tools are visible but a query is rejected | Is the SQL one bounded read-only statement? | Reduce scope, add the required bound, or correct the schema-derived SQL. |
-| `get_memory_stats` is unavailable or partial | Are `8030` and `8040` reachable, and are FE/BE HTTP settings correct? | Repair the configured evidence route and preserve the unavailable reason. |
+| `get_memory_stats` is unavailable or partial | Are `18030` and `18040` reachable, and are FE/BE HTTP settings correct? | Repair the configured evidence route and preserve the unavailable reason. |
 | A child reports a stale manifest | Did capability or authorization state change? | Rediscover the domain with `{}` and use the new manifest version. |
 | A Host cannot complete progressive discovery | Does that Host support the hierarchical flow? | Record the incompatibility, then configure `MCP_TOOL_EXPOSURE_MODE=flat` before restart as a bounded fallback. |
 | The SQL result is correct but the explanation is not | Do the prose numbers and claims match the structured result? | Correct the interpretation; do not rerun unrelated tools to justify it. |
@@ -916,8 +916,8 @@ gallery of transient error dialogs.
 ### Completion checklist
 
 - [ ] The active Doris environment is the Level 1–8 single-FE, single-BE
-  `doris` container.
-- [ ] Ports 9030, 8030, and 8040 are reachable only through the intended local
+  `doris-rta` container.
+- [ ] Ports 19030, 18030, and 18040 are reachable only through the intended local
   mappings.
 - [ ] `doris_course.events` contains the verified Lab 1 baseline.
 - [ ] `mcp_reader` can read the course database and does not have Doris

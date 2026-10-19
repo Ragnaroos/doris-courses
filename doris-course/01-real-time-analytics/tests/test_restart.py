@@ -23,21 +23,21 @@ class RestartTests(unittest.TestCase):
              patch("doris_labkit.docker.container_inspect", return_value=RUNNING), \
              patch("doris_labkit.docker.wait_for_health") as wait, \
              patch("doris_labkit.docker.run") as run:
-            state = lab.start_container("doris")
+            state = lab.start_container()
         self.assertEqual(state["State"]["Status"], "running")
-        wait.assert_called_once_with("doris", timeout_seconds=300)
+        wait.assert_called_once_with("doris-rta", timeout_seconds=300)
         run.assert_not_called()
 
     def test_stopped_container_is_started(self):
         lab = object.__new__(DorisLab)
-        start_result = subprocess.CompletedProcess(["docker", "start", "doris"], 0, "doris", "")
+        start_result = subprocess.CompletedProcess(["docker", "start", "doris-rta"], 0, "doris-rta", "")
         with patch("doris_labkit.docker.shutil.which", return_value="/usr/local/bin/docker"), \
              patch("doris_labkit.docker.docker_preflight", return_value=(True, "ready")), \
              patch("doris_labkit.docker.container_inspect", side_effect=[STOPPED, RUNNING]), \
              patch("doris_labkit.docker.wait_for_health"), \
              patch("doris_labkit.docker.run", return_value=start_result) as run:
-            lab.start_container("doris")
-        run.assert_called_once_with(["docker", "start", "doris"], show=True)
+            lab.start_container()
+        run.assert_called_once_with(["docker", "start", "doris-rta"], show=True)
 
     def test_stopped_docker_desktop_is_opened_and_waited_for(self):
         lab = object.__new__(DorisLab)

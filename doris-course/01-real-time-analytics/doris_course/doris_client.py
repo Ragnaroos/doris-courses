@@ -41,6 +41,8 @@ from doris_labkit.shell import run_shell
 from doris_labkit.ui import ReturnLater, card, progress_step, show_log, show_sql, workflow_html
 from doris_labkit.ui import install_styles as install_shared_styles
 
+from . import environment as env
+
 
 # Every notebook uses the course root as its runtime workspace, even when the
 # notebook file itself lives several module directories below it.
@@ -155,11 +157,11 @@ class DorisLab:
     branching, credentials, expected values, progress, and styled diagnostics.
     """
 
-    DORIS_IMAGE = "apache/doris:all-in-one-4.1.3"
-    DORIS_CONTAINER = "doris"
-    DORIS_NETWORK = "doris-course"
-    FE_VOLUME = "doris-fe-meta"
-    BE_VOLUME = "doris-be-storage"
+    DORIS_IMAGE = env.DORIS_IMAGE
+    DORIS_CONTAINER = env.DORIS_CONTAINER
+    DORIS_NETWORK = env.DORIS_NETWORK
+    FE_VOLUME = env.FE_VOLUME
+    BE_VOLUME = env.BE_VOLUME
     S3_CONFIG = {
         "uri": "s3://yy-glue-test-us-east-1/doris-course/events/v1/events-*.parquet",
         "endpoint": "https://s3.us-east-1.amazonaws.com",
@@ -182,9 +184,9 @@ class DorisLab:
         lab_dir: Path | None = None,
         *,
         connection_host: str = "127.0.0.1",
-        connection_port: int = 9030,
+        connection_port: int = env.QUERY_PORT,
         profile_http_host: str | None = None,
-        profile_http_port: int = 8030,
+        profile_http_port: int = env.HTTP_PORT,
         ready_title: str = "Lab tools are ready",
         ready_message: str = "You can now continue to Section 1 and run the remaining cells in order.",
     ) -> None:
@@ -2156,7 +2158,7 @@ LIMIT 10
         if parsed.hostname not in {None, "127.0.0.1", "localhost"}:
             host_url = urllib.parse.urlunsplit((
                 parsed.scheme,
-                f"127.0.0.1:{parsed.port or 8040}",
+                f"127.0.0.1:{parsed.port or env.BE_HTTP_PORT}",
                 parsed.path,
                 parsed.query,
                 parsed.fragment,
@@ -2414,7 +2416,7 @@ LIMIT 10
         if not re.fullmatch(r"[A-Za-z0-9._-]+", topic):
             raise ValueError(f"Unsafe Kafka topic name: {topic!r}")
         offset_command = [
-            "docker", "exec", "kafka", "/opt/kafka/bin/kafka-get-offsets.sh",
+            "docker", "exec", env.KAFKA_CONTAINER, "/opt/kafka/bin/kafka-get-offsets.sh",
             "--bootstrap-server", "kafka:29092", "--topic", topic,
         ]
 
@@ -2470,7 +2472,7 @@ LIMIT 10
             raise ValueError(f"{fixture.name} contains no Kafka messages.")
 
         offset_command = [
-            "docker", "exec", "kafka", "/opt/kafka/bin/kafka-get-offsets.sh",
+            "docker", "exec", env.KAFKA_CONTAINER, "/opt/kafka/bin/kafka-get-offsets.sh",
             "--bootstrap-server", "kafka:29092", "--topic", topic,
         ]
 
@@ -2591,7 +2593,7 @@ LIMIT 10
             batch_end = min(published + batch_size, expected_messages)
             payload = "\n".join(lines[published:batch_end]) + "\n"
             command = [
-                "docker", "exec", "-i", "kafka",
+                "docker", "exec", "-i", env.KAFKA_CONTAINER,
                 "/opt/kafka/bin/kafka-console-producer.sh",
                 "--bootstrap-server", "kafka:29092", "--topic", topic,
             ]
@@ -2630,12 +2632,15 @@ LIMIT 10
 
     def start_container(
         self,
-        container: str,
+        container: str = env.DORIS_CONTAINER,
         *,
         wait_for_healthy: bool = True,
         timeout_seconds: int = 300,
     ) -> dict:
-        """Idempotently make an existing course container available again."""
+        """Idempotently make an existing course container available again.
+
+        Without a name, this is the course's single-node Doris sandbox.
+        """
         state = labkit_docker.start_container(
             container,
             wait_for_healthy=wait_for_healthy,
@@ -2655,12 +2660,16 @@ LIMIT 10
     def connect(
         self,
         *,
-        container: str = "doris",
+        container: str = env.DORIS_CONTAINER,
         host: str = "127.0.0.1",
-        port: int = 9030,
+        port: int = env.QUERY_PORT,
         http_host: str | None = None,
-        http_port: int = 8030,
+        http_port: int = env.HTTP_PORT,
     ):
+        """Wait for a healthy container, then connect to its FE.
+
+        Without arguments, this is the course's single-node Doris sandbox.
+        """
         wait_for_health(container, timeout_seconds=300, report=False)
         if self.connection is not None:
             try:
@@ -2674,6 +2683,11 @@ LIMIT 10
         self._profile_http_port = http_port
         self.connection = connect_doris(host=host, port=port)
         return self.connection
+
+    @property
+    def fe_http_url(self) -> str:
+        """The FE HTTP address on this host, for Stream Load and other REST requests."""
+        return f"http://{self._profile_http_host}:{self._profile_http_port}"
 
     def prepare_environment(self):
         total_steps = 6
@@ -2712,16 +2726,19 @@ LIMIT 10
         card(f"Supported host and running Docker daemon: {system} {machine}", "ok")
 
         progress_step(2, total_steps, "Check required host ports")
-        port_rows = []
-        for port in (8030, 8040, 9030, 3000):
-            with socket.socket() as probe:
-                probe.settimeout(0.25)
-                in_use = probe.connect_ex(("127.0.0.1", port)) == 0
-            port_rows.append({
+        port_rows = [
+            {
                 "host_port": port,
-                "purpose": "optional Metabase" if port == 3000 else "Doris",
-                "status": "in use" if in_use else "available",
-            })
+                "purpose": purpose,
+                "status": "in use" if labkit_docker.port_in_use(port) else "available",
+            }
+            for port, purpose in (
+                (env.QUERY_PORT, "Doris"),
+                (env.HTTP_PORT, "Doris"),
+                (env.BE_HTTP_PORT, "Doris"),
+                (env.METABASE_PORT, "optional Metabase"),
+            )
+        ]
         show_frame("Host port check", pd.DataFrame(port_rows))
 
         existing = container_inspect(self.DORIS_CONTAINER)
@@ -2732,7 +2749,9 @@ LIMIT 10
         if existing is None and busy_ports:
             self._failure(
                 "Required port is unavailable",
-                f"Another process is using: {', '.join(map(str, busy_ports))}. Stop it or change the Lab ports.",
+                f"Another process is using: {', '.join(map(str, busy_ports))}. Stop it, or set "
+                "DORIS_RTA_QUERY_PORT, DORIS_RTA_HTTP_PORT, and DORIS_RTA_BE_HTTP_PORT to free ports "
+                "before starting Jupyter.",
             )
             return None
         card("Required Doris ports are available or belong to the reusable course container.", "ok")
@@ -2764,9 +2783,11 @@ LIMIT 10
             command = [
                 "docker", "run", "-d", "--name", self.DORIS_CONTAINER,
                 "--network", self.DORIS_NETWORK,
-                "-p", "127.0.0.1:9030:9030",
-                "-p", "127.0.0.1:8030:8030",
-                "-p", "127.0.0.1:8040:8040",
+                "-e", f"BE_HTTP_PORT={env.BE_HTTP_PORT}",
+                "-e", f"BE_CONFIG_EXTRA=webserver_port = {env.BE_HTTP_PORT}",
+                "-p", f"127.0.0.1:{env.QUERY_PORT}:9030",
+                "-p", f"127.0.0.1:{env.HTTP_PORT}:8030",
+                "-p", f"127.0.0.1:{env.BE_HTTP_PORT}:{env.BE_HTTP_PORT}",
                 "-v", f"{self.FE_VOLUME}:/opt/apache-doris/fe/doris-meta",
                 "-v", f"{self.BE_VOLUME}:/opt/apache-doris/be/storage",
                 self.DORIS_IMAGE,
@@ -2781,9 +2802,9 @@ LIMIT 10
                 return None
         else:
             expected_ports = {
-                "9030/tcp": ("127.0.0.1", "9030"),
-                "8030/tcp": ("127.0.0.1", "8030"),
-                "8040/tcp": ("127.0.0.1", "8040"),
+                "9030/tcp": ("127.0.0.1", str(env.QUERY_PORT)),
+                "8030/tcp": ("127.0.0.1", str(env.HTTP_PORT)),
+                f"{env.BE_HTTP_PORT}/tcp": ("127.0.0.1", str(env.BE_HTTP_PORT)),
             }
             bindings = existing["HostConfig"]["PortBindings"]
             actual_ports = {
@@ -2811,7 +2832,8 @@ LIMIT 10
             if not matches:
                 self._failure(
                     "Existing container conflict",
-                    "A container named doris exists but does not match this Lab's image, ports, volumes, or network. It was left unchanged.",
+                    f"A container named {self.DORIS_CONTAINER} exists but does not match this Lab's image, "
+                    "ports, volumes, or network. It was left unchanged.",
                 )
                 return None
             if existing["State"]["Status"] != "running":
@@ -2844,7 +2866,7 @@ LIMIT 10
         }]))
 
         progress_step(6, total_steps, "Connect to FE and inspect FE/BE")
-        self.connection = connect_doris()
+        self.connection = connect_doris(port=env.QUERY_PORT)
         self.sql(
             "SELECT VERSION() AS doris_version, CURRENT_USER() AS current_user",
             title="Connection",

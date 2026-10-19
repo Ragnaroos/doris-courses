@@ -69,6 +69,33 @@ class DockerReadyTests(unittest.TestCase):
                 docker.ensure_docker_ready()
 
 
+class PortTests(unittest.TestCase):
+    def test_env_port_uses_the_default_and_shares_it_with_child_processes(self):
+        with patch.dict(docker.os.environ, {}, clear=True):
+            self.assertEqual(docker.env_port("COURSE_QUERY_PORT", 19030), 19030)
+            self.assertEqual(docker.os.environ["COURSE_QUERY_PORT"], "19030")
+
+    def test_env_port_reads_an_override(self):
+        with patch.dict(docker.os.environ, {"COURSE_QUERY_PORT": " 29030 "}, clear=True):
+            self.assertEqual(docker.env_port("COURSE_QUERY_PORT", 19030), 29030)
+
+    def test_env_port_rejects_values_that_are_not_ports(self):
+        for value in ("abc", "0", "70000", "-1"):
+            with patch.dict(docker.os.environ, {"COURSE_QUERY_PORT": value}, clear=True):
+                with self.assertRaisesRegex(ValueError, "COURSE_QUERY_PORT"):
+                    docker.env_port("COURSE_QUERY_PORT", 19030)
+
+    def test_port_in_use_detects_a_listener(self):
+        import socket
+
+        with socket.socket() as server:
+            server.bind(("127.0.0.1", 0))
+            server.listen(1)
+            port = server.getsockname()[1]
+            self.assertTrue(docker.port_in_use(port))
+        self.assertFalse(docker.port_in_use(port))
+
+
 class RunTests(unittest.TestCase):
     def test_run_uses_the_working_directory(self):
         result = docker.run(["pwd"], cwd="/")

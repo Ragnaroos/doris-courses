@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import os
 import platform
 import re
 import shutil
@@ -13,6 +14,30 @@ from pathlib import Path
 from typing import Sequence
 
 from .ui import card, show_log
+
+
+def env_port(name: str, default: int) -> int:
+    """Return the host port set in environment variable ``name``, or ``default``.
+
+    The value is also stored in ``os.environ`` so that shell cells and
+    ``docker compose`` started from this kernel see the same port.
+    """
+    raw = os.environ.get(name, "").strip()
+    if not raw:
+        port = default
+    elif raw.isdigit() and 0 < int(raw) < 65536:
+        port = int(raw)
+    else:
+        raise ValueError(f"{name}={raw!r} is not a TCP port number (1-65535).")
+    os.environ[name] = str(port)
+    return port
+
+
+def port_in_use(port: int, host: str = "127.0.0.1") -> bool:
+    """Return True when something already accepts connections on ``host:port``."""
+    with socket.socket() as probe:
+        probe.settimeout(0.25)
+        return probe.connect_ex((host, port)) == 0
 
 
 def run(
