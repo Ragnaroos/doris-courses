@@ -31,17 +31,73 @@ can execute shell or Doris commands directly from later cells:
 
 ```python
 lab.shell("docker ps", title="Running containers")
-lab.sql("SELECT VERSION() AS doris_version", title="Doris version")
+lab.sql("SHOW FRONTENDS", title="Doris frontends")
 lab.execute("CREATE DATABASE IF NOT EXISTS otel")
 ```
 
-Module 1 prepares the persistent DOG stack. It clones the upstream stack into
-the ignored `.runtime/` directory, mounts the Doris log directories, and starts
-Doris, Grafana, and the OpenTelemetry Collector. Module 2 then starts dedicated
-collectors for logs, metrics, and traces.
+Module 1 prepares the persistent DOG stack. It checks out the pinned upstream
+stack into the ignored `.runtime/` directory, mounts the Doris log directories,
+and starts Doris, Grafana, and the OpenTelemetry Collector. Module 2 then starts
+dedicated collectors for logs, metrics, and traces.
 
 Docker state is kept outside the course files. Re-running an environment cell
 reuses existing containers and data instead of replacing them.
+
+## Environment
+
+The labs run in Docker. Module 1 starts the DOG stack and the OpenTelemetry demo
+storefront, which keeps sending telemetry to the stack. Both come from the
+upstream [ai-observe-stack](https://github.com/ai-observe/ai-observe-stack)
+repository at commit `2c1fbee` (2026-09-23). The environment cell checks out
+that commit into `.runtime/` and never pulls newer upstream code.
+
+| Component | Image | Containers |
+| --- | --- | --- |
+| Apache Doris 4.1.3 | `apache/doris:all-in-one-4.1.3` | `doris-obs` |
+| OpenTelemetry Collector | `otel/opentelemetry-collector-contrib:0.144.0` | `doris-obs-otel-collector` |
+| Grafana with the Doris App plugin | `grafana/grafana:11.4.0` | `doris-obs-grafana` |
+| OpenTelemetry demo (Astronomy Shop) 2.0.2 | 23 images, mostly `ghcr.io/open-telemetry/demo:2.0.2-*` | `doris-obs-demo-*` (23) |
+
+The Doris image digest is
+`sha256:82a5cabc7900ebcd3d080412d636c0cebd6602799fffe2605c652b2ea7d42609`.
+`SHOW FRONTENDS` and `SHOW BACKENDS` report its version as
+`doris-4.1.3-rc02-7126cf65d96`: the 4.1.3 release is that build.
+
+- **Docker:** Docker Compose 2.24.4 or later. The environment cell checks it.
+- **Downloads:** about 2.1 GB of images for the DOG stack and 2.7 GB for the
+  demo. Grafana also downloads two small plugins when it first starts.
+- **Memory:** the DOG stack uses about 5 GB, most of it for Doris, and the demo
+  about 3 GB. Give Docker at least 10 GB of memory.
+- **Disk:** about 16 GB for the images, plus the data that Doris keeps.
+- **Platforms:** all images are published for linux/amd64 and linux/arm64. The
+  environment was verified on macOS with Apple silicon and Docker Desktop.
+
+All ports bind to 127.0.0.1. To use another port, set its variable before
+starting Jupyter, for example `DORIS_OBS_GRAFANA_PORT=23001 .venv/bin/jupyter lab`.
+
+| Host port | Service | Variable |
+| --- | --- | --- |
+| 29030 | Doris FE query port (MySQL protocol) | `DORIS_OBS_QUERY_PORT` |
+| 28030 | Doris FE HTTP | `DORIS_OBS_HTTP_PORT` |
+| 28040 | Doris BE HTTP | `DORIS_OBS_BE_HTTP_PORT` |
+| 23000 | Grafana (user `admin`, password `admin`) | `DORIS_OBS_GRAFANA_PORT` |
+| 24317 | Collector OTLP gRPC | `DORIS_OBS_OTLP_GRPC_PORT` |
+| 24318 | Collector OTLP HTTP | `DORIS_OBS_OTLP_HTTP_PORT` |
+| 28082 | Demo storefront | `DORIS_OBS_DEMO_PORT` |
+
+The Compose override files in `environments/dog-stack/` apply these names and
+ports on top of the upstream Compose files.
+
+## Stop and clean up
+
+- `lab.stop_demo()` stops and removes the demo containers. The telemetry already
+  in Doris stays, and `lab.start_demo()` starts the demo again.
+- `lab.teardown()` removes every container, network, and volume of this course:
+  the demo, the Module 2 collectors, and the DOG stack.
+  `lab.teardown(keep_data=True)` keeps the Doris and Grafana volumes, so a later
+  `lab.prepare_environment()` continues with the same data.
+- The upstream checkout and the Doris logs stay in `.runtime/`. Delete that
+  directory when you no longer need them.
 
 ## Interactive quizzes
 

@@ -12,10 +12,10 @@ receivers:
           scrape_interval: 15s
           metrics_path: '/metrics'
           static_configs:
-            - targets: ['doris:8030']
+            - targets: ['doris-obs:8030']
               labels:
                 group: 'doris_fe'
-            - targets: ['doris:8040']
+            - targets: ['doris-obs:8040']
               labels:
                 group: 'doris_be'
 
@@ -41,14 +41,14 @@ processors:
 
 exporters:
   doris:
-    endpoint: http://doris:8040
+    endpoint: http://doris-obs:8040
     database: otel
     username: root
     password:
     table:
       metrics: otel_metrics
     create_schema: true
-    mysql_endpoint: doris:9030
+    mysql_endpoint: doris-obs:9030
     history_days: 14
     create_history_days: 10
     replication_num: 1

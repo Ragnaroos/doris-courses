@@ -1,0 +1,101 @@
+# Course settings for the upstream OpenTelemetry demo
+# (doris-opentelemetry-demo/docker-compose.yml in ai-observe-stack, at the
+# commit pinned in doris_course/environment.py). After the DOG stack is
+# running, ObservabilityLab.start_demo() runs, from that directory:
+#
+#   docker compose -p doris-obs-demo -f docker-compose.yml -f <this file> up -d
+#
+# with DORIS_OBS_COURSE_ROOT set to the course directory.
+#
+# - Every container gets the doris-obs-demo- prefix. The upstream names, such
+#   as kafka and frontend, are common and collide with other containers.
+# - Only the storefront proxy is published, on 127.0.0.1. Upstream publishes
+#   most services on random host ports of every interface.
+# - The demo Collector also joins the DOG network and forwards the demo's
+#   telemetry to the DOG Collector (see demo-collector-extras.yml).
+#
+# This file names every upstream service; update it together with the pinned
+# commit.
+services:
+  accounting:
+    container_name: doris-obs-demo-accounting
+  ad:
+    container_name: doris-obs-demo-ad
+    ports: !reset []
+  cart:
+    container_name: doris-obs-demo-cart
+    ports: !reset []
+  checkout:
+    container_name: doris-obs-demo-checkout
+    ports: !reset []
+  currency:
+    container_name: doris-obs-demo-currency
+    ports: !reset []
+  email:
+    container_name: doris-obs-demo-email
+    ports: !reset []
+  fraud-detection:
+    container_name: doris-obs-demo-fraud-detection
+  frontend:
+    container_name: doris-obs-demo-frontend
+    ports: !reset []
+    environment:
+      # The browser sends its spans through the storefront proxy.
+      - PUBLIC_OTEL_EXPORTER_OTLP_TRACES_ENDPOINT=http://127.0.0.1:${DORIS_OBS_DEMO_PORT:-28082}/otlp-http/v1/traces
+  frontend-proxy:
+    container_name: doris-obs-demo-frontend-proxy
+    ports: !override
+      - "127.0.0.1:${DORIS_OBS_DEMO_PORT:-28082}:8080"
+  image-provider:
+    container_name: doris-obs-demo-image-provider
+    ports: !reset []
+  load-generator:
+    container_name: doris-obs-demo-load-generator
+    ports: !reset []
+  payment:
+    container_name: doris-obs-demo-payment
+    ports: !reset []
+  product-catalog:
+    container_name: doris-obs-demo-product-catalog
+    ports: !reset []
+  quote:
+    container_name: doris-obs-demo-quote
+    ports: !reset []
+  recommendation:
+    container_name: doris-obs-demo-recommendation
+    ports: !reset []
+  shipping:
+    container_name: doris-obs-demo-shipping
+    ports: !reset []
+  flagd:
+    container_name: doris-obs-demo-flagd
+    ports: !reset []
+  flagd-ui:
+    container_name: doris-obs-demo-flagd-ui
+    ports: !reset []
+  kafka:
+    container_name: doris-obs-demo-kafka
+  valkey-cart:
+    container_name: doris-obs-demo-valkey-cart
+    ports: !reset []
+  jaeger:
+    container_name: doris-obs-demo-jaeger
+    ports: !reset []
+  otel-collector:
+    container_name: doris-obs-demo-otel-collector
+    ports: !reset []
+    volumes:
+      - ${DORIS_OBS_COURSE_ROOT:?set DORIS_OBS_COURSE_ROOT}/environments/dog-stack/demo-collector-extras.yml:/etc/otelcol-config-extras.yml:ro
+    networks:
+      - default
+      - dog
+  prometheus:
+    container_name: doris-obs-demo-prometheus
+    ports: !reset []
+
+networks:
+  default:
+    name: doris-obs-demo
+  dog:
+    name: doris-obs
+    external: true

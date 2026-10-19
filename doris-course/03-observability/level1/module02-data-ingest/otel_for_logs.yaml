@@ -26,8 +26,8 @@ processors:
 
 exporters:
   doris:
-    endpoint: http://doris:8040
-    mysql_endpoint: doris:9030
+    endpoint: http://doris-obs:8040
+    mysql_endpoint: doris-obs:9030
     database: otel
     username: root
     password:

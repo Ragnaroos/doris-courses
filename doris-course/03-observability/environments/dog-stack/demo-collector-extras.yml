@@ -1,0 +1,21 @@
+# Merged into the demo Collector's configuration (upstream
+# src/otel-collector/otelcol-config.yml) by compose.demo.yml.
+receivers:
+  otlp:
+    protocols:
+      # Listen on every interface. The Collector is on two networks, and on the
+      # DOG network the name otel-collector also belongs to the DOG Collector.
+      grpc:
+        endpoint: 0.0.0.0:4317
+      http:
+        endpoint: 0.0.0.0:4318
+  # This Collector version asks Docker for API 1.25 by default. Docker Engine 29
+  # rejects it (minimum 1.40), and the Collector exits at startup.
+  docker_stats:
+    api_version: "1.44"
+
+exporters:
+  # Forward the demo's traces, metrics, and logs to the DOG Collector over the
+  # doris-obs network. Upstream sends them to port 4317 on the host instead.
+  otlp/gateway:
+    endpoint: doris-obs-otel-collector:4317

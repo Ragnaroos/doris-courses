@@ -13,14 +13,14 @@ processors:
 
 exporters:
   doris:
-    endpoint: http://doris:8040
+    endpoint: http://doris-obs:8040
     database: otel
     username: root
     password:
     table:
       traces: otel_traces
     create_schema: true
-    mysql_endpoint: doris:9030
+    mysql_endpoint: doris-obs:9030
     history_days: 10
     create_history_days: 10
     timezone: Asia/Shanghai
