@@ -622,6 +622,24 @@ class AlignmentTest(unittest.TestCase):
         self.assertEqual(CONNECTION["DW_PORT"], "52030")
         self.assertEqual(set(config["volumes"]), {"fe-meta", "be-storage"})
 
+    def test_object_storage_is_pinned_silo_reached_by_its_aliases(self):
+        # minio/minio is no longer on Docker Hub; both helper environments run Silo.
+        services = {name: yaml.safe_load((COURSE_ROOT / "environments" / name / "compose.yml").read_text())["services"]["silo"]
+                    for name in ("lakehouse", "backup")}
+        self.assertRegex(services["lakehouse"]["image"], r"^pgsty/silo:RELEASE\.\d{4}-\d\d-\d\dT\d\d-\d\d-\d\dZ$")
+        self.assertEqual(services["backup"]["image"], services["lakehouse"]["image"])
+        aliases = {name: service["networks"]["default"]["aliases"] for name, service in services.items()}
+        self.assertEqual(aliases, {"lakehouse": ["course-lake-silo"], "backup": ["course-backup-silo"]})
+        # Doris, the REST fixture and the notebooks reach the store only through these aliases.
+        hosts = set()
+        for path in COURSE_ROOT.rglob("*"):
+            hidden = any(part.startswith(".") for part in path.relative_to(COURSE_ROOT).parts)
+            if path.suffix in {".py", ".yml", ".ipynb", ".md"} and not hidden:
+                text = path.read_text()
+                self.assertNotRegex(text, r"minio/minio|course-[a-z]+-minio", path)
+                hosts.update(re.findall(r"http://(course-[\w-]+):9000", text))
+        self.assertEqual(hosts, {"course-lake-silo", "course-backup-silo"})
+
     def test_docker_start_requires_explicit_opt_in(self):
         from dw_course.docker_runtime import prepare_environment
         with patch.dict("os.environ", {}, clear=True), patch("subprocess.run") as run:

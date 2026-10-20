@@ -20,7 +20,7 @@ Generating Parquet files for the extensions requires PyArrow. Install it from th
 
 Run only one notebook at a time in the same lab database. Each extension lists the `ext_*` tables it rebuilds at the beginning;
 it does not modify main-course business tables, delete historical files from object storage, or restart other clusters.
-Object storage experiments reuse the course MinIO and write to an independent random path each time. On failure, preserve job status and output before troubleshooting.
+Object storage experiments reuse the course object storage from Lab 4 (Silo) and write to an independent random path each time. On failure, preserve job status and output before troubleshooting.
 Allow 80–115 minutes in total; this is additional lab time, not video duration.
 
 Maintainers can run the full regression from the repository root using Python with the above dependencies installed:

@@ -218,11 +218,11 @@ Verify recovery before cleanup: read the archived data and reconcile its rows wi
 
 Recycle-bin recovery and repository restore have different prerequisites. `RECOVER` depends on retained Doris metadata and data. `BACKUP SNAPSHOT` creates a full snapshot in a registered remote repository; `RESTORE SNAPSHOT` reads a selected snapshot timestamp. Neither recovers writes after that cutoff automatically.
 
-The extended Lab starts a small local MinIO service, registers an S3-compatible repository, backs up a dedicated ordinary table, waits for the real job to finish, and force-drops only that table. It then restores under another name in a separate course database and reconciles all ordered rows, count and amount against its independently recorded cutoff. This proves more than an upload status or a hypothetical runbook.
+The extended Lab starts a small local Silo service (the S3-compatible object store from Module 4), registers an S3-compatible repository, backs up a dedicated ordinary table, waits for the real job to finish, and force-drops only that table. It then restores under another name in a separate course database and reconciles all ordered rows, count and amount against its independently recorded cutoff. This proves more than an upload status or a hypothetical runbook.
 
 The supported backup scope matters: this coupled single-node exercise uses no asynchronous MV or Storage Policy on the backed-up table. It does not claim to cover storage-compute separation, cluster-wide configuration, external lake data, or post-snapshot replay. See the official [Backup](https://doris.apache.org/docs/4.x/admin-manual/data-admin/backup-restore/backup/) and [Restore](https://doris.apache.org/docs/4.x/admin-manual/data-admin/backup-restore/restore/) guides.
 
-Although the protocol is real, Doris and MinIO share a host here. Losing that host can lose both copies. Production disaster recovery requires an independent failure domain and a tested recovery-point objective (RPO) and recovery-time objective (RTO). Snapshot retention and credential management are also operational responsibilities, not consequences of a `FINISHED` status.
+Although the protocol is real, Doris and Silo share a host here. Losing that host can lose both copies. Production disaster recovery requires an independent failure domain and a tested recovery-point objective (RPO) and recovery-time objective (RTO). Snapshot retention and credential management are also operational responsibilities, not consequences of a `FINISHED` status.
 
 ## Hands-on Lab: Partition Lifecycle on Isolated Tables
 

@@ -104,11 +104,14 @@ CREATE CATALOG <catalog_name> PROPERTIES (
 | iceberg.rest.uri | Find tables, snapshots, and file lists through the metadata service |
 | warehouse | Object-storage location used by the course sample; must match the REST service configuration |
 | s3.endpoint, region, access credentials | Allow Doris nodes to read the actual data files |
-| use_path_style | Match the course MinIO path-style access |
+| use_path_style | Put the bucket name in the URL path, which the course's Silo service expects |
 | iceberg.rest.view-enabled | Disable external view support because this lab uses only lake tables |
 
 The service addresses on the course container network are `http://course-lake-rest:8181` and
-`http://course-lake-minio:9000`, not localhost on the host running the notebook.
+`http://course-lake-silo:9000`, not localhost on the host running the notebook.
+The object store is [Silo](https://github.com/pgsty/silo), an open-source fork of the MinIO server maintained by the Pigsty project.
+It speaks the S3 API, so Doris reaches it through the same S3 properties it uses for Amazon S3 or MinIO;
+the course uses Silo because MinIO no longer publishes community container images.
 If you can retrieve the table definition but cannot read orders, check the metadata and file entry points separately.
 Configure credentials only in the lab environment; do not put real secrets in the course notes.
 
@@ -177,7 +180,7 @@ ORDER BY order_date;
 This result should match a direct query of the lake table; also compare order IDs, customers, dates, amounts, line counts, and sources
 to avoid different errors canceling each other out in the aggregate.
 
-**Lab requirements:** The course Doris instance is running, and Docker is available. The lab starts MinIO and Iceberg REST Catalog
+**Lab requirements:** The course Doris instance is running, and Docker is available. The lab starts Silo and an Iceberg REST Catalog
 as two auxiliary containers and prepares the sample; see the [lake table environment notes](../../environments/lakehouse/README.md) for ports and data retention.
 
 ## Hands-on Lab 4: Joining lake tables and internal tables

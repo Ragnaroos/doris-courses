@@ -4,8 +4,11 @@ Lab 4 uses the course Doris instance to query real Iceberg tables. Running the p
 
 | Service | Pinned Image | Local Port | Stored Content |
 | --- | --- | --- | --- |
-| MinIO | minio/minio:RELEASE.2025-01-20T14-49-07Z | 51900 | Iceberg metadata files and Parquet data |
+| Silo (S3-compatible object storage) | pgsty/silo:RELEASE.2026-10-18T00-00-00Z | 51900 | Iceberg metadata files and Parquet data |
 | Iceberg REST Catalog | apache/iceberg-rest-fixture:1.10.0 | 51818 | SQLite table catalog |
+
+[Silo](https://github.com/pgsty/silo) is an open-source (AGPLv3) fork of the MinIO server maintained by the Pigsty project.
+It keeps MinIO's S3 API and its `MINIO_*` settings; the course uses it because MinIO no longer publishes community container images.
 
 Complete Lab 1 first, install the dependencies in the course requirements.txt, and confirm that both ports are free.
 Then run the code in Lab 4 in order; preparation displays progress and verifies the ten orders.
@@ -30,5 +33,5 @@ For connection errors, first check Docker's status and port usage, then inspect 
 
 ```bash
 docker compose -f environments/lakehouse/compose.yml ps
-docker compose -f environments/lakehouse/compose.yml logs --tail 80 rest minio
+docker compose -f environments/lakehouse/compose.yml logs --tail 80 rest silo
 ```

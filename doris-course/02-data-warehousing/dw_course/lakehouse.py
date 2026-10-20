@@ -77,7 +77,7 @@ def prepare_lakehouse(lab, *, start=False):
             "type"="iceberg", "iceberg.catalog.type"="rest",
             "iceberg.rest.uri"="http://course-lake-rest:8181",
             "warehouse"="s3://course-warehouse/",
-            "s3.endpoint"="http://course-lake-minio:9000", "s3.region"="us-east-1",
+            "s3.endpoint"="http://course-lake-silo:9000", "s3.region"="us-east-1",
             "s3.access_key"="{ACCESS_KEY}", "s3.secret_key"="{SECRET_KEY}",
             "use_path_style"="true", "iceberg.rest.view-enabled"="false"
         )''')
@@ -85,7 +85,7 @@ def prepare_lakehouse(lab, *, start=False):
         expected_properties = {
             "type": "iceberg", "iceberg.catalog.type": "rest",
             "iceberg.rest.uri": "http://course-lake-rest:8181",
-            "s3.endpoint": "http://course-lake-minio:9000",
+            "s3.endpoint": "http://course-lake-silo:9000",
             "warehouse": "s3://course-warehouse/",
         }
         if any(properties.get(key) != value for key, value in expected_properties.items()):

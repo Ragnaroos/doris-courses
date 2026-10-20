@@ -1,11 +1,13 @@
 name: doris-warehousing-backup
 services:
-  minio:
-    image: minio/minio:RELEASE.2025-01-20T14-49-07Z
+  silo:
+    # The same S3-compatible object store as the Lab 4 lake environment:
+    # Silo, the MinIO server fork that Pigsty maintains.
+    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z
     command: server /data --console-address :9001
     networks:
       default:
-        aliases: [course-backup-minio]
+        aliases: [course-backup-silo]
     mem_limit: 512m
     cpus: 1
     environment:
