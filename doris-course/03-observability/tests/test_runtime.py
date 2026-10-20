@@ -1,5 +1,6 @@
 """Offline checks for the observability runtime boundary."""
 
+import base64
 import itertools
 import json
 import subprocess
@@ -13,7 +14,15 @@ from unittest.mock import patch
 import pandas as pd
 
 from doris_course import DorisLab, ObservabilityLab, environment
-from doris_course.doris_client import CHECKOUT_STACK, CORE_PORTS, EnvironmentNotReady
+from doris_course.doris_client import (
+    CHECKOUT_STACK,
+    CORE_PORTS,
+    LITEFUSE_COMPOSE_FILE,
+    LITEFUSE_PORTS,
+    LOCAL_MODEL_COMPOSE_FILE,
+    LOCAL_MODEL_PORTS,
+    EnvironmentNotReady,
+)
 
 
 RUNNING = {
@@ -135,7 +144,7 @@ class RuntimeTests(unittest.TestCase):
             self.assertNotIn("Reusing", outputs[0])
             self.assertIn(f"Reusing the DOG stack at commit {pinned}", outputs[1])
 
-    def test_teardown_removes_the_demo_before_the_network_it_joins(self):
+    def test_teardown_removes_the_demo_and_litefuse_before_the_network_they_join(self):
         lab = object.__new__(ObservabilityLab)
         lab.lab_dir = Path.cwd()
         for keep_data, volumes in ((False, True), (True, False)):
@@ -143,11 +152,17 @@ class RuntimeTests(unittest.TestCase):
                 lab.teardown(keep_data=keep_data)
             script = shell.call_args.args[0]
             demo = script.index(f"docker compose -p {environment.DEMO_PROJECT} down")
+            litefuse = script.index(f"docker compose -p {environment.LITEFUSE_PROJECT} down")
+            model = script.index(f"docker compose -p {environment.LOCAL_MODEL_PROJECT} down")
             containers = " ".join((*environment.MODULE2_COLLECTORS, environment.CPU_LOAD_CONTAINER))
             collectors = script.index(f"for name in {containers}; do")
             core = script.index(f"docker compose -p {environment.PROJECT} down")
-            self.assertLess(demo, collectors)
+            self.assertLess(demo, litefuse)
+            self.assertLess(litefuse, model)
+            self.assertLess(model, collectors)
             self.assertLess(collectors, core)
+            self.assertEqual("--volumes" in script[litefuse:model], volumes)
+            self.assertEqual("--volumes" in script[model:collectors], volumes)
             self.assertEqual("--volumes" in script[core:], volumes)
 
     def test_shell_runs_from_the_course_root(self):
@@ -305,6 +320,202 @@ class GrafanaAlertingTests(unittest.TestCase):
         self.assertEqual(read.call_args.args[0],
                          f"{lab.grafana_url}/api/v1/provisioning/alert-rules/u2/export?format=yaml")
         self.assertEqual(log.call_args.kwargs, {"opened": True})
+
+
+class LitefuseTests(unittest.TestCase):
+    def lab(self):
+        lab = object.__new__(ObservabilityLab)
+        lab.lab_dir = Path.cwd()
+        return lab
+
+    def test_start_needs_the_dog_stack(self):
+        with patch.object(ObservabilityLab, "ensure_docker_ready"), \
+             patch.object(ObservabilityLab, "_dog_stack_running", return_value=False), \
+             patch("doris_course.doris_client.run_shell") as shell, \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady):
+                self.lab().start_litefuse()
+        shell.assert_not_called()
+        self.assertEqual(card.call_args.args[1:], ("fail", "The DOG stack is not running"))
+
+    def test_start_gives_the_be_a_private_endpoint_before_the_containers_start(self):
+        steps = []
+        with patch.object(ObservabilityLab, "ensure_docker_ready"), \
+             patch.object(ObservabilityLab, "_dog_stack_running", return_value=True), \
+             patch.object(ObservabilityLab, "_check_compose_version"), \
+             patch.object(ObservabilityLab, "_check_ports") as ports, \
+             patch.object(ObservabilityLab, "_set_be_private_endpoint", side_effect=lambda: steps.append("endpoint")), \
+             patch.object(ObservabilityLab, "shell", side_effect=lambda script, title: steps.append(script)), \
+             patch.object(ObservabilityLab, "_wait_for_litefuse") as wait:
+            self.lab().start_litefuse()
+        ports.assert_called_once_with(LITEFUSE_PORTS, (environment.LITEFUSE_WEB_CONTAINER,))
+        self.assertEqual(steps[0], "endpoint")
+        self.assertIn(f"docker compose -p {environment.LITEFUSE_PROJECT} -f {LITEFUSE_COMPOSE_FILE} up -d", steps[1])
+        wait.assert_called_once_with(180)
+
+    def test_private_endpoint_keeps_the_tags_that_the_backend_has(self):
+        expected = ('ALTER SYSTEM MODIFY BACKEND "127.0.0.1:9050"\n'
+                    'SET ("tag.location" = "default",\n     "tag.private_endpoint" = "doris-obs:8040")')
+        # MODIFY BACKEND replaces every tag, so the location is repeated, also when the cell runs again.
+        for tags in ('{"location" : "default"}', '{"private_endpoint" : "doris-obs:8040", "location" : "default"}'):
+            backends = pd.DataFrame([{"Host": "127.0.0.1", "HeartbeatPort": 9050, "Tag": tags}])
+            with self.subTest(tags=tags), \
+                 patch.object(ObservabilityLab, "query", return_value=backends), \
+                 patch.object(ObservabilityLab, "execute") as execute:
+                self.lab()._set_be_private_endpoint()
+            self.assertEqual(execute.call_args.args[0], expected)
+
+    def test_wait_checks_the_project_that_the_api_keys_belong_to(self):
+        lab = self.lab()
+        projects = json.dumps({"data": [{"id": "llm_app", "name": "LLM app",
+                                         "organization": {"id": "doris_course", "name": "Doris course"}}]})
+        with patch.object(ObservabilityLab, "_http_status", side_effect=[None, 502, 200]), \
+             patch.object(ObservabilityLab, "_read", return_value=projects) as read, \
+             patch("doris_course.doris_client.time.sleep") as sleep, \
+             patch("doris_course.doris_client.show_sql") as statement, \
+             patch("doris_course.doris_client.show_frame") as shown, \
+             patch("doris_course.doris_client.card") as card:
+            lab._wait_for_litefuse(180)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertIn(f"curl -s -u pk-lf-doris-course:sk-lf-doris-course \"{lab.litefuse_url}/api/public/projects\"",
+                      statement.call_args.args[1])
+        self.assertEqual(read.call_args.args[0], f"{lab.litefuse_url}/api/public/projects")
+        self.assertEqual(read.call_args.kwargs["auth"], (environment.LITEFUSE_PUBLIC_KEY, environment.LITEFUSE_SECRET_KEY))
+        self.assertEqual(shown.call_args.args[1].to_dict("records"),
+                         [{"organization": "Doris course", "project": "LLM app", "project_id": "llm_app"}])
+        self.assertEqual(card.call_args.args[1:], ("ok", "Litefuse is running"))
+        self.assertIn(environment.LITEFUSE_USER_EMAIL, card.call_args.args[0])
+        self.assertIn(environment.LITEFUSE_USER_PASSWORD, card.call_args.args[0])
+
+    def test_wait_stops_when_litefuse_does_not_answer(self):
+        clock = itertools.count(0, 100)
+        with patch.object(ObservabilityLab, "_http_status", return_value=None), \
+             patch("doris_course.doris_client.time.monotonic", side_effect=lambda: next(clock)), \
+             patch("doris_course.doris_client.time.sleep"), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady):
+                self.lab()._wait_for_litefuse(180)
+        self.assertEqual(card.call_args.args[1:], ("fail", "Litefuse does not answer"))
+        self.assertIn(f"docker logs {environment.LITEFUSE_WEB_CONTAINER}", card.call_args.args[0])
+
+    def test_wait_stops_when_the_keys_belong_to_another_project(self):
+        other = json.dumps({"data": [{"id": "other", "name": "Other", "organization": {"name": "Org"}}]})
+        with patch.object(ObservabilityLab, "_http_status", return_value=200), \
+             patch.object(ObservabilityLab, "_read", return_value=other), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady):
+                self.lab()._wait_for_litefuse(180)
+        self.assertEqual(card.call_args.args[1:], ("fail", "The API keys do not belong to the course's project"))
+        self.assertIn(f"docker compose -p {environment.LITEFUSE_PROJECT} down --volumes", card.call_args.args[0])
+
+    def test_read_sends_the_keys_with_basic_authentication(self):
+        with patch("doris_course.doris_client.urllib.request.urlopen") as urlopen:
+            urlopen.return_value.__enter__.return_value.read.return_value = b"{}"
+            text = self.lab()._read("http://127.0.0.1:23100/api/public/projects", "Litefuse", "Start it.",
+                                    auth=("pk", "sk"))
+        self.assertEqual(text, "{}")
+        request = urlopen.call_args.args[0]
+        self.assertEqual(request.full_url, "http://127.0.0.1:23100/api/public/projects")
+        self.assertEqual(request.get_header("Authorization"), "Basic " + base64.b64encode(b"pk:sk").decode())
+
+    def test_trace_lists_its_observations_in_time_order(self):
+        lab = self.lab()
+        trace = json.dumps({"id": "t1", "name": "course-assistant", "latency": 0.23, "totalCost": 0.00079,
+                            "observations": [
+                                {"type": "GENERATION", "name": "llm-answer", "startTime": "2026-10-20T10:51:03.540Z",
+                                 "latency": 0.174, "model": "simulated-llm",
+                                 "usageDetails": {"input": 28, "output": 17, "total": 45},
+                                 "costDetails": {"input": 0.00028, "output": 0.00051, "total": 0.00079}},
+                                {"type": "SPAN", "name": "answer-question", "startTime": "2026-10-20T10:51:03.310Z",
+                                 "latency": 0.23, "model": None, "usageDetails": {}, "costDetails": {}},
+                            ]})
+        with patch.object(ObservabilityLab, "_read", return_value=trace) as read, \
+             patch("doris_course.doris_client.show_sql") as statement, \
+             patch("doris_course.doris_client.show_frame") as shown:
+            result = lab.litefuse_trace("t1")
+        self.assertEqual(result["name"], "course-assistant")
+        self.assertEqual(read.call_args.args[0], f"{lab.litefuse_url}/api/public/traces/t1")
+        self.assertIn("-u pk-lf-doris-course:sk-lf-doris-course", statement.call_args.args[1])
+        frame = shown.call_args.args[1]
+        self.assertEqual(frame["name"].tolist(), ["answer-question", "llm-answer"])
+        self.assertEqual(frame["start_time_utc"].tolist(), ["2026-10-20 10:51:03", "2026-10-20 10:51:03"])
+        self.assertEqual(frame.loc[1, "cost_usd"], 0.00079)
+
+    def test_stop_keeps_the_volumes(self):
+        with patch("doris_course.doris_client.run_shell") as shell:
+            self.lab().stop_litefuse()
+        self.assertEqual(shell.call_args.args[0], f"docker compose -p {environment.LITEFUSE_PROJECT} down")
+
+
+class LocalModelTests(unittest.TestCase):
+    def lab(self):
+        lab = object.__new__(ObservabilityLab)
+        lab.lab_dir = Path.cwd()
+        return lab
+
+    def test_start_downloads_and_checks_the_model_before_the_server_starts(self):
+        scripts = []
+        with patch.object(ObservabilityLab, "ensure_docker_ready"), \
+             patch.object(ObservabilityLab, "_check_compose_version"), \
+             patch.object(ObservabilityLab, "_check_ports") as ports, \
+             patch.object(ObservabilityLab, "shell", side_effect=lambda script, title: scripts.append(script)), \
+             patch.object(ObservabilityLab, "_wait_for_local_model") as wait:
+            self.lab().start_local_model()
+        ports.assert_called_once_with(LOCAL_MODEL_PORTS, (environment.LOCAL_MODEL_CONTAINER,))
+        script = scripts[0]
+        compose = f"docker compose -p {environment.LOCAL_MODEL_PROJECT} -f {LOCAL_MODEL_COMPOSE_FILE}"
+        download = script.index(f"{compose} run --rm --no-deps --entrypoint sh")
+        self.assertLess(download, script.index(f"{compose} up -d"))
+        self.assertIn(f"-e MODEL_FILE={environment.LOCAL_MODEL_FILE} -e MODEL_SHA256={environment.LOCAL_MODEL_SHA256}",
+                      script)
+        self.assertIn(environment.LOCAL_MODEL_URL, script)
+        self.assertIn('sha256sum -c -', script)
+        wait.assert_called_once_with(120)
+
+    def test_wait_lists_the_models_of_the_server(self):
+        lab = self.lab()
+        models = json.dumps({"object": "list", "data": [{"id": "qwen2.5-0.5b-instruct"}]})
+        with patch.object(ObservabilityLab, "_http_status", side_effect=[None, 503, 200]), \
+             patch.object(ObservabilityLab, "_read", return_value=models) as read, \
+             patch("doris_course.doris_client.time.sleep") as sleep, \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.show_frame") as shown, \
+             patch("doris_course.doris_client.card") as card:
+            lab._wait_for_local_model(120)
+        self.assertEqual(sleep.call_count, 2)
+        self.assertEqual(read.call_args.args[0], f"{lab.local_model_url}/v1/models")
+        self.assertEqual(shown.call_args.args[1]["model"].tolist(), ["qwen2.5-0.5b-instruct"])
+        self.assertEqual(card.call_args.args[1:], ("ok", "The local model is running"))
+
+    def test_wait_stops_when_the_server_does_not_answer(self):
+        clock = itertools.count(0, 100)
+        with patch.object(ObservabilityLab, "_http_status", return_value=None), \
+             patch("doris_course.doris_client.time.monotonic", side_effect=lambda: next(clock)), \
+             patch("doris_course.doris_client.time.sleep"), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady):
+                self.lab()._wait_for_local_model(120)
+        self.assertEqual(card.call_args.args[1:], ("fail", "The model server does not answer"))
+        self.assertIn(f"docker logs {environment.LOCAL_MODEL_CONTAINER}", card.call_args.args[0])
+
+    def test_openai_key_comes_from_the_environment_and_is_never_shown(self):
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "sk-course-test-key"}), \
+             patch("doris_course.doris_client.card") as card:
+            self.assertEqual(self.lab().openai_api_key(), "sk-course-test-key")
+        card.assert_not_called()
+        with patch.dict("os.environ", {"OPENAI_API_KEY": "  "}), \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady):
+                self.lab().openai_api_key()
+        self.assertEqual(card.call_args.args[1:], ("fail", "OPENAI_API_KEY is not set"))
+
+    def test_stop_keeps_the_downloaded_model(self):
+        with patch("doris_course.doris_client.run_shell") as shell:
+            self.lab().stop_local_model()
+        self.assertEqual(shell.call_args.args[0], f"docker compose -p {environment.LOCAL_MODEL_PROJECT} down")
 
 
 class DemoReadinessTests(unittest.TestCase):

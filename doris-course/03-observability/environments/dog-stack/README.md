@@ -35,3 +35,11 @@ Both override files name every upstream service, and `compose.dog.yml` adds
 `tests/test_environment.py`: its last test compares the services with the
 upstream Compose files, and checks that `collector-host-metrics.yml` still
 restates every receiver of the upstream Collector's `metrics` pipeline.
+
+Litefuse, which Module 7 starts, has a Compose file of its own in
+`environments/litefuse/` (Compose project `doris-obs-litefuse`). It joins the
+`doris-obs` network and keeps its tables in this Doris, in the database
+`litefuse`. `ObservabilityLab.start_litefuse()` first gives the Doris BE the tag
+`private_endpoint` = `doris-obs:8040`: the BE of the all-in-one image registers
+as 127.0.0.1, and without the tag the FE redirects Litefuse's Stream Loads to an
+address that the Litefuse containers cannot reach.

@@ -1,7 +1,7 @@
 title: "Module 7 Quiz: Trace Analysis and Litefuse"
 description: Six questions check whether you can choose window and aggregate operations for trace analysis,
-  interpret percentile evidence, and place Litefuse in an application-observability workflow without confusing
-  it with the DOG stack.
+  interpret percentile evidence, place Litefuse in an LLM application workflow next to the DOG stack, and find
+  its traces in Doris.
 questions:
 - id: choose_ranked_span_analysis
   objective: Choose row-level ranking over aggregate-only analysis
@@ -73,37 +73,46 @@ questions:
     volume and distribution checks are needed to estimate how many users were affected.
 - id: choose_litefuse_for_llm_traces
   objective: Choose the appropriate surface for Large Language Model (LLM) traces
-  prompt: A team is building an AI assistant and needs to inspect prompts, model calls, tool steps, and
-    response quality across Large Language Model (LLM) application runs. The existing DOG stack handles
-    infrastructure logs, metrics, and distributed service traces. Which choice fits?
+  prompt: A team is building an AI assistant and needs to inspect prompts, model calls, tool steps, token
+    costs, and response quality across Large Language Model (LLM) application runs. The existing DOG stack
+    handles infrastructure logs, metrics, and distributed service traces. Which choice fits?
   options:
-  - id: logs_only
-    text: Store prompts as CPU metrics, because every prompt is a numeric sample
-  - id: grafana_only
-    text: Use Grafana contact points as the LLM trace model
+  - id: metrics_only
+    text: Count the model calls and tokens as metrics per model, and chart them in Grafana next to the host
+      metrics
+  - id: service_traces
+    text: Search otel_traces in Grafana, because the demo's service spans already record each model call's
+      prompt and answer
   - id: litefuse
-    text: Use Litefuse for LLM application traces and evaluations while keeping the DOG stack for infrastructure
-      telemetry
+    text: Trace the application with Litefuse, and keep the DOG stack for infrastructure telemetry
   - id: replace_all
-    text: Replace Doris and Grafana, because Litefuse stores all infrastructure metrics and dashboards
+    text: Replace the DOG stack with Litefuse, because Litefuse also collects the logs, host metrics, and
+      service spans
   answer: litefuse
-  explanation: Litefuse is used in the Lab to inspect LLM application behavior such as prompts, model
-    calls, and agent steps. It complements rather than replaces the DOG infrastructure-observability stack.
-- id: distinguish_litefuse_delivery_configuration
-  objective: Distinguish Litefuse SDK delivery from Doris ingestion
-  prompt: An application sets LANGFUSE_PUBLIC_KEY, LANGFUSE_SECRET_KEY, and a Litefuse base URL, then
-    wraps an LLM call with the Litefuse client. Which statement describes the telemetry boundary?
+  explanation: Litefuse records each request of an LLM application as a trace with an observation per step;
+    in the Lab, the document search and the model call, with its prompt, answer, tokens, and cost. Metrics
+    keep counts and totals, but not the prompt or the steps of a request, and the demo's service spans record
+    no prompts at all. Litefuse does not collect logs, metrics, or service spans, so it adds to the DOG stack
+    instead of replacing it; in the Lab, both keep their tables in the same Doris, in the databases otel and
+    litefuse.
+- id: locate_litefuse_traces
+  objective: Locate the Doris tables that hold an LLM application's traces
+  prompt: An application sends its traces to Litefuse with the Langfuse SDK, using a public key, a secret
+    key, and Litefuse's address. Its Litefuse project has the ID llm_app. Where can you query the model calls
+    of these traces with SQL?
   options:
-  - id: litefuse_endpoint
-    text: The SDK sends application traces to the configured Litefuse service; those credentials do not
-      route the traces into the Doris telemetry tables
-  - id: doris_credentials
-    text: The Litefuse keys authenticate direct writes to Doris Frontend (FE) metadata
-  - id: grafana_storage
-    text: The Litefuse SDK stores prompts only in Grafana contact points
-  - id: no_delivery
-    text: The SDK sends only to an OpenTelemetry Collector; Litefuse displays whatever Doris stores
-  answer: litefuse_endpoint
-  explanation: Litefuse credentials target the configured Litefuse endpoint for application traces. They
-    are separate from the OTel-to-Doris pipelines that carry infrastructure logs, metrics, and service
-    spans.
+  - id: otel_traces
+    text: In otel.otel_traces, because every span that reaches Doris passes through the DOG Collector on its
+      way
+  - id: spans_table
+    text: In litefuse.spans_llm_app, the table into which Litefuse's worker loads the project's observations
+  - id: postgres
+    text: Nowhere in Doris, because Litefuse keeps traces in PostgreSQL next to its users and API keys
+  - id: object_storage
+    text: Only in the object storage bucket, whose JSON files Doris reads again for every query
+  answer: spans_table
+  explanation: The SDK sends the observations as OpenTelemetry spans to Litefuse's API, which keeps each
+    batch in object storage and queues it. Litefuse's worker then loads the observations into Doris with
+    Stream Load, into the project's table spans_llm_app, and the traces into traces_scalar_llm_app. PostgreSQL
+    holds the users, projects, and API keys, and the object storage keeps the batches that the API received,
+    but queries read Doris. The spans never pass through the DOG Collector, so they are not in otel_traces.

@@ -1,6 +1,7 @@
 """Offline checks that every place naming a Docker resource or host port agrees."""
 
 import json
+import os
 import re
 import unittest
 from pathlib import Path
@@ -8,10 +9,20 @@ from pathlib import Path
 import yaml
 
 from doris_course import environment
-from doris_course.doris_client import CORE_PORTS, DEMO_PORTS, TRACE_COLLECTOR_PORTS
+from doris_course.doris_client import (
+    CORE_PORTS,
+    DEMO_PORTS,
+    LITEFUSE_COMPOSE_FILE,
+    LITEFUSE_PORTS,
+    LOCAL_MODEL_COMPOSE_FILE,
+    LOCAL_MODEL_PORTS,
+    TRACE_COLLECTOR_PORTS,
+)
 
 ROOT = Path(__file__).resolve().parents[1]
 ENVIRONMENT_DIR = ROOT / "environments/dog-stack"
+LITEFUSE_COMPOSE = ROOT / LITEFUSE_COMPOSE_FILE
+LOCAL_MODEL_COMPOSE = ROOT / LOCAL_MODEL_COMPOSE_FILE
 MODULE2_LAB = ROOT / "level1/module02-data-ingest/lab02_ingest_observability_data.ipynb"
 DEFAULTS = dict(re.findall(r'env_port\("(DORIS_OBS_\w+)", (\d+)\)', (ROOT / "doris_course/environment.py").read_text()))
 SHELL_DEFAULT = re.compile(r"\$\{(DORIS_OBS_\w+):-(\d+)\}")
@@ -50,7 +61,7 @@ def notebook_sources():
 
 class EnvironmentTests(unittest.TestCase):
     def test_compose_files_and_notebooks_use_the_python_defaults(self):
-        places = [(path, path.read_text()) for path in sorted(ENVIRONMENT_DIR.glob("compose*.yml"))]
+        places = [(path, path.read_text()) for path in sorted(ROOT.glob("environments/*/compose*.yml"))]
         places += list(notebook_sources())
         seen = set()
         for path, text in places:
@@ -59,14 +70,16 @@ class EnvironmentTests(unittest.TestCase):
                     self.assertIn(name, DEFAULTS)
                     self.assertEqual(default, DEFAULTS[name])
                     seen.add(name)
-        # Every host port is published by a Compose override file or a notebook cell.
+        # Every host port is published by a Compose file or a notebook cell.
         self.assertEqual(seen, set(DEFAULTS))
 
     def test_names_use_the_course_prefix(self):
         names = [environment.PROJECT, environment.NETWORK, environment.DORIS_CONTAINER,
                  environment.COLLECTOR_CONTAINER, environment.GRAFANA_CONTAINER, environment.MAILPIT_CONTAINER,
                  environment.DEMO_PROJECT, environment.DEMO_NETWORK, environment.DEMO_PROXY_CONTAINER,
-                 *environment.MODULE2_COLLECTORS, environment.CPU_LOAD_CONTAINER]
+                 *environment.MODULE2_COLLECTORS, environment.CPU_LOAD_CONTAINER,
+                 environment.LITEFUSE_PROJECT, environment.LITEFUSE_WEB_CONTAINER,
+                 environment.LOCAL_MODEL_PROJECT, environment.LOCAL_MODEL_CONTAINER]
         for name in names:
             self.assertTrue(name.startswith("doris-obs"), name)
 
@@ -77,7 +90,8 @@ class EnvironmentTests(unittest.TestCase):
             self.assertTrue(20000 <= port < 30000, port)
 
     def test_port_checks_cover_every_host_port(self):
-        checked = {variable: port for port, variable, _purpose in CORE_PORTS + DEMO_PORTS + TRACE_COLLECTOR_PORTS}
+        checked = {variable: port for port, variable, _purpose
+                   in CORE_PORTS + DEMO_PORTS + TRACE_COLLECTOR_PORTS + LITEFUSE_PORTS + LOCAL_MODEL_PORTS}
         self.assertEqual(checked, {name: int(value) for name, value in DEFAULTS.items()})
 
     def test_dog_override_uses_the_python_names(self):
@@ -149,6 +163,81 @@ class EnvironmentTests(unittest.TestCase):
     def test_demo_collector_forwards_to_the_dog_collector(self):
         config = yaml.safe_load((ENVIRONMENT_DIR / "demo-collector-extras.yml").read_text())
         self.assertEqual(config["exporters"]["otlp/gateway"]["endpoint"], f"{environment.COLLECTOR_CONTAINER}:4317")
+
+    def test_litefuse_uses_the_course_names_and_publishes_only_its_web_ui(self):
+        compose = load_compose(LITEFUSE_COMPOSE)
+        services = compose["services"]
+        self.assertEqual(compose["networks"], {"doris-obs": {"name": environment.NETWORK, "external": True}})
+        names = {name: service["container_name"] for name, service in services.items()}
+        self.assertEqual(names["litefuse-web"], environment.LITEFUSE_WEB_CONTAINER)
+        for name, service in services.items():
+            with self.subTest(service=name):
+                self.assertEqual(service["container_name"], f"{environment.LITEFUSE_PROJECT}-{name.split('-')[-1]}")
+                self.assertEqual(service["networks"], ["doris-obs"])
+                # Every image is pinned to a version: a tag other than latest, or a digest.
+                self.assertRegex(service["image"], r"(:(?!latest$)[\w.-]+|@sha256:[0-9a-f]{64})$")
+                if name != "litefuse-web":
+                    self.assertNotIn("ports", service)
+        self.assertEqual(services["litefuse-web"]["ports"], ["127.0.0.1:${DORIS_OBS_LITEFUSE_PORT:-23100}:3000"])
+
+    def test_litefuse_settings_match_the_python_names(self):
+        services = load_compose(LITEFUSE_COMPOSE)["services"]
+        settings = services["litefuse-web"]["environment"]
+        self.assertEqual(services["litefuse-worker"]["environment"], settings)
+        container = {name: service["container_name"] for name, service in services.items()}
+        # Litefuse keeps its tables in the DOG stack's Doris, reached by container name.
+        self.assertEqual(settings["DORIS_FE_HTTP_URL"], f"http://{environment.DORIS_CONTAINER}:8030")
+        self.assertEqual(settings["DORIS_DB"], environment.LITEFUSE_DATABASE)
+        self.assertEqual(settings["DORIS_REPLICATION_NUM"], "1")
+        self.assertEqual(settings["NEXTAUTH_URL"], "http://127.0.0.1:${DORIS_OBS_LITEFUSE_PORT:-23100}")
+        self.assertIn(f"@{container['postgres']}:5432/", settings["DATABASE_URL"])
+        self.assertEqual(settings["REDIS_HOST"], container["redis"])
+        for kind in ("EVENT", "MEDIA"):
+            self.assertEqual(settings[f"LITEFUSE_S3_{kind}_UPLOAD_ENDPOINT"], f"http://{container['silo']}:9000")
+        self.assertEqual(settings["REDIS_AUTH"], services["redis"]["command"][1])
+        self.assertEqual(settings["LITEFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID"],
+                         services["silo"]["environment"]["MINIO_ROOT_USER"])
+        self.assertEqual(settings["LITEFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY"],
+                         services["silo"]["environment"]["MINIO_ROOT_PASSWORD"])
+        # The project, keys, and user that the runtime and Lab 7 use.
+        self.assertEqual(settings["LITEFUSE_INIT_PROJECT_ID"], environment.LITEFUSE_PROJECT_ID)
+        # Litefuse names the project's tables after its ID and accepts only these characters.
+        self.assertRegex(environment.LITEFUSE_PROJECT_ID, r"^[A-Za-z0-9_]+$")
+        self.assertEqual(settings["LITEFUSE_INIT_PROJECT_PUBLIC_KEY"], environment.LITEFUSE_PUBLIC_KEY)
+        self.assertEqual(settings["LITEFUSE_INIT_PROJECT_SECRET_KEY"], environment.LITEFUSE_SECRET_KEY)
+        self.assertEqual(settings["LITEFUSE_INIT_USER_EMAIL"], environment.LITEFUSE_USER_EMAIL)
+        self.assertEqual(settings["LITEFUSE_INIT_USER_PASSWORD"], environment.LITEFUSE_USER_PASSWORD)
+        # Litefuse's sign-up rules: at least 8 characters with a letter, a digit, and another character.
+        self.assertRegex(environment.LITEFUSE_USER_PASSWORD, r"^(?=.*[A-Za-z])(?=.*\d)(?=.*[^A-Za-z\d]).{8,}$")
+        self.assertEqual(environment.DORIS_BE_HTTP_ENDPOINT, f"{environment.DORIS_CONTAINER}:8040")
+
+    def test_the_llm_sdks_are_pinned(self):
+        requirements = (ROOT / "requirements.txt").read_text().splitlines()
+        for package in ("langfuse", "openai"):
+            with self.subTest(package=package):
+                pinned = [line for line in requirements if line.startswith(package)]
+                self.assertEqual(len(pinned), 1)
+                self.assertRegex(pinned[0], rf"^{package}==\d+\.\d+\.\d+$")
+                self.assertIn(f'"{pinned[0]}"', (ROOT / "pyproject.toml").read_text())
+
+    def test_local_model_server_is_pinned_and_serves_the_python_model(self):
+        compose = load_compose(LOCAL_MODEL_COMPOSE)
+        server = compose["services"]["llm"]
+        self.assertEqual(list(compose["services"]), ["llm"])
+        self.assertEqual(server["container_name"], environment.LOCAL_MODEL_CONTAINER)
+        self.assertRegex(server["image"], r"^ghcr\.io/ggml-org/llama\.cpp:server-b\d+$")
+        self.assertEqual(server["ports"], ["127.0.0.1:${DORIS_OBS_LLM_PORT:-28080}:8080"])
+        self.assertEqual(server["volumes"], ["models:/models"])
+        command = server["command"]
+        # The server loads the file that start_local_model() downloads, under the name that requests use.
+        self.assertEqual(command[command.index("--model") + 1], f"/models/{environment.LOCAL_MODEL_FILE}")
+        self.assertEqual(command[command.index("--alias") + 1], environment.LOCAL_MODEL)
+        self.assertRegex(environment.LOCAL_MODEL_SHA256, r"^[0-9a-f]{64}$")
+        if "DORIS_OBS_LLM_MODEL_URL" not in os.environ:
+            # The file comes from a fixed commit of its repository, not from a branch that can move.
+            self.assertRegex(environment.LOCAL_MODEL_URL,
+                             rf"^https://huggingface\.co/[\w.-]+/[\w.-]+/resolve/[0-9a-f]{{40}}/"
+                             rf"{re.escape(environment.LOCAL_MODEL_FILE)}$")
 
     def test_module2_collectors_use_the_course_network_and_names(self):
         text = "\n".join(source for path, source in notebook_sources() if path == MODULE2_LAB)
