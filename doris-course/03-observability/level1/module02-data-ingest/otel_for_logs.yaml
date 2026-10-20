@@ -20,6 +20,13 @@ receivers:
           fatal: FATAL
 
 processors:
+  # A log file does not say which service wrote it. Name the source, so the FE
+  # log rows have service_name = doris-fe in Doris instead of an empty value.
+  resource:
+    attributes:
+      - key: service.name
+        value: doris-fe
+        action: upsert
   batch:
     send_batch_size: 10000
     timeout: 2s
@@ -54,5 +61,5 @@ service:
   pipelines:
     logs:
       receivers: [filelog]
-      processors: [batch]
+      processors: [resource, batch]
       exporters: [doris]

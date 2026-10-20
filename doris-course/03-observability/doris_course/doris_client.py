@@ -1,9 +1,13 @@
 from __future__ import annotations
 
+import http.client
+import json
 import re
 import shlex
 import subprocess
 import time
+import urllib.error
+import urllib.request
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -366,8 +370,11 @@ dog_compose ps
             and env.NETWORK in state.get("NetworkSettings", {}).get("Networks", {})
         )
 
-    def start_demo(self) -> None:
-        """Start the OpenTelemetry demo storefront, which sends its telemetry to the DOG Collector."""
+    def start_demo(self, *, timeout_seconds: int = 180) -> None:
+        """Start the OpenTelemetry demo storefront, which sends its telemetry to the DOG Collector.
+
+        Returns once every demo container is running and the storefront answers.
+        """
         self.ensure_docker_ready()
         if not self._dog_stack_running():
             self._failure(
@@ -386,7 +393,73 @@ echo "[2/2] Show the demo services"
 demo_compose ps
 """)
         self.shell(script, title="Start the OpenTelemetry demo")
-        card(f"Open the storefront at {self.demo_url}", "ok", "The demo is running")
+        self._wait_for_demo(timeout_seconds)
+
+    def _demo_containers(self) -> pd.DataFrame:
+        """Every container of the demo's Compose project, with its state and restart count."""
+        listed = run(["docker", "ps", "--all", "--quiet", "--filter",
+                      f"label=com.docker.compose.project={env.DEMO_PROJECT}"], check=False)
+        ids = listed.stdout.split()
+        # A container removed after the listing is reported on stderr; the others are still printed.
+        inspected = json.loads(run(["docker", "container", "inspect", *ids], check=False).stdout or "[]") if ids else []
+        rows = [
+            {"container": state["Name"].lstrip("/"), "state": state["State"]["Status"],
+             "restarts": state.get("RestartCount", 0)}
+            for state in inspected
+        ]
+        return pd.DataFrame(rows, columns=["container", "state", "restarts"]).sort_values("container", ignore_index=True)
+
+    def _storefront_status(self) -> int | None:
+        """The HTTP status of the storefront page, or None when it does not answer."""
+        try:
+            with urllib.request.urlopen(self.demo_url, timeout=5) as response:
+                return response.status
+        except urllib.error.HTTPError as error:
+            return error.code
+        except (OSError, http.client.HTTPException):
+            # The proxy keeps the connection open while the frontend starts, so this is often a timeout.
+            return None
+
+    def _wait_for_demo(self, timeout_seconds: int) -> None:
+        """Wait until every demo container is running and the storefront answers; stop with a card otherwise."""
+        started = time.monotonic()
+        while True:
+            containers = self._demo_containers()
+            not_running = containers[containers["state"] != "running"]
+            status = self._storefront_status()
+            elapsed = time.monotonic() - started
+            if not containers.empty and not_running.empty and status == 200:
+                break
+            if elapsed >= timeout_seconds:
+                if not not_running.empty:
+                    show_frame("Demo containers that are not running", not_running)
+                if containers.empty or not not_running.empty:
+                    self._failure(
+                        "The demo did not start",
+                        f"Not every demo container is running after {timeout_seconds} seconds. Read a container's "
+                        f"log with docker logs <container>, for example docker logs {env.DEMO_PROXY_CONTAINER}. "
+                        "Containers that keep exiting often mean that Docker is short of memory: see Environment "
+                        "in the course README. Then rerun this cell.",
+                    )
+                else:
+                    answer = f"HTTP {status}" if status else "no answer"
+                    self._failure(
+                        "The storefront does not answer",
+                        f"All demo containers are running, but {self.demo_url} gave {answer} for "
+                        f"{timeout_seconds} seconds. Read the logs with docker logs {env.DEMO_PROXY_CONTAINER} "
+                        f"and docker logs {env.DEMO_PROJECT}-frontend, then rerun this cell.",
+                    )
+                raise EnvironmentNotReady(f"the demo was not ready within {timeout_seconds} seconds.")
+            time.sleep(3)
+        restarted = containers[containers["restarts"] > 0]
+        if not restarted.empty:
+            show_frame("Demo containers that restarted at least once (all are running now)", restarted)
+        card(
+            f"All {len(containers)} demo containers are running, and the storefront at {self.demo_url} "
+            f"answers (waited {elapsed:.0f} seconds).",
+            "ok",
+            "The demo is running",
+        )
 
     def stop_demo(self) -> None:
         """Stop and remove the demo containers. The telemetry already in Doris stays."""

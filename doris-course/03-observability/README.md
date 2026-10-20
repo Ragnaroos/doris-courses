@@ -37,7 +37,9 @@ lab.execute("CREATE DATABASE IF NOT EXISTS otel")
 
 Module 1 prepares the persistent DOG stack. It checks out the pinned upstream
 stack into the ignored `.runtime/` directory, mounts the Doris log directories,
-and starts Doris, Grafana, and the OpenTelemetry Collector. Module 2 then starts
+and starts Doris, Grafana, and the OpenTelemetry Collector. It then starts the
+OpenTelemetry demo and waits until the demo's traces, logs, and metrics reach
+Doris; the Level 2 labs that analyze this data check for it first. Module 2 starts
 dedicated collectors for logs, metrics, and traces.
 
 Docker state is kept outside the course files. Re-running an environment cell
@@ -66,6 +68,10 @@ The Doris image digest is
 - **Docker:** Docker Compose 2.24.4 or later. The environment cell checks it.
 - **Downloads:** about 2.1 GB of images for the DOG stack and 2.7 GB for the
   demo. Grafana also downloads two small plugins when it first starts.
+- **Time:** once the images are downloaded, the Module 1 environment cells take
+  about a minute: about 25 seconds for the DOG stack, 10 for the demo, and a few
+  more until the demo's telemetry reaches Doris. The first run also downloads
+  the images, which takes several minutes more.
 - **Memory:** the DOG stack uses about 5 GB, most of it for Doris, and the demo
   about 3 GB. Give Docker at least 10 GB of memory.
 - **Disk:** about 16 GB for the images, plus the data that Doris keeps.
