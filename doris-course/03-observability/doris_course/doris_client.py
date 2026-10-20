@@ -25,6 +25,7 @@ from doris_labkit.docker import (
     wait_for_port,
 )
 from doris_labkit import docker as labkit_docker
+from doris_labkit.profiles import fetch_profile_text, find_profile, last_query_id, profile_row_sum
 from doris_labkit.results import result_frame, show_frame
 from doris_labkit.shell import run_shell
 from doris_labkit.ui import card, install_styles, show_log, show_sql
@@ -64,6 +65,23 @@ else
   git -C "$STACK_DIR" -c advice.detachedHead=false checkout --force "$STACK_COMMIT"
 fi
 """
+
+
+# Row counters of a table scan in a Query Profile. For a filter that Doris checks
+# against zone maps and an inverted index, such as service_name = 'cart' in
+# Module 6, each row of the scanned partitions is counted in exactly one of them.
+# Filters on leading key columns and bloom filters have counters of their own.
+SCAN_FILTER_COUNTERS = (
+    ("RowsStatsFiltered", "Skipped unread: the zone map (minimum and maximum) of their segment or page rules out a match"),
+    ("RowsInvertedIndexFiltered", "Skipped unread: the inverted index shows that they do not match"),
+    ("RowsVectorPredFiltered", "Read, then dropped: their values did not match the filter"),
+    ("RowsRead", "Read, and passed every filter"),
+)
+
+
+def _scan_reported(profile: str) -> bool:
+    """True once the BEs have reported the table scan of a profile."""
+    return "DetailProfile" in profile and "OLAP_SCAN_OPERATOR" in profile.split("DetailProfile", 1)[1]
 
 
 class EnvironmentNotReady(RuntimeError):
@@ -154,13 +172,16 @@ class ObservabilityLab:
         *,
         title: str | None = None,
         final: bool = False,
+        columns: Sequence[str] | None = None,
     ):
+        """Run a statement and show its result; ``columns`` limits the result to those columns."""
         return sql(
             self._require_connection(),
             statement,
             title=title,
             show_statement=True,
             final=final,
+            columns=columns,
         )
 
     def execute(self, statement: str, *, title: str | None = None) -> int:
@@ -222,6 +243,89 @@ class ObservabilityLab:
         found = "No rows" if frame.empty else f"Only {len(frame)} of {min_rows} rows"
         self._failure(f"{found} after {timeout_seconds} seconds", hint)
         raise EnvironmentNotReady(f"{title} did not return {min_rows} row(s) within {timeout_seconds} seconds.")
+
+    def profile_query(self, statement: str, *, title: str | None = None, timeout_seconds: int = 20) -> str:
+        """Run a query that scans a table, show its result, and return the text of its Query Profile.
+
+        Run it in a session with enable_profile = true. Each step that finds the
+        profile is shown, so that it can be repeated in a MySQL client and a
+        terminal: SELECT last_query_id() gives the ID of the query, SHOW QUERY
+        PROFILE lists its profile, and the FE HTTP API returns the text, as the
+        curl command shown would. The text is shown in a collapsed box.
+        """
+        self.sql(statement, title=title)
+        connection = self._require_connection()
+        show_sql("The ID of the query, which is also the ID of its profile", "SELECT last_query_id()")
+        profile_id = last_query_id(connection)
+        show_sql(f"Find the profile {profile_id}", "SHOW QUERY PROFILE")
+        row = find_profile(connection, profile_id)
+        if row is None:
+            self._failure(
+                "SHOW QUERY PROFILE does not list the query",
+                f"Doris collected no profile of the query {profile_id}: it does so only in a session with "
+                "enable_profile = true. Run the cell that sets the session variables, then rerun this cell.",
+            )
+            raise EnvironmentNotReady("SHOW QUERY PROFILE does not list the query.")
+        show_frame("The profile of the query in SHOW QUERY PROFILE", pd.DataFrame(
+            [{name: row.get(name) for name in ("Profile ID", "Start Time", "Total", "Sql Statement")}]
+        ))
+        show_sql(
+            "Fetch the profile text from the FE HTTP API (the same request with curl)",
+            f'curl -u root: "{self.fe_http_url}/api/profile/text?query_id={profile_id}"',
+        )
+        try:
+            text = fetch_profile_text(
+                self.fe_http_url,
+                profile_id,
+                ready=lambda answer: _scan_reported(answer) or "Is Cached: Yes" in answer,
+                timeout_seconds=timeout_seconds,
+            )
+        except OSError as error:
+            self._failure(
+                "The FE HTTP API does not answer",
+                f"Could not fetch {self.fe_http_url}/api/profile/text ({error}). Check that the DOG stack "
+                "is running with the cells in Module 1, then rerun this cell.",
+            )
+            raise EnvironmentNotReady("the FE HTTP API does not answer.")
+        if "Is Cached: Yes" in text:
+            self._failure(
+                "The result came from the SQL cache",
+                "Doris answered the query from the SQL cache, without scanning the table. Run the cell "
+                "that sets the session variables, which turns the SQL cache off, then rerun this cell.",
+            )
+            raise EnvironmentNotReady("the query was answered from the SQL cache.")
+        if not _scan_reported(text):
+            self._failure(
+                "The profile has no table scan",
+                f"The profile of {profile_id} shows no scan of a table after {timeout_seconds} seconds. "
+                "Rerun this cell.",
+            )
+            raise EnvironmentNotReady("the profile shows no table scan.")
+        show_log(f"Query Profile {profile_id}", text)
+        return text
+
+    def scan_filters(self, profile: str, *, title: str = "How the table scan filtered its rows") -> pd.Series:
+        """Show how many rows the table scan of a profile skipped, dropped, and kept.
+
+        Adds up each counter of SCAN_FILTER_COUNTERS over the scan instances in
+        the profile's DetailProfile, and returns the totals by counter name.
+        """
+        detail = profile.split("DetailProfile", 1)[-1]
+        totals = {name: profile_row_sum(detail, name) for name, _ in SCAN_FILTER_COUNTERS}
+        missing = [name for name, total in totals.items() if not isinstance(total, int)]
+        if missing:
+            self._failure(
+                "The profile does not show the scan counters",
+                f"Missing: {', '.join(missing)}. Profiles show these counters at profile_level 2 or 3. "
+                "Run the cell that sets the session variables, then rerun the cell that runs the query "
+                "and this cell.",
+            )
+            raise EnvironmentNotReady(f"the profile does not show {', '.join(missing)}.")
+        show_frame(title, pd.DataFrame(
+            [{"counter": name, "rows": totals[name], "what happened to these rows": meaning}
+             for name, meaning in SCAN_FILTER_COUNTERS]
+        ))
+        return pd.Series(totals, name="rows")
 
     def connect(
         self,

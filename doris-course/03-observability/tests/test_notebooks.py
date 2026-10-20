@@ -101,6 +101,25 @@ class NotebookTests(unittest.TestCase):
                 with self.subTest(notebook=path.name, table=table):
                     self.assertIn(table, created)
 
+    def test_no_lab_writes_down_a_profile_id(self):
+        # A Profile ID names one query on one FE; anywhere else, Doris answers "query id ... not found".
+        for path in sorted(ROOT.glob("level*/module*/lab*.ipynb")):
+            with self.subTest(notebook=path.name):
+                self.assertNotRegex("\n".join(code_cells(path)), r"[0-9a-f]{16}-[0-9a-f]{16}")
+
+    def test_module6_measures_the_index_in_the_profile_of_its_own_query(self):
+        cells = code_cells(LAB6)
+        settings = next(index for index, cell in enumerate(cells) if "SET enable_profile = true" in cell)
+        query = next(index for index, cell in enumerate(cells) if "profile = lab.profile_query(INDEX_QUERY" in cell)
+        self.assertLess(settings, query)
+        # Without these, a repeated query can be answered from a cache, and its profile shows no or less scanning.
+        for setting in ("profile_level = 2", "enable_sql_cache = false", "enable_condition_cache = false"):
+            self.assertIn(setting, cells[settings])
+        self.assertRegex(cells[query + 1], r'assert with_index\["RowsInvertedIndexFiltered"\] > 0')
+        # The comparison turns the index off for the session, and on again even when a step fails.
+        comparison = next(cell for cell in cells if "enable_inverted_index_query = false" in cell)
+        self.assertLess(comparison.index("finally:"), comparison.index("enable_inverted_index_query = true"))
+
     def test_span_durations_are_converted_from_microseconds(self):
         # The Doris exporter stores duration in microseconds (end_time minus timestamp).
         text = "\n".join(code_cells(LAB7))

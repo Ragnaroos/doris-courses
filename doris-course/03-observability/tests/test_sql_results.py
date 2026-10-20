@@ -1,11 +1,12 @@
-"""Offline checks for ObservabilityLab results and SQL error cards.
+"""Offline checks for ObservabilityLab results, SQL error cards, and Query Profiles.
 
-The shared behavior (empty results, NULL display, error cards) is tested in
-doris-course/common/tests.
+The shared behavior (empty results, NULL display, error cards, finding and
+fetching profiles) is tested in doris-course/common/tests.
 """
 
 import itertools
 import unittest
+import urllib.error
 from unittest.mock import Mock, patch
 
 import pandas as pd
@@ -14,6 +15,31 @@ import pymysql
 from doris_course import ObservabilityLab
 from doris_course.doris_client import EnvironmentNotReady
 from doris_labkit import db
+
+# A shortened Doris 4.1 profile of a query whose table scan ran as two instances.
+PROFILE = """Summary:
+   - Profile ID: a1-b2
+   - Is Cached: No
+MergedProfile:
+           OLAP_SCAN_OPERATOR(nereids_id=66. table_name=otel_logs(otel_logs))(id=0):
+                - RowsRead: sum 999, avg 999, max 999, min 999
+DetailProfile(a1-b2):
+          OLAP_SCAN_OPERATOR(nereids_id=66. table_name=otel_logs(otel_logs))(id=0):
+               - RowsRead: 262
+                 - PerScannerRowsRead: [0, 262, ]
+                SegmentIterator:
+                   - RowsInvertedIndexFiltered: 3.891K (3891)
+                   - RowsStatsFiltered: 22.38K (22380)
+                   - RowsVectorPredFiltered: 0
+          OLAP_SCAN_OPERATOR(nereids_id=66. table_name=otel_logs(otel_logs))(id=0):
+               - RowsRead: 14
+                SegmentIterator:
+                   - RowsInvertedIndexFiltered: 756
+                   - RowsStatsFiltered: 1.673K (1673)
+                   - RowsVectorPredFiltered: 0
+"""
+QUERY = "SELECT severity_text, COUNT(*) AS log_rows FROM otel_logs WHERE service_name = 'cart' GROUP BY severity_text"
+PROFILE_ROW = {"Profile ID": "a1-b2", "Start Time": "2026-10-20 06:54:14", "Total": "11ms", "Sql Statement": QUERY}
 
 
 def connection_for(cursor):
@@ -98,6 +124,103 @@ class WaitForRowsTests(unittest.TestCase):
         card.assert_called_once_with("Start it.", "fail", "Only 1 of 2 rows after 60 seconds")
         self.assertEqual(raised.exception._render_traceback_(),
                          ["Stopped: Rows did not return 2 row(s) within 60 seconds."])
+
+
+class QueryProfileTests(unittest.TestCase):
+    def lab(self):
+        lab = object.__new__(ObservabilityLab)
+        lab.connection = Mock()
+        return lab
+
+    def profile_query(self, *, row=PROFILE_ROW, text=PROFILE, error=None):
+        """Run profile_query with the profile lookups replaced; return the mocks that it called."""
+        lab = self.lab()
+        fetch = {"side_effect": error} if error else {"return_value": text}
+        with patch.object(ObservabilityLab, "sql") as run_query, \
+             patch("doris_course.doris_client.last_query_id", return_value="a1-b2") as last_id, \
+             patch("doris_course.doris_client.find_profile", return_value=row) as find, \
+             patch("doris_course.doris_client.fetch_profile_text", **fetch) as fetch_text, \
+             patch("doris_course.doris_client.show_sql") as statement, \
+             patch("doris_course.doris_client.show_frame"), \
+             patch("doris_course.doris_client.show_log") as log, \
+             patch("doris_course.doris_client.card") as card:
+            calls = {"lab": lab, "run_query": run_query, "last_id": last_id, "find": find, "fetch": fetch_text,
+                     "statement": statement, "log": log, "card": card}
+            try:
+                calls["text"] = lab.profile_query(QUERY, title="Log rows of cart")
+            except EnvironmentNotReady as stopped:
+                calls["stopped"] = stopped
+        return calls
+
+    def test_query_runs_and_its_own_profile_is_fetched_and_shown(self):
+        calls = self.profile_query()
+        lab = calls["lab"]
+        self.assertEqual(calls["text"], PROFILE)
+        calls["run_query"].assert_called_once_with(QUERY, title="Log rows of cart")
+        # The profile is looked up by the ID of this run, not by its SQL: earlier runs share the SQL.
+        self.assertEqual(calls["find"].call_args.args[1], "a1-b2")
+        self.assertEqual(calls["fetch"].call_args.args[:2], (lab.fe_http_url, "a1-b2"))
+        # The learner sees each step, so that it can be repeated in a MySQL client and a terminal.
+        shown = [call.args[1] for call in calls["statement"].call_args_list]
+        self.assertEqual(shown, [
+            "SELECT last_query_id()",
+            "SHOW QUERY PROFILE",
+            f'curl -u root: "{lab.fe_http_url}/api/profile/text?query_id=a1-b2"',
+        ])
+        calls["log"].assert_called_once_with("Query Profile a1-b2", PROFILE)
+        # The text is fetched again until the BEs have reported the scan.
+        ready = calls["fetch"].call_args.kwargs["ready"]
+        self.assertFalse(ready("Summary:\nMergedProfile:\n  OLAP_SCAN_OPERATOR(id=0):\n"))
+        self.assertTrue(ready(PROFILE))
+
+    def test_query_without_a_profile_stops_with_a_card(self):
+        calls = self.profile_query(row=None)
+        self.assertIn("stopped", calls)
+        calls["fetch"].assert_not_called()
+        self.assertEqual(calls["card"].call_args.args[2], "SHOW QUERY PROFILE does not list the query")
+        self.assertIn("enable_profile = true", calls["card"].call_args.args[0])
+
+    def test_profile_without_a_scan_stops_with_a_card(self):
+        cases = (
+            ("Summary:\n   - Is Cached: Yes\n   - Total Instances Num: 0\n", "The result came from the SQL cache"),
+            ("Summary:\n   - Is Cached: No\n", "The profile has no table scan"),
+        )
+        for text, title in cases:
+            with self.subTest(title=title):
+                calls = self.profile_query(text=text)
+                self.assertIn("stopped", calls)
+                self.assertEqual(calls["card"].call_args.args[2], title)
+                calls["log"].assert_not_called()
+
+    def test_unreachable_fe_stops_with_a_card(self):
+        calls = self.profile_query(error=urllib.error.URLError("Connection refused"))
+        self.assertEqual(calls["card"].call_args.args[2], "The FE HTTP API does not answer")
+        self.assertEqual(calls["stopped"]._render_traceback_(), ["Stopped: the FE HTTP API does not answer."])
+
+    def test_scan_filters_add_up_the_scan_instances(self):
+        with patch("doris_course.doris_client.show_frame") as shown:
+            totals = self.lab().scan_filters(PROFILE)
+        # Only DetailProfile is counted: MergedProfile repeats the totals in another format.
+        self.assertEqual(totals.to_dict(), {
+            "RowsStatsFiltered": 24053,
+            "RowsInvertedIndexFiltered": 4647,
+            "RowsVectorPredFiltered": 0,
+            "RowsRead": 276,
+        })
+        frame = shown.call_args.args[1]
+        self.assertEqual(list(frame["counter"]), list(totals.index))
+        self.assertEqual(list(frame["rows"]), list(totals))
+
+    def test_scan_filters_stop_when_the_profile_level_hides_counters(self):
+        # At profile_level 1, the scan reports only its inverted-index counters.
+        level1 = "DetailProfile(a1-b2):\n  OLAP_SCAN_OPERATOR(id=0):\n    - RowsInvertedIndexFiltered: 756\n"
+        with patch("doris_course.doris_client.show_frame") as shown, \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady):
+                self.lab().scan_filters(level1)
+        shown.assert_not_called()
+        self.assertIn("RowsStatsFiltered, RowsVectorPredFiltered, RowsRead", card.call_args.args[0])
+        self.assertIn("profile_level 2", card.call_args.args[0])
 
 
 if __name__ == "__main__":
