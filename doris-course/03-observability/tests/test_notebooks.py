@@ -7,12 +7,16 @@ from pathlib import Path
 
 import yaml
 
+from doris_course import environment
+
 ROOT = Path(__file__).resolve().parents[1]
 LAB1 = ROOT / "level1/module01-observability-introduction/lab01_observability_introduction.ipynb"
 LAB2 = ROOT / "level1/module02-data-ingest/lab02_ingest_observability_data.ipynb"
 LAB4 = ROOT / "level2/module04-table-model/lab04_table_models.ipynb"
 LAB6 = ROOT / "level2/module06-property-mv-index/lab06_properties_mv_index.ipynb"
 LAB7 = ROOT / "level2/module07-data-analysis-litefuse/lab07_data_analysis_litefuse.ipynb"
+LAB8 = ROOT / "level2/module08-alerting/lab08_alerting.ipynb"
+QUIZ8 = ROOT / "level2/module08-alerting/quiz08_alerting_rules.yaml"
 # The tables that the Doris exporter creates when a collector starts.
 EXPORTER_TABLES = {
     "otel_logs", "otel_traces", "otel_traces_graph", "otel_metrics_gauge", "otel_metrics_sum",
@@ -22,6 +26,11 @@ EXPORTER_TABLES = {
 
 def code_cells(path):
     return ["".join(cell["source"]) for cell in json.loads(path.read_text())["cells"] if cell["cell_type"] == "code"]
+
+
+def markdown_text(path):
+    return "\n".join("".join(cell["source"]) for cell in json.loads(path.read_text())["cells"]
+                     if cell["cell_type"] == "markdown")
 
 
 class NotebookTests(unittest.TestCase):
@@ -45,7 +54,8 @@ class NotebookTests(unittest.TestCase):
         self.assertIn("min_rows=3", check)
 
     def test_level2_labs_check_their_data_before_using_it(self):
-        for path, table in ((LAB4, "FROM otel_logs"), (LAB6, "FROM otel_logs"), (LAB7, "FROM otel_traces")):
+        for path, table in ((LAB4, "FROM otel_logs"), (LAB6, "FROM otel_logs"), (LAB7, "FROM otel_traces"),
+                            (LAB8, "FROM otel_metrics_gauge")):
             cells = code_cells(path)
             with self.subTest(notebook=path.name):
                 self.assertIn("lab = DorisLab(", cells[0])
@@ -119,6 +129,39 @@ class NotebookTests(unittest.TestCase):
         # The comparison turns the index off for the session, and on again even when a step fails.
         comparison = next(cell for cell in cells if "enable_inverted_index_query = false" in cell)
         self.assertLess(comparison.index("finally:"), comparison.index("enable_inverted_index_query = true"))
+
+    def test_module8_alert_query_measures_how_busy_each_host_is(self):
+        query = next(cell for cell in code_cells(LAB8) if "HOST_CPU_QUERY = " in cell)
+        # A row is the share of time that one core spent in one state: the busy share is 1 - idle.
+        self.assertIn("attributes['state'] = 'idle'", query)
+        self.assertIn("(1 - AVG(value)) * 100", query)
+        # One source per host, and one alert instance per host.
+        self.assertIn("scope_name LIKE '%hostmetricsreceiver%'", query)
+        self.assertIn("resource_attributes['host.name'] IS NOT NULL", query)
+        self.assertIn("GROUP BY host", query)
+        # The window ends now: a host that stops reporting leaves the result.
+        self.assertIn("timestamp >= UTC_TIMESTAMP() - INTERVAL 1 MINUTE", query)
+
+    def test_module8_rule_uses_the_threshold_of_the_quiz(self):
+        text = markdown_text(LAB8)
+        self.assertIn("keep **IS ABOVE**, and enter `90`", text)
+        self.assertIn("**Pending period**: `1m`", text)
+        self.assertIn("such as 10 minutes", text)
+        quiz = yaml.safe_load(QUIZ8.read_text())
+        self.assertIn("above 90% continuously for 10 minutes", quiz["questions"][1]["prompt"])
+        # Every cell that reads the rule uses the name that the Lab tells the learner to give it.
+        self.assertIn("**1. Enter alert rule name**: `Host CPU busy`", text)
+        for cell in code_cells(LAB8):
+            for name in re.findall(r'lab\.(?:alert_instances|wait_for_alert_state|export_alert_rule)\(\s*"([^"]+)"', cell):
+                self.assertEqual(name, "Host CPU busy")
+
+    def test_module8_cpu_load_is_low_priority_and_stops_by_itself(self):
+        load = next(cell for cell in code_cells(LAB8) if "docker run" in cell)
+        self.assertIn(f"--rm --name {environment.CPU_LOAD_CONTAINER} busybox:1.37.0", load)
+        self.assertIn("nice -n 19 yes", load)
+        self.assertIn("sleep 300", load)
+        stop = next(cell for cell in code_cells(LAB8) if "Stop the CPU load" in cell)
+        self.assertIn(f"docker rm -f {environment.CPU_LOAD_CONTAINER}", stop)
 
     def test_span_durations_are_converted_from_microseconds(self):
         # The Doris exporter stores duration in microseconds (end_time minus timestamp).

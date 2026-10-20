@@ -6,6 +6,7 @@ import subprocess
 import tempfile
 import unittest
 import urllib.error
+from datetime import datetime, timezone
 from pathlib import Path
 from unittest.mock import patch
 
@@ -142,7 +143,8 @@ class RuntimeTests(unittest.TestCase):
                 lab.teardown(keep_data=keep_data)
             script = shell.call_args.args[0]
             demo = script.index(f"docker compose -p {environment.DEMO_PROJECT} down")
-            collectors = script.index(f"for name in {' '.join(environment.MODULE2_COLLECTORS)}; do")
+            containers = " ".join((*environment.MODULE2_COLLECTORS, environment.CPU_LOAD_CONTAINER))
+            collectors = script.index(f"for name in {containers}; do")
             core = script.index(f"docker compose -p {environment.PROJECT} down")
             self.assertLess(demo, collectors)
             self.assertLess(collectors, core)
@@ -157,6 +159,152 @@ class RuntimeTests(unittest.TestCase):
         )
         self.assertEqual(result.returncode, 0)
         self.assertIn(f"course-root={Path.cwd()}", result.stdout)
+
+
+def rules_page(*instances, health="ok"):
+    """Grafana's rules API with the rule Host CPU busy and the given (labels, state) instances."""
+    alerts = [{"labels": {"alertname": "Host CPU busy", "grafana_folder": "Doris course", "team": "doris-course",
+                          **labels},
+               "state": state, "activeAt": "2026-10-20T09:04:10Z",
+               "annotations": {"summary": f"CPU of {labels.get('host')} is 95.9% busy"}}
+              for labels, state in instances]
+    rule = {"name": "Host CPU busy", "labels": {"team": "doris-course"}, "health": health,
+            "lastEvaluation": "2026-10-20T09:04:10Z", "alerts": alerts}
+    return json.dumps({"status": "success", "data": {"groups": [{"name": "host-cpu", "rules": [rule]}]}})
+
+
+def mailpit_page(*messages):
+    return json.dumps({"messages": [
+        {"ID": message_id, "Subject": subject, "Created": created,
+         "From": {"Name": "Grafana (DOG course)", "Address": "grafana@example.com"},
+         "To": [{"Name": "", "Address": "oncall@example.com"}]}
+        for message_id, subject, created in messages
+    ]})
+
+
+class GrafanaAlertingTests(unittest.TestCase):
+    def lab(self):
+        return object.__new__(ObservabilityLab)
+
+    def test_instances_are_named_by_the_labels_of_the_query_result(self):
+        lab = self.lab()
+        page = rules_page(({"host": "docker-desktop"}, "Normal"))
+        with patch.object(ObservabilityLab, "_read", return_value=page) as read, \
+             patch("doris_course.doris_client.show_sql") as statement, \
+             patch("doris_course.doris_client.show_frame"):
+            frame = lab.alert_instances("Host CPU busy")
+        # Grafana's anonymous viewer may read the rules API; the learner sees the request.
+        self.assertEqual(read.call_args.args[0], f"{lab.grafana_url}/api/prometheus/grafana/api/v1/rules")
+        self.assertEqual(statement.call_args.args[1], f'curl -s "{lab.grafana_url}/api/prometheus/grafana/api/v1/rules"')
+        # The labels that every instance of the rule has are left out.
+        self.assertEqual(frame.to_dict("records"), [{
+            "instance": "host=docker-desktop", "state": "Normal", "since_utc": "2026-10-20 09:04:10",
+            "summary": "CPU of docker-desktop is 95.9% busy",
+        }])
+
+    def test_a_rule_that_was_not_evaluated_yet_has_no_instances(self):
+        with patch.object(ObservabilityLab, "_read", return_value=rules_page()), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.show_frame") as shown, \
+             patch("doris_course.doris_client.card") as card:
+            frame = self.lab().alert_instances("Host CPU busy")
+        self.assertTrue(frame.empty)
+        shown.assert_not_called()
+        self.assertEqual(card.call_args.args[1:], ("info", "No instances yet"))
+
+    def test_a_missing_rule_stops_with_a_card(self):
+        with patch.object(ObservabilityLab, "_read", return_value=rules_page()), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady) as raised:
+                self.lab().alert_instances("Host CPU is busy")
+        self.assertEqual(card.call_args.args[1:], ("fail", "Grafana has no alert rule named 'Host CPU is busy'"))
+        self.assertEqual(raised.exception._render_traceback_(),
+                         ["Stopped: Grafana has no alert rule named 'Host CPU is busy'."])
+
+    def test_wait_shows_each_change_until_every_instance_is_in_the_state(self):
+        pages = [rules_page(({"host": "h1"}, "Normal")), rules_page(({"host": "h1"}, "Pending")),
+                 rules_page(({"host": "h1"}, "Pending")), rules_page(({"host": "h1"}, "Alerting"))]
+        with patch.object(ObservabilityLab, "_read", side_effect=pages), \
+             patch("doris_course.doris_client.time.sleep") as sleep, \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.show_frame") as shown:
+            frame = self.lab().wait_for_alert_state("Host CPU busy", "Alerting", hint="Start the load.")
+        self.assertEqual(sleep.call_count, 3)
+        self.assertEqual(frame["state"].tolist(), ["Alerting"])
+        changes = shown.call_args_list[0].args[1]
+        self.assertEqual(changes["instances"].tolist(), ["host=h1: Normal", "host=h1: Pending", "host=h1: Alerting"])
+
+    def test_wait_needs_every_instance_in_the_state(self):
+        # After the data stops, the host's instance stays Normal for two evaluations next to the NoData one.
+        mixed = rules_page(({}, "NoData"), ({"host": "h1"}, "Normal"), health="nodata")
+        clock = itertools.count(0, 100)
+        with patch.object(ObservabilityLab, "_read", return_value=mixed), \
+             patch("doris_course.doris_client.time.monotonic", side_effect=lambda: next(clock)), \
+             patch("doris_course.doris_client.time.sleep"), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.show_frame"), \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady):
+                self.lab().wait_for_alert_state("Host CPU busy", "NoData", hint="Stop the Collector.",
+                                                timeout_seconds=150)
+        card.assert_called_once_with("Stop the Collector.", "fail", "Host CPU busy is not NoData after 150 seconds")
+
+    def test_email_wait_skips_older_emails(self):
+        lab = self.lab()
+        listing = mailpit_page(("new", "[FIRING:1] Host CPU busy Doris course h1", "2026-10-20T09:04:20.241Z"),
+                               ("old", "[FIRING:1] Host CPU busy Doris course h1", "2026-10-20T08:30:00.000Z"))
+        after = datetime(2026, 10, 20, 9, 1, 45, tzinfo=timezone.utc)
+        with patch.object(ObservabilityLab, "_read", side_effect=[mailpit_page(), listing,
+                                                                  json.dumps({"Text": "Summary: CPU of h1"})]) as read, \
+             patch("doris_course.doris_client.time.sleep"), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.show_frame") as shown, \
+             patch("doris_course.doris_client.show_log") as log:
+            email = lab.wait_for_email("[FIRING:1] Host CPU busy", after=after, hint="Check the policy.")
+        self.assertEqual(email["id"], "new")
+        self.assertEqual(read.call_args.args[0], f"{lab.mailpit_url}/api/v1/message/new")
+        row = shown.call_args.args[1].to_dict("records")[0]
+        self.assertEqual(row["from"], "Grafana (DOG course) <grafana@example.com>")
+        self.assertEqual(row["received_utc"], "2026-10-20 09:04:20")
+        self.assertEqual(log.call_args.args[1], "Summary: CPU of h1")
+
+    def test_email_wait_stops_when_only_older_emails_match(self):
+        listing = mailpit_page(("old", "[RESOLVED] Host CPU busy", "2026-10-20T08:30:00.000Z"))
+        clock = itertools.count(0, 100)
+        with patch.object(ObservabilityLab, "_read", return_value=listing), \
+             patch("doris_course.doris_client.time.monotonic", side_effect=lambda: next(clock)), \
+             patch("doris_course.doris_client.time.sleep"), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady):
+                self.lab().wait_for_email("[RESOLVED] Host CPU busy", hint="Wait for the group interval.",
+                                          after=datetime(2026, 10, 20, 9, 0, tzinfo=timezone.utc),
+                                          timeout_seconds=120)
+        self.assertEqual(card.call_args.args[1:], ("fail", "No email about '[RESOLVED] Host CPU busy' after 120 seconds"))
+
+    def test_an_unreachable_service_stops_with_a_card(self):
+        refused = urllib.error.URLError("Connection refused")
+        with patch("doris_course.doris_client.urllib.request.urlopen", side_effect=refused), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady) as raised:
+                self.lab().wait_for_email("TestAlert", hint="Press Test.")
+        self.assertEqual(card.call_args.args[1:], ("fail", "Mailpit does not answer"))
+        self.assertIn("lab.prepare_environment()", card.call_args.args[0])
+        self.assertEqual(raised.exception._render_traceback_(), ["Stopped: Mailpit does not answer."])
+
+    def test_export_finds_the_rule_by_its_title(self):
+        lab = self.lab()
+        listing = json.dumps([{"uid": "u1", "title": "Other rule"}, {"uid": "u2", "title": "Host CPU busy"}])
+        with patch.object(ObservabilityLab, "_read", side_effect=[listing, "apiVersion: 1\n"]) as read, \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.show_log") as log:
+            text = lab.export_alert_rule("Host CPU busy")
+        self.assertEqual(text, "apiVersion: 1\n")
+        self.assertEqual(read.call_args.args[0],
+                         f"{lab.grafana_url}/api/v1/provisioning/alert-rules/u2/export?format=yaml")
+        self.assertEqual(log.call_args.kwargs, {"opened": True})
 
 
 class DemoReadinessTests(unittest.TestCase):

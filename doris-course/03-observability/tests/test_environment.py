@@ -16,6 +16,9 @@ MODULE2_LAB = ROOT / "level1/module02-data-ingest/lab02_ingest_observability_dat
 DEFAULTS = dict(re.findall(r'env_port\("(DORIS_OBS_\w+)", (\d+)\)', (ROOT / "doris_course/environment.py").read_text()))
 SHELL_DEFAULT = re.compile(r"\$\{(DORIS_OBS_\w+):-(\d+)\}")
 UPSTREAM = ROOT / ".runtime/ai-observe-stack"
+# Services that compose.dog.yml adds to the upstream DOG stack.
+COURSE_SERVICES = {"mailpit"}
+HOST_METRICS_CONFIG = "/etc/otelcol/collector-host-metrics.yaml"
 
 
 class ComposeLoader(yaml.SafeLoader):
@@ -61,9 +64,9 @@ class EnvironmentTests(unittest.TestCase):
 
     def test_names_use_the_course_prefix(self):
         names = [environment.PROJECT, environment.NETWORK, environment.DORIS_CONTAINER,
-                 environment.COLLECTOR_CONTAINER, environment.GRAFANA_CONTAINER,
+                 environment.COLLECTOR_CONTAINER, environment.GRAFANA_CONTAINER, environment.MAILPIT_CONTAINER,
                  environment.DEMO_PROJECT, environment.DEMO_NETWORK, environment.DEMO_PROXY_CONTAINER,
-                 *environment.MODULE2_COLLECTORS]
+                 *environment.MODULE2_COLLECTORS, environment.CPU_LOAD_CONTAINER]
         for name in names:
             self.assertTrue(name.startswith("doris-obs"), name)
 
@@ -84,13 +87,47 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(services["doris"]["container_name"], environment.DORIS_CONTAINER)
         self.assertEqual(services["otel-collector"]["container_name"], environment.COLLECTOR_CONTAINER)
         self.assertEqual(services["grafana"]["container_name"], environment.GRAFANA_CONTAINER)
+        self.assertEqual(services["mailpit"]["container_name"], environment.MAILPIT_CONTAINER)
         self.assertEqual(compose["networks"]["aiobs-net"]["name"], environment.NETWORK)
         for name, service in services.items():
             with self.subTest(service=name):
-                # !override replaces the upstream list, which binds every interface.
-                self.assertEqual(service["ports"]["tag"], "!override")
-                for binding in service["ports"]["value"]:
+                if name in COURSE_SERVICES:
+                    bindings = service["ports"]
+                else:
+                    # !override replaces the upstream list, which binds every interface.
+                    self.assertEqual(service["ports"]["tag"], "!override")
+                    bindings = service["ports"]["value"]
+                for binding in bindings:
                     self.assertTrue(binding.startswith("127.0.0.1:"), binding)
+
+    def test_grafana_sends_its_email_to_mailpit(self):
+        services = load_compose(ENVIRONMENT_DIR / "compose.dog.yml")["services"]
+        settings = dict(item.split("=", 1) for item in services["grafana"]["environment"])
+        self.assertEqual(settings["GF_SMTP_ENABLED"], "true")
+        # Mailpit listens for SMTP on port 1025 of the course network.
+        self.assertEqual(settings["GF_SMTP_HOST"], f"{environment.MAILPIT_CONTAINER}:1025")
+        mailpit = services["mailpit"]
+        self.assertRegex(mailpit["image"], r"^axllent/mailpit:v\d+\.\d+\.\d+$")
+        self.assertEqual(mailpit["networks"], ["aiobs-net"])
+
+    def test_dog_collector_labels_its_host_metrics_with_the_host_name(self):
+        collector = load_compose(ENVIRONMENT_DIR / "compose.dog.yml")["services"]["otel-collector"]
+        # In the Docker host's UTS namespace, the system detector reads the host's name.
+        # Upstream sets a fixed hostname, which Docker does not allow together with it.
+        self.assertEqual(collector["uts"], "host")
+        self.assertEqual(collector["hostname"]["tag"], "!reset")
+        self.assertEqual(collector["command"]["tag"], "!override")
+        self.assertEqual(collector["command"]["value"][-1], f"--config={HOST_METRICS_CONFIG}")
+        self.assertIn("${DORIS_OBS_COURSE_ROOT:?set DORIS_OBS_COURSE_ROOT}/environments/dog-stack/"
+                      f"collector-host-metrics.yml:{HOST_METRICS_CONFIG}:ro", collector["volumes"])
+        config = yaml.safe_load((ENVIRONMENT_DIR / "collector-host-metrics.yml").read_text())
+        self.assertEqual(config["processors"]["resourcedetection/host"]["detectors"], ["system"])
+        pipelines = config["service"]["pipelines"]
+        self.assertEqual(pipelines["metrics/host"]["receivers"], ["hostmetrics"])
+        self.assertIn("resourcedetection/host", pipelines["metrics/host"]["processors"])
+        self.assertEqual(pipelines["metrics/host"]["exporters"], ["doris"])
+        # The demo's telemetry stays in the shared pipeline, without the Collector's host name.
+        self.assertNotIn("hostmetrics", pipelines["metrics"]["receivers"])
 
     def test_demo_override_renames_every_container_and_publishes_only_the_storefront(self):
         compose = load_compose(ENVIRONMENT_DIR / "compose.demo.yml")
@@ -158,16 +195,25 @@ class EnvironmentTests(unittest.TestCase):
         head = UPSTREAM / ".git/HEAD"
         if not head.is_file() or head.read_text().strip() != environment.STACK_COMMIT:
             self.skipTest("the pinned DOG stack is not checked out in .runtime/")
-        pairs = (("docker/docker-compose.yaml", "compose.dog.yml"),
-                 ("doris-opentelemetry-demo/docker-compose.yml", "compose.demo.yml"))
-        for upstream_file, override_file in pairs:
+        pairs = (("docker/docker-compose.yaml", "compose.dog.yml", COURSE_SERVICES),
+                 ("doris-opentelemetry-demo/docker-compose.yml", "compose.demo.yml", set()))
+        for upstream_file, override_file, added in pairs:
             upstream = load_compose(UPSTREAM / upstream_file)["services"]
             override = load_compose(ENVIRONMENT_DIR / override_file)["services"]
             with self.subTest(override=override_file):
-                self.assertEqual(set(upstream), set(override))
+                self.assertEqual(set(override), set(upstream) | added)
                 for name, service in upstream.items():
                     if service.get("ports"):
                         self.assertIn("ports", override[name], name)
+        # collector-host-metrics.yml restates the upstream metrics pipeline without hostmetrics.
+        upstream = yaml.safe_load((UPSTREAM / "docker/otel-collector-config/otel-collector-config.yaml").read_text())
+        course = yaml.safe_load((ENVIRONMENT_DIR / "collector-host-metrics.yml").read_text())["service"]["pipelines"]
+        receivers = upstream["service"]["pipelines"]["metrics"]["receivers"]
+        self.assertEqual(sorted(receivers), sorted(course["metrics"]["receivers"] + course["metrics/host"]["receivers"]))
+        for processor in course["metrics/host"]["processors"]:
+            if processor != "resourcedetection/host":
+                self.assertIn(processor, upstream["processors"])
+        self.assertIn("doris", upstream["exporters"])
 
 
 if __name__ == "__main__":

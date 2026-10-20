@@ -37,7 +37,8 @@ lab.execute("CREATE DATABASE IF NOT EXISTS otel")
 
 Module 1 prepares the persistent DOG stack. It checks out the pinned upstream
 stack into the ignored `.runtime/` directory, mounts the Doris log directories,
-and starts Doris, Grafana, and the OpenTelemetry Collector. It then starts the
+and starts Doris, Grafana, the OpenTelemetry Collector, and Mailpit, a local mail
+server that receives Grafana's alert emails in Module 8. It then starts the
 OpenTelemetry demo and waits until the demo's traces, logs, and metrics reach
 Doris; the Level 2 labs that analyze this data check for it first. Module 2 starts
 dedicated collectors for logs, metrics, and traces.
@@ -58,7 +59,9 @@ that commit into `.runtime/` and never pulls newer upstream code.
 | Apache Doris 4.1.3 | `apache/doris:all-in-one-4.1.3` | `doris-obs` |
 | OpenTelemetry Collector | `otel/opentelemetry-collector-contrib:0.144.0` | `doris-obs-otel-collector` |
 | Grafana with the Doris App plugin | `grafana/grafana:11.4.0` | `doris-obs-grafana` |
+| Mailpit, a local mail server and inbox | `axllent/mailpit:v1.31.3` | `doris-obs-mailpit` |
 | OpenTelemetry demo (Astronomy Shop) 2.0.2 | 23 images, mostly `ghcr.io/open-telemetry/demo:2.0.2-*` | `doris-obs-demo-*` (23) |
+| CPU load for Module 8, for a few minutes | `busybox:1.37.0` | `doris-obs-cpu-load` |
 
 The Doris image digest is
 `sha256:82a5cabc7900ebcd3d080412d636c0cebd6602799fffe2605c652b2ea7d42609`.
@@ -67,13 +70,16 @@ The Doris image digest is
 
 - **Docker:** Docker Compose 2.24.4 or later. The environment cell checks it.
 - **Downloads:** about 2.1 GB of images for the DOG stack and 2.7 GB for the
-  demo. Grafana also downloads two small plugins when it first starts.
+  demo. Grafana also downloads two small plugins when it first starts, and
+  Module 8 downloads the 2 MB `busybox` image.
 - **Time:** once the images are downloaded, the Module 1 environment cells take
   about a minute: about 25 seconds for the DOG stack, 10 for the demo, and a few
   more until the demo's telemetry reaches Doris. The first run also downloads
   the images, which takes several minutes more.
 - **Memory:** the DOG stack uses about 5 GB, most of it for Doris, and the demo
   about 3 GB. Give Docker at least 10 GB of memory.
+- **CPU:** Module 8 keeps every CPU of the Docker host busy for up to 5 minutes,
+  at the lowest priority, to make an alert fire. Your computer may run its fans.
 - **Disk:** about 16 GB for the images, plus the data that Doris keeps.
 - **Platforms:** all images are published for linux/amd64 and linux/arm64. The
   environment was verified on macOS with Apple silicon and Docker Desktop.
@@ -91,9 +97,12 @@ starting Jupyter, for example `DORIS_OBS_GRAFANA_PORT=23001 .venv/bin/jupyter la
 | 24318 | Collector OTLP HTTP | `DORIS_OBS_OTLP_HTTP_PORT` |
 | 24328 | Module 2 trace collector OTLP HTTP | `DORIS_OBS_TRACES_OTLP_HTTP_PORT` |
 | 28082 | Demo storefront | `DORIS_OBS_DEMO_PORT` |
+| 28025 | Mailpit inbox for Grafana's emails | `DORIS_OBS_MAILPIT_PORT` |
 
 The Compose override files in `environments/dog-stack/` apply these names and
-ports on top of the upstream Compose files. The Module 2 trace collector
+ports on top of the upstream Compose files. They also add Mailpit, give Grafana
+its SMTP settings, and label the DOG Collector's host metrics with the name of
+the Docker host, which Module 8 alerts on. The Module 2 trace collector
 publishes its port when the Module 2 lab starts it.
 
 ## Stop and clean up
@@ -101,7 +110,9 @@ publishes its port when the Module 2 lab starts it.
 - `lab.stop_demo()` stops and removes the demo containers. The telemetry already
   in Doris stays, and `lab.start_demo()` starts the demo again.
 - `lab.teardown()` removes every container, network, and volume of this course:
-  the demo, the Module 2 collectors, and the DOG stack.
+  the demo, the Module 2 collectors, the Module 8 CPU load if it still runs, and
+  the DOG stack. The Grafana volume holds the alert rule, the notification policy,
+  and the contact point of Module 8.
   `lab.teardown(keep_data=True)` keeps the Doris and Grafana volumes, so a later
   `lab.prepare_environment()` continues with the same data.
 - The upstream checkout and the Doris logs stay in `.runtime/`. Delete that

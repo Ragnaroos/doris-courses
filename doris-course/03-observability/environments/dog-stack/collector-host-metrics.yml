@@ -1,0 +1,23 @@
+# Merged into the DOG Collector's configuration (upstream
+# docker/otel-collector-config/otel-collector-config.yaml) by compose.dog.yml.
+#
+# Upstream sends the Collector's own host metrics through the shared metrics
+# pipeline without saying which host they describe. This file moves them to a
+# pipeline of their own that labels them with host.name, the name of the Docker
+# host: compose.dog.yml runs the Collector in the host's UTS namespace, so the
+# system detector reads that name. The demo's telemetry, which also passes
+# through this Collector, comes from other hosts in general and is not labeled.
+processors:
+  resourcedetection/host:
+    detectors: [system]
+    system:
+      hostname_sources: [os]
+
+service:
+  pipelines:
+    metrics:
+      receivers: [otlp, prometheus]
+    metrics/host:
+      receivers: [hostmetrics]
+      processors: [memory_limiter, resourcedetection/host, batch]
+      exporters: [doris]

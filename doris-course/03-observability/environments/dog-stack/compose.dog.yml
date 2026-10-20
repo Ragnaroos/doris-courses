@@ -28,13 +28,40 @@ services:
     ports: !override
       - "127.0.0.1:${DORIS_OBS_OTLP_GRPC_PORT:-24317}:4317"
       - "127.0.0.1:${DORIS_OBS_OTLP_HTTP_PORT:-24318}:4318"
+    # Label the Collector's host metrics with the Docker host's name
+    # (collector-host-metrics.yml). In the host's UTS namespace, the Collector
+    # sees that name; upstream sets a fixed hostname, which Docker does not
+    # allow together with it.
+    hostname: !reset ""
+    uts: host
+    command: !override
+      - --config=/etc/otelcol/otel-collector-config.yaml
+      - --config=/etc/otelcol/collector-host-metrics.yaml
+    volumes:
+      - ${DORIS_OBS_COURSE_ROOT:?set DORIS_OBS_COURSE_ROOT}/environments/dog-stack/collector-host-metrics.yml:/etc/otelcol/collector-host-metrics.yaml:ro
 
   grafana:
     container_name: doris-obs-grafana
     environment:
       - GF_SERVER_ROOT_URL=http://127.0.0.1:${DORIS_OBS_GRAFANA_PORT:-23000}/
+      # Module 8 sends alert emails to the local Mailpit inbox below.
+      - GF_SMTP_ENABLED=true
+      - GF_SMTP_HOST=doris-obs-mailpit:1025
+      - GF_SMTP_FROM_ADDRESS=grafana@example.com
+      - GF_SMTP_FROM_NAME=Grafana (DOG course)
     ports: !override
       - "127.0.0.1:${DORIS_OBS_GRAFANA_PORT:-23000}:3000"
+
+  # A local mail server for Module 8: it accepts every message that Grafana
+  # sends over SMTP and shows it in a web inbox. Nothing leaves this machine.
+  mailpit:
+    image: axllent/mailpit:v1.31.3
+    container_name: doris-obs-mailpit
+    restart: unless-stopped
+    ports:
+      - "127.0.0.1:${DORIS_OBS_MAILPIT_PORT:-28025}:8025"
+    networks:
+      - aiobs-net
 
 volumes:
   fe_meta:

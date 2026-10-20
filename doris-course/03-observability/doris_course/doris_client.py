@@ -8,6 +8,7 @@ import subprocess
 import time
 import urllib.error
 import urllib.request
+from datetime import datetime
 from pathlib import Path
 from typing import Mapping, Sequence
 
@@ -43,6 +44,7 @@ CORE_PORTS = (
     (env.GRAFANA_PORT, "DORIS_OBS_GRAFANA_PORT", "Grafana"),
     (env.OTLP_GRPC_PORT, "DORIS_OBS_OTLP_GRPC_PORT", "Collector OTLP gRPC"),
     (env.OTLP_HTTP_PORT, "DORIS_OBS_OTLP_HTTP_PORT", "Collector OTLP HTTP"),
+    (env.MAILPIT_PORT, "DORIS_OBS_MAILPIT_PORT", "Mailpit inbox for Grafana's emails"),
 )
 DEMO_PORTS = ((env.DEMO_PORT, "DORIS_OBS_DEMO_PORT", "Demo storefront"),)
 TRACE_COLLECTOR_PORTS = (
@@ -82,6 +84,44 @@ SCAN_FILTER_COUNTERS = (
 def _scan_reported(profile: str) -> bool:
     """True once the BEs have reported the table scan of a profile."""
     return "DetailProfile" in profile and "OLAP_SCAN_OPERATOR" in profile.split("DetailProfile", 1)[1]
+
+
+# Grafana's rules API lists every Grafana-managed alert rule with the instances of
+# its last evaluation. Grafana's anonymous viewer, which the DOG stack enables, may
+# read it, so the Labs do not depend on the admin password.
+GRAFANA_RULES_PATH = "/api/prometheus/grafana/api/v1/rules"
+GRAFANA_HINT = "Check that the DOG stack is running with the cells in Module 1, then rerun this cell."
+MAILPIT_HINT = ("Mailpit starts with the DOG stack: run lab.prepare_environment() in Module 1 again, "
+                "then rerun this cell.")
+
+
+def _utc(timestamp: str | None) -> str:
+    """A UTC timestamp from Grafana, such as 2026-10-20T09:04:10Z, as 2026-10-20 09:04:10."""
+    return (timestamp or "").replace("T", " ").replace("Z", "")[:19]
+
+
+def _received(message: Mapping) -> datetime:
+    """When Mailpit received a message, as a timezone-aware time."""
+    return datetime.fromisoformat(message["Created"].replace("Z", "+00:00"))
+
+
+def _alert_frame(rule: Mapping) -> pd.DataFrame:
+    """One row per instance of a rule from Grafana's rules API.
+
+    An instance is named by the labels that its query result adds, such as host;
+    the labels that every instance of the rule has are left out.
+    """
+    common = set(rule.get("labels") or {}) | {"alertname", "grafana_folder"}
+    rows = []
+    for alert in rule.get("alerts") or []:
+        labels = {key: value for key, value in (alert.get("labels") or {}).items() if key not in common}
+        rows.append({
+            "instance": ", ".join(f"{key}={value}" for key, value in sorted(labels.items())) or "(no labels)",
+            "state": alert.get("state", ""),
+            "since_utc": _utc(alert.get("activeAt")),
+            "summary": (alert.get("annotations") or {}).get("summary", ""),
+        })
+    return pd.DataFrame(rows, columns=["instance", "state", "since_utc", "summary"])
 
 
 class EnvironmentNotReady(RuntimeError):
@@ -165,6 +205,11 @@ class ObservabilityLab:
     def demo_url(self) -> str:
         """The demo storefront on this host."""
         return f"http://127.0.0.1:{env.DEMO_PORT}"
+
+    @property
+    def mailpit_url(self) -> str:
+        """The Mailpit inbox on this host, which receives every email that Grafana sends."""
+        return f"http://127.0.0.1:{env.MAILPIT_PORT}"
 
     def sql(
         self,
@@ -327,6 +372,139 @@ class ObservabilityLab:
         ))
         return pd.Series(totals, name="rows")
 
+    def _read(self, url: str, service: str, hint: str) -> str:
+        """GET a page from Grafana or Mailpit; stop with a card when the service does not answer."""
+        try:
+            with urllib.request.urlopen(url, timeout=10) as response:
+                return response.read().decode("utf-8")
+        except (OSError, http.client.HTTPException) as error:
+            self._failure(f"{service} does not answer", f"Could not read {url} ({error}). {hint}")
+            raise EnvironmentNotReady(f"{service} does not answer.")
+
+    def _no_rule(self, rule: str) -> None:
+        self._failure(
+            f"Grafana has no alert rule named {rule!r}",
+            "Create the rule in Grafana (Alerting > Alert rules > New alert rule), save it with exactly "
+            "this name, then rerun this cell.",
+        )
+        raise EnvironmentNotReady(f"Grafana has no alert rule named {rule!r}.")
+
+    def _grafana_rule(self, rule: str) -> dict:
+        """The rule named ``rule`` in Grafana's rules API, with the instances of its last evaluation."""
+        data = json.loads(self._read(self.grafana_url + GRAFANA_RULES_PATH, "Grafana", GRAFANA_HINT))
+        for group in data.get("data", {}).get("groups", []):
+            for found in group.get("rules", []):
+                if found.get("name") == rule:
+                    return found
+        self._no_rule(rule)
+
+    def alert_instances(self, rule: str) -> pd.DataFrame:
+        """Show the instances of a Grafana alert rule: their labels, states, and summaries.
+
+        Grafana evaluates the rule on its own schedule. This reads the result of the
+        last evaluation from Grafana's rules API; the request is shown first, so that
+        it can be repeated with curl.
+        """
+        url = self.grafana_url + GRAFANA_RULES_PATH
+        show_sql(f"Read the state of the rule {rule!r} from Grafana's rules API", f'curl -s "{url}"')
+        found = self._grafana_rule(rule)
+        frame = _alert_frame(found)
+        if frame.empty:
+            card("Grafana has not evaluated the rule yet. It does so at the interval of the rule's "
+                 "evaluation group: rerun this cell after that.", "info", "No instances yet")
+            return frame
+        show_frame(f"{rule} · last evaluated at {_utc(found.get('lastEvaluation'))} UTC · "
+                   f"health {found.get('health')}", frame)
+        return frame
+
+    def wait_for_alert_state(self, rule: str, state: str, *, hint: str, timeout_seconds: int = 300) -> pd.DataFrame:
+        """Reread a Grafana alert rule every 5 seconds until all its instances are in ``state``.
+
+        Shows how the instances changed on the way, with the evaluation that
+        changed them, then the instances. ``hint`` says what to check when the
+        state does not come in time.
+        """
+        url = self.grafana_url + GRAFANA_RULES_PATH
+        show_sql(f"Wait until every instance of {rule!r} is {state} "
+                 f"(read every 5 seconds for up to {timeout_seconds} seconds)", f'curl -s "{url}"')
+        started = time.monotonic()
+        changes, last = [], None
+        while True:
+            found = self._grafana_rule(rule)
+            frame = _alert_frame(found)
+            elapsed = time.monotonic() - started
+            instances = "; ".join(f"{name}: {current}" for name, current in zip(frame["instance"], frame["state"]))
+            if instances != last:
+                changes.append({"after_seconds": round(elapsed), "evaluated_at_utc": _utc(found.get("lastEvaluation")),
+                                "instances": instances or "(none)"})
+                last = instances
+            done = not frame.empty and (frame["state"] == state).all()
+            if done or elapsed >= timeout_seconds:
+                break
+            time.sleep(5)
+        show_frame(f"How the instances of {rule} changed", pd.DataFrame(changes))
+        if done:
+            show_frame(f"{rule} · every instance is {state} after {elapsed:.0f} seconds", frame)
+            return frame
+        show_frame(rule, frame)
+        self._failure(f"{rule} is not {state} after {timeout_seconds} seconds", hint)
+        raise EnvironmentNotReady(f"{rule} did not become {state} within {timeout_seconds} seconds.")
+
+    def wait_for_email(
+        self,
+        subject: str,
+        *,
+        hint: str,
+        after: datetime | None = None,
+        timeout_seconds: int = 120,
+    ) -> dict:
+        """Wait until Mailpit has received an email whose subject contains ``subject``, then show it.
+
+        ``after``, a timezone-aware time, skips older emails, such as those of an
+        earlier run of the same steps. The text of the email is in a collapsed box.
+        """
+        url = f"{self.mailpit_url}/api/v1/messages"
+        show_sql(f"Wait for an email whose subject contains {subject!r} "
+                 f"(read every 3 seconds for up to {timeout_seconds} seconds)", f'curl -s "{url}"')
+        started = time.monotonic()
+        while True:
+            messages = json.loads(self._read(url, "Mailpit", MAILPIT_HINT)).get("messages") or []
+            match = next((message for message in messages if subject in message.get("Subject", "")
+                          and (after is None or _received(message) >= after)), None)
+            elapsed = time.monotonic() - started
+            if match is not None:
+                break
+            if elapsed >= timeout_seconds:
+                self._failure(f"No email about {subject!r} after {timeout_seconds} seconds", hint)
+                raise EnvironmentNotReady(f"no email whose subject contains {subject!r} arrived "
+                                          f"within {timeout_seconds} seconds.")
+            time.sleep(3)
+        detail = json.loads(self._read(f"{self.mailpit_url}/api/v1/message/{match['ID']}", "Mailpit", MAILPIT_HINT))
+        received = _received(match)
+        sender = match.get("From") or {}
+        show_frame(f"The email in Mailpit · found after {elapsed:.0f} seconds", pd.DataFrame([{
+            "received_utc": received.strftime("%Y-%m-%d %H:%M:%S"),
+            "from": f"{sender.get('Name', '')} <{sender.get('Address', '')}>",
+            "to": ", ".join(item.get("Address", "") for item in match.get("To") or []),
+            "subject": match.get("Subject", ""),
+        }]))
+        text = detail.get("Text", "")
+        show_log(f"The text of the email (in the inbox at {self.mailpit_url})", text)
+        return {"id": match["ID"], "subject": match.get("Subject", ""), "received": received, "text": text}
+
+    def export_alert_rule(self, rule: str) -> str:
+        """Show a Grafana alert rule as provisioning YAML, from Grafana's export API, and return it."""
+        url = f"{self.grafana_url}/api/v1/provisioning/alert-rules"
+        rules = json.loads(self._read(url, "Grafana", GRAFANA_HINT))
+        uid = next((found.get("uid") for found in rules if found.get("title") == rule), None)
+        if uid is None:
+            self._no_rule(rule)
+        export = f"{url}/{uid}/export?format=yaml"
+        show_sql(f"Export the rule {rule!r} as provisioning YAML", f'curl -s "{export}"')
+        text = self._read(export, "Grafana", GRAFANA_HINT)
+        show_log(f"The rule {rule!r} as provisioning YAML", text, opened=True)
+        return text
+
     def connect(
         self,
         *,
@@ -431,10 +609,11 @@ demo_compose() {{
             raise EnvironmentNotReady("a required host port is in use.")
 
     def prepare_environment(self) -> None:
-        """Check out the pinned DOG stack and start Doris, the OTel Collector, and Grafana."""
+        """Check out the pinned DOG stack and start Doris, the OTel Collector, Grafana, and Mailpit."""
         self.ensure_docker_ready()
         self._check_compose_version()
-        self._check_ports(CORE_PORTS, (env.DORIS_CONTAINER, env.COLLECTOR_CONTAINER, env.GRAFANA_CONTAINER))
+        self._check_ports(CORE_PORTS, (env.DORIS_CONTAINER, env.COLLECTOR_CONTAINER, env.GRAFANA_CONTAINER,
+                                       env.MAILPIT_CONTAINER))
         script = self._compose_script(r"""
 echo "[1/4] Prepare the local runtime directory"
 mkdir -p .runtime/doris-logs/fe .runtime/doris-logs/be
@@ -461,7 +640,8 @@ dog_compose ps
         self.sql("SELECT DATABASE() AS current_database", title="Current database")
         card(
             f"Grafana: {self.grafana_url}/a/velodb-doris-app (user admin, password admin). "
-            f"Doris: 127.0.0.1:{env.QUERY_PORT} for MySQL clients, {self.fe_http_url} for HTTP.",
+            f"Doris: 127.0.0.1:{env.QUERY_PORT} for MySQL clients, {self.fe_http_url} for HTTP. "
+            f"Mailpit, the inbox for Grafana's emails in Module 8: {self.mailpit_url}.",
             "ok",
             "The DOG stack is running",
         )
@@ -581,7 +761,7 @@ demo_compose ps
         again with the same data.
         """
         volumes = "" if keep_data else " --volumes"
-        collectors = " ".join(env.MODULE2_COLLECTORS)
+        containers = " ".join((*env.MODULE2_COLLECTORS, env.CPU_LOAD_CONTAINER))
         # Compose finds each project's containers, networks, and volumes by their labels,
         # so this also works after .runtime/ was deleted. The demo Collector and the
         # Module 2 collectors are attached to the doris-obs network: remove them first.
@@ -590,8 +770,8 @@ demo_compose ps
 echo "[1/3] Remove the OpenTelemetry demo"
 docker compose -p {env.DEMO_PROJECT} down
 
-echo "[2/3] Remove the Module 2 collectors"
-for name in {collectors}; do
+echo "[2/3] Remove the Module 2 collectors and the Module 8 CPU load"
+for name in {containers}; do
   if docker container inspect "$name" >/dev/null 2>&1; then
     docker rm -f "$name"
   fi
