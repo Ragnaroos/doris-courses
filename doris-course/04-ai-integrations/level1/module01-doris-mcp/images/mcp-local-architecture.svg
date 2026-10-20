@@ -1,0 +1,82 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="880" height="640" viewBox="0 0 880 640" role="img" aria-labelledby="title desc">
+  <title id="title">Local MCP responsibility boundary</title>
+  <desc id="desc">On your computer, an MCP Host contains an MCP Client, which starts the Apache Doris MCP Server as a child process and talks to it over standard input and output. The Server connects to the Doris sandbox on three loopback ports: 39030 for the FE MySQL protocol, 38030 for FE HTTP, and 38040 for BE HTTP. The only connection that leaves the computer goes from the Host to its model provider, and it carries prompts, tool results, and answers.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+    <marker id="arrow-out" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#b45309"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #0f172a; }
+    .title { font-size: 16px; font-weight: 700; }
+    .body { font-size: 13px; fill: #334155; }
+    .small { font-size: 12px; fill: #475569; }
+    .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; fill: #0f172a; }
+    .boundary { font-size: 13px; font-weight: 700; fill: #475569; letter-spacing: 0.5px; }
+    .cloud { font-size: 13px; fill: #7c2d12; }
+  </style>
+
+  <rect x="0" y="0" width="880" height="640" fill="#ffffff"/>
+
+  <!-- Your computer -->
+  <rect x="16" y="16" width="616" height="608" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="32" y="40" class="boundary">YOUR COMPUTER</text>
+
+  <!-- Host with its MCP Client -->
+  <rect x="40" y="56" width="568" height="190" rx="8" fill="#eef2ff" stroke="#6366f1" stroke-width="1.5"/>
+  <text x="58" y="82" class="title">MCP Host</text>
+  <text x="58" y="102" class="body">Claude Desktop, Cursor, VS Code with GitHub Copilot, or Codex</text>
+  <text x="58" y="122" class="body">Keeps the conversation, calls the model, and decides whether to request a tool</text>
+  <rect x="72" y="142" width="504" height="84" rx="6" fill="#ffffff" stroke="#6366f1" stroke-width="1.2"/>
+  <text x="90" y="166" class="title" style="font-size:15px">MCP Client, inside the Host</text>
+  <text x="90" y="186" class="body">Starts run-doris-mcp-local as a child process; one process per Host</text>
+  <text x="90" y="206" class="body">Sends tool calls and reads results over standard input and output</text>
+
+  <!-- stdio -->
+  <line x1="324" y1="226" x2="324" y2="290" stroke="#334155" stroke-width="2" marker-start="url(#arrow)" marker-end="url(#arrow)"/>
+  <text x="338" y="254" class="mono">stdio</text>
+  <text x="338" y="272" class="small">MCP messages; no network port</text>
+
+  <!-- MCP Server -->
+  <rect x="40" y="292" width="568" height="128" rx="8" fill="#ecfdf5" stroke="#059669" stroke-width="1.5"/>
+  <text x="58" y="318" class="title">Apache Doris MCP Server 1.0.0</text>
+  <text x="58" y="338" class="body">doris-mcp-server, started by run-doris-mcp-local with the route and the</text>
+  <text x="58" y="356" class="body">mcp_reader password from .env.mcp.local</text>
+  <text x="58" y="378" class="body">Publishes tool schemas, accepts only bounded read-only requests,</text>
+  <text x="58" y="396" class="body">and returns results with their source, warnings, and limits</text>
+
+  <!-- Three loopback routes -->
+  <line x1="130" y1="420" x2="130" y2="514" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="142" y="452" class="mono">127.0.0.1:39030</text>
+  <text x="142" y="470" class="small">FE MySQL protocol:</text>
+  <text x="142" y="486" class="small">metadata and SQL</text>
+
+  <line x1="324" y1="420" x2="324" y2="514" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="336" y="452" class="mono">127.0.0.1:38030</text>
+  <text x="336" y="470" class="small">FE HTTP</text>
+
+  <line x1="490" y1="420" x2="490" y2="514" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="502" y="452" class="mono">127.0.0.1:38040</text>
+  <text x="502" y="470" class="small">BE HTTP:</text>
+  <text x="502" y="486" class="small">memory metrics</text>
+
+  <!-- Doris -->
+  <rect x="40" y="516" width="568" height="92" rx="8" fill="#fff7ed" stroke="#ea580c" stroke-width="1.5"/>
+  <text x="58" y="542" class="title">Apache Doris 4.1.3 sandbox: container doris-ai, one FE and one BE</text>
+  <text x="58" y="564" class="body">Checks what mcp_reader may read, runs the metadata and SQL requests,</text>
+  <text x="58" y="584" class="body">and reports the metrics: the source of every fact in the answer</text>
+
+  <!-- Model provider outside the computer -->
+  <rect x="664" y="96" width="200" height="110" rx="10" fill="#fffbeb" stroke="#b45309" stroke-width="1.5"/>
+  <text x="680" y="124" class="title" style="fill:#7c2d12">Model provider</text>
+  <text x="680" y="146" class="cloud">The cloud service that</text>
+  <text x="680" y="164" class="cloud">your Host uses for its</text>
+  <text x="680" y="182" class="cloud">model</text>
+  <line x1="608" y1="110" x2="664" y2="128" stroke="#b45309" stroke-width="2" marker-start="url(#arrow-out)" marker-end="url(#arrow-out)"/>
+  <text x="652" y="232" class="small" style="fill:#7c2d12">Prompts, tool results,</text>
+  <text x="652" y="250" class="small" style="fill:#7c2d12">and answers leave the</text>
+  <text x="652" y="268" class="small" style="fill:#7c2d12">computer here</text>
+</svg>

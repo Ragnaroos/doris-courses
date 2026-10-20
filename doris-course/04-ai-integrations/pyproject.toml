@@ -1,0 +1,23 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "doris-ai-integrations-course"
+version = "0.1.0"
+description = "Shared runtime support for the Apache Doris AI Integrations course"
+requires-python = ">=3.12,<3.14"
+dependencies = [
+  "doris-mcp-server==1.0.0",
+  "ipykernel==6.29.5",
+  "ipywidgets>=8.1,<9",
+  "jupyterlab==4.4.10",
+  "mcp==2.0.1",
+  "nbformat==5.10.4",
+  "pandas==2.2.3",
+  "PyMySQL==1.1.1",
+  "PyYAML>=6.0,<7",
+]
+
+[tool.setuptools.packages.find]
+include = ["doris_course*"]

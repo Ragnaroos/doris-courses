@@ -74,7 +74,7 @@ FE `doris-0.0.0-ad8644154c3`（19030），BE `doris-0.0.0-8bafeb1e4c4`（HTTP 18
 不是目标 4.1.3 发布镜像的兼容性验收，也不是性能测试。目标表暂用单副本、2 桶 Duplicate Key，
 用途是保真导入，不代表最终数仓表设计。
 
-本机生成文件保留在 `/mnt/disk1/chenjunwei/doris_build/wwi-validation-itiJM02K/`：
+本机生成文件保留在作者的构建机上（产物目录）：
 
 - `wwi.bak`、`MICROSOFT-MIT-LICENSE.txt`：下载原件。
 - 10 个 Parquet：待评估的课程文件，不上传、不提交 Git。
