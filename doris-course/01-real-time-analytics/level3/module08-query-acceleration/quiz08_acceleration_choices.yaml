@@ -11,15 +11,15 @@ questions:
       revenue. The definition may change centrally, but the team does not want
       another stored copy or a refresh process. Which object directly fits?
     options:
-      - id: a
+      - id: regular_view
         text: "A regular View that stores the shared SQL definition."
-      - id: b
+      - id: manual_summary_table
         text: "A manually populated summary table that stores precomputed rows."
-      - id: c
+      - id: synchronous_mv
         text: "A synchronous Materialized View (MV) maintained with base-table writes."
-      - id: d
+      - id: asynchronous_mv
         text: "An asynchronous Materialized View refreshed by a scheduled task."
-    answer: a
+    answer: regular_view
     explanation: >-
       A regular View centralizes the SQL definition and is normally expanded to
       its underlying tables when queried; it is not a saved result cache. The
@@ -36,15 +36,15 @@ questions:
       team wants to avoid adding maintenance work to every fact-table write.
       Which starting choice best matches these conditions?
     options:
-      - id: a
+      - id: synchronous_mv
         text: "A synchronous Materialized View (MV), because every committed change must update any multi-table result immediately."
-      - id: b
+      - id: asynchronous_mv_with_policy
         text: "An asynchronous Materialized View (MV) with a refresh policy that stays within the five-minute freshness limit."
-      - id: c
+      - id: regular_view
         text: "A regular View, because naming the join once stores the joined result."
-      - id: d
+      - id: manual_summary
         text: "A manually populated summary with no refresh contract, because its rows will remain current automatically."
-    answer: b
+    answer: asynchronous_mv_with_policy
     explanation: >-
       An asynchronous MV supports the multi-table stored result and makes the
       accepted refresh lag explicit. A synchronous MV has a narrower supported
@@ -61,15 +61,15 @@ questions:
       event_count and revenue_sum. A new report needs daily revenue_sum and
       COUNT(DISTINCT buyer_id) by region. What can the stored summary answer?
     options:
-      - id: a
+      - id: both_measures
         text: "Both measures, because any hourly summary can always be rolled up to a day."
-      - id: b
+      - id: daily_revenue_only
         text: "Daily revenue_sum only; region and an additive revenue measure are preserved, but no mergeable distinct-buyer state was stored."
-      - id: c
+      - id: distinct_buyers_only
         text: "Distinct buyers only, because event_count can be treated as the buyer identifier."
-      - id: d
+      - id: neither_measure
         text: "Neither measure, because a materialized result can answer only its exact original GROUP BY."
-    answer: b
+    answer: daily_revenue_only
     explanation: >-
       Hourly revenue_sum values are additive and can be summed to the retained
       daily-by-region grain. Distinct buyer counts cannot be reconstructed from
@@ -86,15 +86,15 @@ questions:
       is not a useful leading Prefix Index column, and only a tiny fraction of
       rows match. Which additional structure is the most direct starting point?
     options:
-      - id: a
+      - id: inverted_index_and_comparison
         text: "A non-tokenized inverted index on product_id, followed by a controlled result and scan-work comparison."
-      - id: b
+      - id: ngram_bloomfilter
         text: "An NGram BloomFilter index, because exact numeric equality is a substring-search problem."
-      - id: c
+      - id: stored_runtime_filter
         text: "A Join Runtime Filter stored permanently with the table."
-      - id: d
+      - id: no_evaluation_needed
         text: "No evaluation is needed: merely declaring any secondary index guarantees every query will use it."
-    answer: a
+    answer: inverted_index_and_comparison
     explanation: >-
       A non-tokenized inverted index directly maps the selective numeric value
       to candidate Row IDs within each Segment and matches the equality lookup.
@@ -114,15 +114,15 @@ questions:
       filtered-row counter inside that scan, and indexed and unindexed versions
       return identical rows. Which interpretation is justified?
     options:
-      - id: a
+      - id: combine_three_sources
         text: "Metadata proves the index exists; the Profile shows index filtering during this execution; result equality checks the answer. The base scan label alone does not disprove secondary-index use."
-      - id: b
+      - id: scan_label_disproves_index
         text: "The base scan label proves the secondary index was ignored, so the Profile counter must be only a planner estimate."
-      - id: c
+      - id: equal_results_prove_reduction
         text: "Identical query results prove that the index reduced the number of scanned rows."
-      - id: d
+      - id: counter_proves_every_case
         text: "A nonzero runtime counter proves the index will reduce work for every predicate and data distribution."
-    answer: a
+    answer: combine_three_sources
     explanation: >-
       DDL or metadata establishes existence, while the Query Profile supplies
       runtime evidence for this execution and operator scope. The business rows
@@ -140,15 +140,15 @@ questions:
       adds significant storage and refresh load, and the business still
       requires near-current data. What is the sound decision from these facts?
     options:
-      - id: a
+      - id: drop_the_mv
         text: "Do not keep the MV on the current evidence; its infrequent read benefit does not justify the measured refresh, storage, and freshness cost."
-      - id: b
+      - id: keep_after_one_faster_run
         text: "Keep the MV because any lower elapsed time in one run proves a durable production improvement."
-      - id: c
+      - id: refresh_less_often
         text: "Refresh less often without consulting the freshness requirement, because refresh cost is the only decision variable."
-      - id: d
+      - id: replace_base_table
         text: "Replace the base table with the MV so that write maintenance and storage costs disappear."
-    answer: a
+    answer: drop_the_mv
     explanation: >-
       The existing report already meets its objective and runs rarely, while
       the candidate adds recurring refresh work, storage, and freshness risk to

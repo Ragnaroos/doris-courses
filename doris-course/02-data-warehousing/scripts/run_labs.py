@@ -7,7 +7,7 @@ import re
 import sys
 from pathlib import Path
 
-ROOT = Path(__file__).resolve().parents[3] / "doris-course/02-data-warehousing"
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 CORE = [
     "module01-introduction",
@@ -76,7 +76,7 @@ def main():
             execute_notebook(ROOT / "level1/extensions" / name)
     print("PASS: selected notebook code cells. This does not validate the browser UI.")
     if not args.iceberg:
-        print("NOT RUN: main Lab 4 Iceberg integration. See maintenance/02-data-warehousing/integration-backlog.md.")
+        print("NOT RUN: main Lab 4 Iceberg integration. Add --iceberg to run it.")
 
 
 if __name__ == "__main__":

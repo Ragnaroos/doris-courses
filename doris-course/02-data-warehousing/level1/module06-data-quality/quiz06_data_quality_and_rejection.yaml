@@ -5,69 +5,69 @@ questions:
   objective: Distinguish field type validation from business quality rules.
   prompt: A new-order input has order_amount=-15.00. It parses as DECIMAL, but the agreed rule for this batch requires a nonnegative amount. How should the input be handled?
   options:
-  - id: a
-    text: A. Accept it because a valid DECIMAL value satisfies the table's numeric field type
-  - id: b
-    text: B. Reject it under the amount rule and preserve the original input and rejection reason
-  - id: c
-    text: C. Replace the amount with zero during parsing and accept it without recording the change
-  - id: d
-    text: D. Remove the minus sign as a formatting correction and accept 15.00 without source confirmation
-  answer: b
-  explanation: "A: DECIMAL accepts negative values, but type validity does not satisfy the batch's nonnegative business rule. B: Correct. Preserve the raw negative amount and explain why the record was rejected. C: Silently replacing a value destroys the evidence needed to repair it correctly. D: Removing the sign invents a different business amount without confirmation from the source."
+  - id: accept_valid_decimal
+    text: Accept it because a valid DECIMAL value satisfies the table's numeric field type
+  - id: reject_and_preserve
+    text: Reject it under the amount rule and preserve the original input and rejection reason
+  - id: replace_with_zero
+    text: Replace the amount with zero during parsing and accept it without recording the change
+  - id: remove_minus_sign
+    text: Remove the minus sign as a formatting correction and accept 15.00 without source confirmation
+  answer: reject_and_preserve
+  explanation: "Reject the input under the amount rule, preserving the raw negative amount and the reason for the rejection. DECIMAL accepts negative values, but type validity does not satisfy the batch's nonnegative business rule. Silently replacing the value with zero destroys the evidence needed to repair it correctly. Removing the minus sign invents a different business amount without confirmation from the source."
 - id: q2
   objective: Preserve input identifiers and raw fields to trace every rejected record.
   prompt: Two weeks after a load, support asks why one specific order input was rejected, but the temporary load error URL has expired. What evidence should the warehouse have retained?
   options:
-  - id: a
-    text: A. Keep only the load error URL and consult temporary error details when needed
-  - id: b
-    text: B. Count only the total rejections each time and delete the details to save space
-  - id: c
-    text: C. Preserve input_id, raw fields, and rejection reasons so each record can be linked back to the original row
-  - id: d
-    text: D. Keep only cleaned fields and error types, discarding the original values
-  answer: c
-  explanation: "A: Temporary error details help troubleshooting but cannot replace long-term, complete business rejection records. B: A count cannot explain which input was rejected or why. C: Correct. Stable input identifiers and original evidence support tracing, repair, and reprocessing. D: Cleaning changes the original information; keeping only modified values may leave the original failure unexplained."
+  - id: error_url_only
+    text: Keep only the load error URL and consult temporary error details when needed
+  - id: rejection_counts_only
+    text: Count only the total rejections each time and delete the details to save space
+  - id: input_id_raw_fields_reasons
+    text: Preserve input_id, raw fields, and rejection reasons so each record can be linked back to the original row
+  - id: cleaned_fields_only
+    text: Keep only cleaned fields and error types, discarding the original values
+  answer: input_id_raw_fields_reasons
+  explanation: "Stable input identifiers, raw fields, and rejection reasons support tracing, repair, and reprocessing. Temporary error details help troubleshooting but cannot replace long-term, complete business rejection records. A count cannot explain which input was rejected or why. Cleaning changes the original information, and keeping only modified values may leave the original failure unexplained."
 - id: q3
   objective: Use an independent customer dimension and explicit rules to route accepted and rejected data.
   prompt: You receive 50 order rows. Customer IDs in 2 rows do not exist in the independent customer dimension; all others meet the rules. Customer references must be valid. How should the rows be routed?
   options:
-  - id: a
-    text: A. Preserve all 50 raw rows, write 48 accepted records, and write 2 rejected records with reasons
-  - id: b
-    text: B. Extract customer IDs from these 50 rows to fill the dimension, then classify all inputs as accepted
-  - id: c
-    text: C. Check only that customer IDs can be converted to integers and write all 50 rows to the accepted table
-  - id: d
-    text: D. Write all 50 rows to the accepted table and also copy the 2 suspicious rows to the rejected table
-  answer: a
-  explanation: "A: Correct. An independent dimension validates references, and accepted and rejected groups are mutually exclusive and cover all inputs. B: Using the data being checked to prove its own validity bypasses the rule. C: A correct type does not mean a valid reference. D: Rejected data still enters the accepted table and contaminates downstream metrics."
+  - id: route_48_and_2
+    text: Preserve all 50 raw rows, write 48 accepted records, and write 2 rejected records with reasons
+  - id: fill_dimension_from_input
+    text: Extract customer IDs from these 50 rows to fill the dimension, then classify all inputs as accepted
+  - id: check_types_only
+    text: Check only that customer IDs can be converted to integers and write all 50 rows to the accepted table
+  - id: accept_all_and_copy
+    text: Write all 50 rows to the accepted table and also copy the 2 suspicious rows to the rejected table
+  answer: route_48_and_2
+  explanation: "The independent dimension validates the references, and the accepted and rejected groups are mutually exclusive and together cover all 50 inputs. Filling the dimension from the rows being checked uses the data to prove its own validity, which bypasses the rule. A customer ID that converts to an integer is not necessarily a valid reference. Writing all 50 rows to the accepted table lets the rejected rows contaminate downstream metrics, even if they are also copied to the rejected table."
 - id: q4
   objective: Check input coverage, business uniqueness, amounts, and row-by-row results together.
   prompt: A new accepted table has four rows totaling 100, exactly matching the source's row count and total. A reviewer suspects one order was omitted and another loaded twice with the same amount. What additional evidence is needed?
   options:
-  - id: a
-    text: A. None; matching row count and total prove that every source order appears once
-  - id: b
-    text: B. Sort by order_id; ordering the rows will restore the omitted order and remove the duplicate
-  - id: c
-    text: C. Check only that order IDs are unique; equal amounts and valid customer references follow automatically
-  - id: d
-    text: D. Compare source and target order IDs and fields row by row, including amounts, statuses, and customer references
-  answer: d
-  explanation: "A: An omitted order and a repeated order of the same amount can leave both aggregate checks unchanged. B: Sorting only changes display order. C: Unique target IDs would not reveal a missing source ID or prove other fields match. D: Correct. Independent row-by-row checks reveal missing, repeated, or altered records hidden by matching totals."
+  - id: totals_are_enough
+    text: None; matching row count and total prove that every source order appears once
+  - id: sort_by_order_id
+    text: Sort by order_id; ordering the rows will restore the omitted order and remove the duplicate
+  - id: unique_ids_only
+    text: Check only that order IDs are unique; equal amounts and valid customer references follow automatically
+  - id: compare_row_by_row
+    text: Compare source and target order IDs and fields row by row, including amounts, statuses, and customer references
+  answer: compare_row_by_row
+  explanation: "Independent row-by-row checks of order IDs and fields reveal missing, repeated, or altered records that matching totals hide. An omitted order and a repeated order of the same amount can leave both the row count and the total unchanged. Sorting only changes the display order. Unique target IDs would not reveal a missing source ID or prove that the other fields match."
 - id: q5
   objective: Use known errors to verify that checks fail, and distinguish offline time criteria from actual freshness.
   prompt: A tester deliberately repeats one source order and reruns the validation suite; another check compares against a fixed historical cutoff. What outcome would show that these checks mean what the team claims?
   options:
-  - id: a
-    text: A. After adding duplicates, change the expected row count so the check continues to pass
-  - id: b
-    text: B. Treat a successful fixed-cutoff check as proof that current ingestion latency is zero
-  - id: c
-    text: C. Adding a known duplicate should fail and restoring the data should pass; a fixed-time check does not represent real-time freshness
-  - id: d
-    text: D. Run only normal inputs and assume that all anomalies can be detected once they pass
-  answer: c
-  explanation: "A: Adjusting expectations to accommodate incorrect output prevents checks from detecting problems. B: A fixed sample time and current end-to-end ingestion latency are different metrics. C: Correct. Known errors test whether rules detect the specified problems; actual freshness also requires event, ingestion, and observation times. D: Passing normal samples does not prove that error paths work; inject targeted errors."
+  - id: adjust_expectation
+    text: After adding duplicates, change the expected row count so the check continues to pass
+  - id: cutoff_proves_freshness
+    text: Treat a successful fixed-cutoff check as proof that current ingestion latency is zero
+  - id: fail_then_pass
+    text: Adding a known duplicate should fail and restoring the data should pass; a fixed-time check does not represent real-time freshness
+  - id: normal_inputs_only
+    text: Run only normal inputs and assume that all anomalies can be detected once they pass
+  answer: fail_then_pass
+  explanation: "Known errors test whether the rules detect the problems they claim to detect, and actual freshness also requires event, ingestion, and observation times. Adjusting expectations to accommodate incorrect output prevents the checks from detecting problems. A fixed sample cutoff and current end-to-end ingestion latency are different metrics. Passing normal samples does not prove that the error paths work; inject targeted errors."

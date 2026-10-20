@@ -5,69 +5,69 @@ questions:
   objective: "Choose ingestion paths for local files, object storage, message streams, and database changes."
   prompt: "A finite comma-separated values (CSV) file arrives on the course host each night, while a Kafka topic keeps receiving events. Which ingestion paths match these different schedules?"
   options:
-  - id: a
-    text: "A. Use Routine Load for CSV; export Kafka messages to files and consider continuous ingestion complete"
-  - id: b
-    text: "B. Use Stream Load for CSV; use Stream Load once for Kafka and wait for automatic consumption"
-  - id: c
-    text: "C. Create an External Catalog for both CSV and Kafka and continuously load through the Catalog"
-  - id: d
-    text: "D. Use Stream Load for CSV and Routine Load for continuous Kafka consumption"
-  answer: d
-  explanation: "A: Routine Load in this course targets Kafka; exporting messages to a one-off file does not establish continuous consumption. B: One Stream Load is one pushed batch, not an automatically created Kafka consumption job. C: A Catalog provides external access, not a universal continuous load job for every source. D: Correct. The client pushes local batches, while a continuous job maintains Kafka consumption progress."
+  - id: routine_load_for_csv
+    text: "Use Routine Load for CSV; export Kafka messages to files and consider continuous ingestion complete"
+  - id: stream_load_for_kafka
+    text: "Use Stream Load for CSV; use Stream Load once for Kafka and wait for automatic consumption"
+  - id: catalog_for_both
+    text: "Create an External Catalog for both CSV and Kafka and continuously load through the Catalog"
+  - id: stream_load_and_routine_load
+    text: "Use Stream Load for CSV and Routine Load for continuous Kafka consumption"
+  answer: stream_load_and_routine_load
+  explanation: "With Stream Load the client pushes each local batch, while a Routine Load job maintains Kafka consumption progress continuously. Routine Load in this course targets Kafka, and exporting messages to a one-off file does not establish continuous consumption. One Stream Load is one pushed batch, not an automatically created Kafka consumption job. A Catalog provides external access, not a universal continuous load job for every source."
 - id: q2
   objective: "Explain the roles of CSV column mappings, Parquet fields, and default values."
   prompt: "A headerless CSV lists order_id, customer_id, amount, but the target table's numeric columns are in a different order. A Wide World Importers (WWI) Parquet file has named fields, and a missing payment state has no verified value. What prevents a type-valid but incorrect load?"
   options:
-  - id: a
-    text: "A. Map CSV positions explicitly, align Parquet fields with the target schema, and use a payment default only when the business rule supports it"
-  - id: b
-    text: "B. Accept the CSV load if numeric types parse; compatible types prove the positions have the intended meanings"
-  - id: c
-    text: "C. Ignore Parquet field names and mappings; every Parquet value always follows the target table's physical column order"
-  - id: d
-    text: "D. Default the missing payment state to PAID; a populated field is sufficient evidence that payment occurred"
-  answer: a
-  explanation: "A: Correct. A headerless CSV needs an explicit positional mapping; Parquet carries field schema that must be aligned with the target, and defaults require a business basis. B: Numeric types do not reveal which source position means customer or amount. C: Parquet field names and schema matter; physical target-column order is not proof of semantic alignment. D: A default cannot invent a payment fact absent from the source."
+  - id: map_and_align_explicitly
+    text: "Map CSV positions explicitly, align Parquet fields with the target schema, and use a payment default only when the business rule supports it"
+  - id: trust_parsed_types
+    text: "Accept the CSV load if numeric types parse; compatible types prove the positions have the intended meanings"
+  - id: ignore_parquet_names
+    text: "Ignore Parquet field names and mappings; every Parquet value always follows the target table's physical column order"
+  - id: default_to_paid
+    text: "Default the missing payment state to PAID; a populated field is sufficient evidence that payment occurred"
+  answer: map_and_align_explicitly
+  explanation: "A headerless CSV needs an explicit positional mapping, Parquet carries a field schema that must be aligned with the target, and a default needs a business basis. Numeric types that parse do not reveal which source position means customer or amount. Parquet field names and schema matter; the physical order of the target columns is not proof of semantic alignment. A PAID default cannot invent a payment fact that is absent from the source."
 - id: q3
   objective: "Judge correctness using load responses, loaded row counts, relationships, and amounts."
   prompt: "A 100-row load returns Hypertext Transfer Protocol (HTTP) 200; its JavaScript Object Notation (JSON) result says Status=Success, NumberLoadedRows=98, and NumberFilteredRows=2. The task requires retaining all orders. What should you do?"
   options:
-  - id: a
-    text: "A. Deliver the report based on Success; the database has handled the two filtered rows"
-  - id: b
-    text: "B. Investigate filtering and missing orders, repair according to the retry strategy, then verify"
-  - id: c
-    text: "C. Immediately resend the entire file with a new label, ignoring the 98 rows already written"
-  - id: d
-    text: "D. Complete business verification as long as amounts from the existing 98 rows can be aggregated"
-  answer: b
-  explanation: "A: A successful load job does not establish business completeness. B: Correct. Locate filtered rows and verify target results, then choose recovery through backfilling, rebuilding, or another appropriate method. C: A new label creates a new batch and may append already-written data again in a detail table. D: Aggregation does not prove order completeness or correct customer references."
+  - id: deliver_on_success
+    text: "Deliver the report based on Success; the database has handled the two filtered rows"
+  - id: investigate_and_repair
+    text: "Investigate filtering and missing orders, repair according to the retry strategy, then verify"
+  - id: resend_with_new_label
+    text: "Immediately resend the entire file with a new label, ignoring the 98 rows already written"
+  - id: aggregate_loaded_rows
+    text: "Complete business verification as long as amounts from the existing 98 rows can be aggregated"
+  answer: investigate_and_repair
+  explanation: "Locate the filtered rows and verify the target results, then choose recovery through backfilling, rebuilding, or another appropriate method. A successful load job does not establish business completeness. A new label creates a new batch and may append the 98 already-written rows again in a detail table. Aggregating the loaded rows does not prove order completeness or correct customer references."
 - id: q4
   objective: "Distinguish load-batch retries, business-event deduplication, and continuous-job recovery."
   prompt: "In this course's off_mode loading, the result of a file request is uncertain. How should batch retries differ from business deduplication?"
   options:
-  - id: a
-    text: "A. Generate a new label and resend the same file; avoiding conflicts with the original request guarantees no duplicates"
-  - id: b
-    text: "B. Permanently submit different files with the same label so it automatically deduplicates all business events"
-  - id: c
-    text: "C. Retain batch identity within the label's retention period and check the original result; use separate stable keys and versions for business events"
-  - id: d
-    text: "D. Once Kafka offsets advance, assume the current order state and other tables are all correctly updated"
-  answer: c
-  explanation: "A: A new label may append the same batch again; confirm the original transaction state first. B: Labels have a retention period and identify load batches, not universal business deduplication keys for different files. C: Correct. Batch identity, business-event identity, and recovery position have distinct roles; cases such as Publish Timeout require checking the original result first. D: Consumption progress cannot replace out-of-order version resolution, business verification, or cross-table recovery checks."
+  - id: new_label_resend
+    text: "Generate a new label and resend the same file; avoiding conflicts with the original request guarantees no duplicates"
+  - id: same_label_for_all_files
+    text: "Permanently submit different files with the same label so it automatically deduplicates all business events"
+  - id: batch_and_business_identity
+    text: "Retain batch identity within the label's retention period and check the original result; use separate stable keys and versions for business events"
+  - id: trust_kafka_offsets
+    text: "Once Kafka offsets advance, assume the current order state and other tables are all correctly updated"
+  answer: batch_and_business_identity
+  explanation: "Batch identity, business-event identity, and recovery position have distinct roles; cases such as Publish Timeout require checking the original result first. A new label may append the same batch again, so confirm the original transaction state before resending. Labels have a retention period and identify load batches; they are not universal business deduplication keys for different files. Advancing Kafka offsets cannot replace out-of-order version resolution, business verification, or cross-table recovery checks."
 - id: q5
   objective: "Distinguish the grain and measurement definitions of WWI historical orders, account receipts, and new orders simulated for the course."
   prompt: "An analyst wants one per-order sales series from WWI order lines, customer-account receipts, and generated course orders. Several lines can belong to one order, receipts are not allocated to individual orders, and the generated orders are simulations. Which treatment preserves the sources' meanings?"
   options:
-  - id: a
-    text: "A. Every order line has an order ID, so line counts can directly serve as order counts"
-  - id: b
-    text: "B. Customer account receipts are negative, so they can be counted directly as order refunds"
-  - id: c
-    text: "C. Simulated orders use WWI customers and products, so their payments are also real history"
-  - id: d
-    text: "D. Aggregate lines by order, do not force account receipts into per-order allocations, and mark simulated sources separately"
-  answer: d
-  explanation: "A: An order may have multiple product lines, so row counts must be interpreted at their actual grain. B: Negative receipts in this dataset represent account receipts, not evidence of per-order refunds. C: Referencing real sample dimensions does not turn generated payments, refunds, and regions into original historical facts. D: Correct. Identify the grain and source of orders, account transactions, and COURSE_SIMULATION separately to avoid mixing measurement definitions."
+  - id: lines_as_orders
+    text: "Every order line has an order ID, so line counts can directly serve as order counts"
+  - id: receipts_as_refunds
+    text: "Customer account receipts are negative, so they can be counted directly as order refunds"
+  - id: simulation_as_history
+    text: "Simulated orders use WWI customers and products, so their payments are also real history"
+  - id: respect_each_grain
+    text: "Aggregate lines by order, do not force account receipts into per-order allocations, and mark simulated sources separately"
+  answer: respect_each_grain
+  explanation: "Identify the grain and source of orders, account transactions, and COURSE_SIMULATION separately to avoid mixing measurement definitions. An order may have several product lines, so line counts must be interpreted at their actual grain. Negative receipts in this dataset represent account receipts, not evidence of per-order refunds. Referencing real sample customers and products does not turn generated payments, refunds, and regions into original historical facts."

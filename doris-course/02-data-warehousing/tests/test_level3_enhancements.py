@@ -6,7 +6,7 @@ from pathlib import Path
 from unittest.mock import Mock, patch
 from botocore.exceptions import ClientError
 
-ROOT=Path(__file__).resolve().parents[3]/'doris-course/02-data-warehousing'
+ROOT=Path(__file__).resolve().parents[1]
 sys.path.insert(0,str(ROOT))
 from dw_course import backup, operations
 

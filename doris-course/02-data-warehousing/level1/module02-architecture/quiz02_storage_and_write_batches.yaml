@@ -5,69 +5,69 @@ questions:
   objective: "Trace a query to explain FE planning and BE execution responsibilities."
   prompt: "A client receives an EXPLAIN plan, but executing the order query fails while a Backend (BE) scan fragment runs. What does this show about the Frontend (FE) and BE stages?"
   options:
-  - id: a
-    text: "A. BE generated the plan successfully; FE failed while scanning the stored order rows"
-  - id: b
-    text: "B. EXPLAIN succeeded, so every BE scan must have completed and the failure is only in the client"
-  - id: c
-    text: "C. FE planned the query, but Compaction must finish before any BE scan can begin"
-  - id: d
-    text: "D. FE could plan the query, but BE execution is a later stage that may still fail"
-  answer: d
-  explanation: "A: FE plans the query, while BE scans the data; the answer swaps their roles. B: EXPLAIN shows a plan, not proof that a BE completed its scan. C: Background Compaction is not a prerequisite for running a query. D: Correct. FE planning can succeed even when a later BE fragment fails during execution."
+  - id: roles_swapped
+    text: "BE generated the plan successfully; FE failed while scanning the stored order rows"
+  - id: explain_proves_scans
+    text: "EXPLAIN succeeded, so every BE scan must have completed and the failure is only in the client"
+  - id: compaction_before_scan
+    text: "FE planned the query, but Compaction must finish before any BE scan can begin"
+  - id: planning_then_execution
+    text: "FE could plan the query, but BE execution is a later stage that may still fail"
+  answer: planning_then_execution
+  explanation: "FE planning can succeed even when a later BE fragment fails during execution. FE plans the query and BE scans the data, so a description in which BE plans and FE scans swaps their roles. EXPLAIN shows a plan, not proof that a BE completed its scan. Background Compaction is not a prerequisite for running a query."
 - id: q2
   objective: "Explain the hierarchy of Table, Partition, Tablet, Rowset, and Segment."
   prompt: "A new table has only a base index, three partitions, and five buckets per partition. Excluding replicas, what layout should an operator expect?"
   options:
-  - id: a
-    text: "A. Five Tablets in total, shared by all three partitions; Tablets contain Rowsets"
-  - id: b
-    text: "B. Fifteen Tablets in total; Tablets contain Rowsets, and Rowsets contain Segments"
-  - id: c
-    text: "C. Three Tablets in total; the five buckets in each partition are five replicas"
-  - id: d
-    text: "D. Fifteen Tablets in total; each Tablet always has exactly one Rowset and one Segment"
-  answer: b
-  explanation: "A: Each partition has its own buckets; Tablets are not shared across these partitions. B: Correct. With only a base index and excluding replicas, the Tablet count is 3×5. C: Buckets describe shards, while replicas describe copies of the same shard. D: Rowset and Segment counts change with writes and Compaction; they are not fixed at one each."
+  - id: five_shared_tablets
+    text: "Five Tablets in total, shared by all three partitions; Tablets contain Rowsets"
+  - id: fifteen_tablets
+    text: "Fifteen Tablets in total; Tablets contain Rowsets, and Rowsets contain Segments"
+  - id: three_tablets
+    text: "Three Tablets in total; the five buckets in each partition are five replicas"
+  - id: fifteen_tablets_one_rowset
+    text: "Fifteen Tablets in total; each Tablet always has exactly one Rowset and one Segment"
+  answer: fifteen_tablets
+  explanation: "With only a base index and excluding replicas, the Tablet count is 3×5 = 15; Tablets contain Rowsets, and Rowsets contain Segments. Each partition has its own buckets, so Tablets are not shared across partitions. Buckets describe shards, while replicas describe copies of the same shard. Rowset and Segment counts change with writes and Compaction; they are not fixed at one each."
 - id: q3
   objective: "Explain the relationship between write batches, data visibility, and background Compaction."
   prompt: "A load transaction has been published and a SELECT already returns its rows, but background Compaction is still pending. Should the dashboard wait for Compaction before reading those rows?"
   options:
-  - id: a
-    text: "A. Yes; published rows cannot be queried until new files are merged with old files"
-  - id: b
-    text: "B. No; the HTTP 200 response alone proves every row in the load was published"
-  - id: c
-    text: "C. No; the published transaction is queryable without waiting for physical Compaction"
-  - id: d
-    text: "D. Yes; the Segment must first become the only file in its Tablet"
-  answer: c
-  explanation: "A: Queries can read multiple published Rowsets before background Compaction finishes. B: A transport-level response alone does not establish row-level completeness; this scenario supplies publication and SELECT evidence. C: Correct. Visibility follows publication, not the completion of physical Compaction. D: A Tablet may contain multiple Rowsets and Segments, and their file count does not decide transaction visibility."
+  - id: wait_for_merge
+    text: "Yes; published rows cannot be queried until new files are merged with old files"
+  - id: http_200_proves_publication
+    text: "No; the HTTP 200 response alone proves every row in the load was published"
+  - id: published_rows_queryable
+    text: "No; the published transaction is queryable without waiting for physical Compaction"
+  - id: wait_for_single_segment
+    text: "Yes; the Segment must first become the only file in its Tablet"
+  answer: published_rows_queryable
+  explanation: "Visibility follows publication, not the completion of physical Compaction, so the dashboard can read the published rows now. Queries can read multiple published Rowsets before background Compaction finishes. An HTTP 200 response alone does not establish row-level completeness; in this scenario, the evidence comes from publication and the SELECT. A Tablet may contain multiple Rowsets and Segments, and their file count does not decide transaction visibility."
 - id: q4
   objective: "Keep table structure and data constant while comparing batch and row-by-row writes."
   prompt: "A team compares writes in batches of 100 rows and 10000 rows. Both runs produce identical results, but the second run also increases the bucket count. How should the results be interpreted?"
   options:
-  - id: a
-    text: "A. First fix the bucket count, data, and write mode, then repeat the comparison of the two batch sizes"
-  - id: b
-    text: "B. Matching results mean all observed timing differences come from batch size"
-  - id: c
-    text: "C. Using the shortest time from each run eliminates the effect of changing the bucket count"
-  - id: d
-    text: "D. Keep the different bucket counts and compare only the final Rowset counts"
-  answer: a
-  explanation: "A: Correct. Changing multiple variables at once prevents attribution; control conditions before comparing. B: Correct data is a prerequisite but does not rule out the bucket count's effect. C: Choosing the shortest time cannot fix the experimental design. D: Bucket count changes data distribution, and Rowset count alone cannot explain the effect of batching."
+  - id: control_then_repeat
+    text: "First fix the bucket count, data, and write mode, then repeat the comparison of the two batch sizes"
+  - id: credit_batch_size
+    text: "Matching results mean all observed timing differences come from batch size"
+  - id: shortest_time
+    text: "Using the shortest time from each run eliminates the effect of changing the bucket count"
+  - id: compare_rowset_counts
+    text: "Keep the different bucket counts and compare only the final Rowset counts"
+  answer: control_then_repeat
+  explanation: "Changing several variables at once prevents attribution, so control the bucket count, data, and write mode before comparing batch sizes. Correct data is a prerequisite but does not rule out the bucket count's effect. Choosing the shortest time from each run cannot fix the experimental design. The bucket count changes data distribution, and the Rowset count alone cannot explain the effect of batching."
 - id: q5
   objective: "Distinguish what query plans, storage metadata, and runtime evidence can each tell you."
   prompt: "A ten-row trial query is slower than expected. The team has its EXPLAIN plan, sampled Tablet metadata, and one Query Profile. Which interpretation uses these three kinds of evidence correctly?"
   options:
-  - id: a
-    text: "A. Use EXPLAIN's estimated scan scope to calculate actual disk reads directly"
-  - id: b
-    text: "B. Replace Rowset and Segment details and runtime metrics with one VersionCount sample"
-  - id: c
-    text: "C. Predict peak production throughput from one Profile's elapsed time on a ten-row sample"
-  - id: d
-    text: "D. Use EXPLAIN for the plan, metadata for the sampled state, and Profile for actual execution work"
-  answer: d
-  explanation: "A: A plan is not an execution result; caching and execution behavior affect actual reads. B: Version count is just one observation and cannot replace all physical-file and execution evidence. C: Ten rows and a single query do not provide the data scale or concurrency of a production workload. D: Correct. The three types of evidence complement one another; background compaction, caching, and the runtime environment must also be considered when sampling."
+  - id: explain_as_disk_reads
+    text: "Use EXPLAIN's estimated scan scope to calculate actual disk reads directly"
+  - id: version_count_only
+    text: "Replace Rowset and Segment details and runtime metrics with one VersionCount sample"
+  - id: predict_peak_throughput
+    text: "Predict peak production throughput from one Profile's elapsed time on a ten-row sample"
+  - id: each_evidence_its_role
+    text: "Use EXPLAIN for the plan, metadata for the sampled state, and Profile for actual execution work"
+  answer: each_evidence_its_role
+  explanation: "EXPLAIN shows the plan, metadata shows the sampled storage state, and the Query Profile shows actual execution work; the three complement one another, and background compaction, caching, and the runtime environment must also be considered when sampling. A plan is not an execution result; caching and execution behavior affect actual disk reads. A VersionCount sample is just one observation and cannot replace the physical-file and execution evidence. Ten rows and a single query do not provide the data scale or concurrency of a production workload."

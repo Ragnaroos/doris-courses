@@ -26,26 +26,33 @@ objective 保存对应的学习目标原文，离线测试检查覆盖关系。
 | [WWI-VALIDATION.md](WWI-VALIDATION.md) | 候选 WWI 数据集的实际导入结果与业务缺口 |
 | [integration-backlog.md](integration-backlog.md) | 已覆盖范围及未验证边界 |
 | [PR_DRAFT.md](PR_DRAFT.md) | PR 说明草稿 |
-| scripts/run_labs.py | 执行主线与三份基础扩展的代码单元 |
-| scripts/run_streaming_labs.py | 显式选择 Kafka / CDC 选做 Lab，固定独立库 dw_course_l1_streaming |
 | scripts/prepare_wwi.py | 校验并暂存本地 WWI Parquet 包，不上传 |
-| tests/test_course.py | 离线检查材料、数据与辅助工具 |
+| tests/test_maintenance_docs.py | 检查本目录的维护文档（链接、集成清单）和 Jupyter 浏览配置 |
 
-安装课程依赖后，从仓库根目录执行：
+课程的离线测试和执行 Lab 的脚本属于课程代码，在课程目录中：
+`doris-course/02-data-warehousing/tests/`（离线检查材料、数据与辅助工具），
+`doris-course/02-data-warehousing/scripts/run_labs.py`（执行主线与三份基础扩展的代码单元），
+`scripts/run_streaming_labs.py`（显式选择 Kafka / CDC 选做 Lab，固定独立库 dw_course_l1_streaming）。
+
+安装课程依赖后，在课程目录 `doris-course/02-data-warehousing` 下执行：
 
 ```bash
-.venv/bin/python -m unittest discover -s maintenance/02-data-warehousing/tests -v
+.venv/bin/python -m unittest discover -s tests -v
 # 使用课程单容器沙箱；先选择独立测试库并确认实验表重置范围。
 export DW_DATABASE=dw_course_l1_validation
 export DW_ALLOW_WRITES=yes
-.venv/bin/python maintenance/02-data-warehousing/scripts/run_labs.py
+.venv/bin/python scripts/run_labs.py
 # 加入本地湖表实验，并执行所有折叠参考答案：
-.venv/bin/python maintenance/02-data-warehousing/scripts/run_labs.py --iceberg --solutions
+.venv/bin/python scripts/run_labs.py --iceberg --solutions
 # 单独选做持续接入；先读 environments/streaming/README.md，使用固定独立实验库：
-.venv/bin/python maintenance/02-data-warehousing/scripts/run_streaming_labs.py all
+.venv/bin/python scripts/run_streaming_labs.py all
 ```
 
-如果 Python 环境安装在课程目录，将上面的 .venv/bin/python 换成对应路径。
+本目录维护文档的检查从仓库根目录执行：
+
+```bash
+doris-course/02-data-warehousing/.venv/bin/python -m unittest discover -s maintenance/02-data-warehousing/tests -v
+```
 测试检查待提交 Notebook 不带执行输出；不要为通过检查清空学员的本地记录，
 可导出 Git 暂存区到临时目录后验证。
 

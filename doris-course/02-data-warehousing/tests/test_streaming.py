@@ -9,7 +9,7 @@ from unittest.mock import Mock, patch
 import nbformat
 import yaml
 
-ROOT = Path(__file__).resolve().parents[3] / "doris-course/02-data-warehousing"
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from dw_course import streaming, docker_runtime
 

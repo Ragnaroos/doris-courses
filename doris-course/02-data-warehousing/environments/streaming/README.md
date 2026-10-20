@@ -97,11 +97,10 @@ Stopping retains all volumes and Doris results. `up -d` does not automatically r
 
 ## Maintainer validation
 
-From the repository root, using Python with the course dependencies installed; keep logs outside the working tree:
+From the course directory, using Python with the course dependencies installed; keep logs outside the working tree:
 
 ```bash
-DW_ALLOW_WRITES=yes .venv/bin/python \
-  maintenance/02-data-warehousing/scripts/run_streaming_labs.py all
+DW_ALLOW_WRITES=yes .venv/bin/python scripts/run_streaming_labs.py all
 ```
 
 Replace `all` with `kafka` or `cdc` to select one lab. This executes notebook code without saving outputs; browser UI inspection is separate. Validation records are in `maintenance/02-data-warehousing/VALIDATION.md` at the repository root. Linux local validation does not establish a clean-install or Docker Desktop/ARM compatibility guarantee.

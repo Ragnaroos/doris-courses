@@ -10,7 +10,7 @@ import unittest
 from pathlib import Path
 from unittest.mock import Mock, call, patch
 
-ROOT = Path(__file__).resolve().parents[3] / "doris-course/02-data-warehousing"
+ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT))
 from dw_course import runtime
 from dw_course import wwi
@@ -286,21 +286,21 @@ class LearningFlowTest(unittest.TestCase):
 
     def test_expected_quality_error_has_no_failure_card(self):
         with patch.object(runtime, "in_notebook", return_value=True), patch.object(runtime, "card") as card:
-            with runtime.expected_failure("重复订单检查", "已识别重复订单，质量规则生效"):
+            with runtime.expected_failure("Duplicate order check", "Duplicate order detected; the quality rule works"):
                 runtime.expect([(11,)], [(10,)])
             self.assertEqual([call.args[1] for call in card.call_args_list], ["ok"])
-            self.assertIn("已识别重复订单", card.call_args.args[0])
+            self.assertIn("Duplicate order detected", card.call_args.args[0])
 
     def test_missing_expected_error_is_a_real_failure(self):
         with patch.object(runtime, "in_notebook", return_value=False):
             with self.assertRaises(AssertionError):
-                with runtime.expected_failure("重复检查", "识别成功"):
+                with runtime.expected_failure("Duplicate check", "Duplicate detected"):
                     runtime.expect([(10,)], [(10,)])
 
     def test_unrelated_exception_is_not_treated_as_learning_success(self):
         with patch.object(runtime, "in_notebook", return_value=True), patch.object(runtime, "card") as card:
             with self.assertRaises(RuntimeError):
-                with runtime.expected_failure("重复检查", "识别成功"):
+                with runtime.expected_failure("Duplicate check", "Duplicate detected"):
                     raise RuntimeError("connection failed")
             card.assert_not_called()
 
@@ -308,8 +308,8 @@ class LearningFlowTest(unittest.TestCase):
         with patch.object(runtime, "in_notebook", return_value=True), patch.object(runtime, "card") as card:
             runtime.expect([(10,)], [(10,)])
             card.assert_not_called()
-            runtime.expect([(10,)], [(10,)], title="订单数符合预期")
-            self.assertEqual(card.call_args.args[2], "订单数符合预期")
+            runtime.expect([(10,)], [(10,)], title="Order count as expected")
+            self.assertEqual(card.call_args.args[2], "Order count as expected")
 
 
 class LocalBundleTest(unittest.TestCase):

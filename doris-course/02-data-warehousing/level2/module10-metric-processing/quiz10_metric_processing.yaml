@@ -7,56 +7,57 @@ questions:
     every date, including dates with no paid orders. Cancelled orders are excluded, and a day follows the order
     event date. Which contract is complete enough to reproduce the number?
   options:
-  - id: a
-    text: A. Name it average_order_amount and divide each day’s gross amount by its row count, regardless of status.
-  - id: b
-    text: B. Record pre-tax amount of paid orders divided by paid-order count, grouped by event date, with a NULL
+  - id: name_and_row_count
+    text: Name it average_order_amount and divide each day’s gross amount by its row count, regardless of status.
+  - id: complete_metric_contract
+    text: Record pre-tax amount of paid orders divided by paid-order count, grouped by event date, with a NULL
       result for a zero denominator.
-  - id: c
-    text: C. Divide all order amounts by paid-order count; the cancelled rows affect only the numerator, not the
+  - id: mixed_populations
+    text: Divide all order amounts by paid-order count; the cancelled rows affect only the numerator, not the
       contract.
-  - id: d
-    text: D. Record only a target refresh interval; the dashboard can choose its own population and time rule.
-  answer: b
-  explanation: 'A: A name and division are not enough when cancelled orders and date semantics matter. B: Correct.
-    It states population, numerator, denominator, grain, time rule, and the NULL value for a calendar date with
-    no paid orders. C: Numerator and denominator would describe different populations. D: Freshness does not define
-    the business calculation.'
+  - id: refresh_interval_only
+    text: Record only a target refresh interval; the dashboard can choose its own population and time rule.
+  answer: complete_metric_contract
+  explanation: 'This contract states the population, numerator, denominator, grain, time rule, and the NULL value
+    for a calendar date with no paid orders. A name and a division are not enough when cancelled orders and date
+    semantics matter. Dividing all order amounts by the paid-order count makes the numerator and denominator describe
+    different populations. Freshness does not define the business calculation.'
 - id: q2
   objective: Distinguish detailed facts from an aggregate serving table.
   prompt: Hundreds of dashboards repeat a daily-by-channel total over millions of orders, while investigators occasionally
     need to inspect a single order and its customer. Which serving design preserves both needs?
   options:
-  - id: a
-    text: A. Retain order detail and maintain a daily-by-channel aggregate for repeated dashboard queries.
-  - id: b
-    text: B. Replace order detail with daily totals; customer-level questions can always be reversed from SUM.
-  - id: c
-    text: C. Give each dashboard its own copied fact table so its filters and totals cannot affect another team.
-  - id: d
-    text: D. Store one total per day but label it as one row per customer for future drill-down.
-  answer: a
-  explanation: 'A: Correct. The service table avoids repeated aggregation at a declared grain, while detail remains
-    available for drill-down and verification. B: Aggregation discards order and customer identity. C: Copies increase
-    synchronization and definition drift. D: Relabeling a day-grain value does not restore customer grain.'
+  - id: detail_and_aggregate
+    text: Retain order detail and maintain a daily-by-channel aggregate for repeated dashboard queries.
+  - id: daily_totals_only
+    text: Replace order detail with daily totals; customer-level questions can always be reversed from SUM.
+  - id: copy_per_dashboard
+    text: Give each dashboard its own copied fact table so its filters and totals cannot affect another team.
+  - id: relabel_daily_total
+    text: Store one total per day but label it as one row per customer for future drill-down.
+  answer: detail_and_aggregate
+  explanation: 'The service table avoids repeated aggregation at a declared grain, while the detail remains available
+    for drill-down and verification. Aggregation discards order and customer identity, so customer-level questions
+    cannot be reversed from SUM. Copied fact tables increase synchronization work and definition drift. Relabeling
+    a day-grain value does not restore customer grain.'
 - id: q3
   objective: Validate metrics using an independent query against detailed data.
   prompt: A service table reports 120 orders for Tuesday, while a detail-table aggregation with the same date and
     status filter reports 117. The service build returned success. What should block publication?
   options:
-  - id: a
-    text: A. Nothing; a successful build is stronger evidence than an independently computed total.
-  - id: b
-    text: B. Only a slow Query Profile; a fast service query can tolerate a three-order discrepancy.
-  - id: c
-    text: C. The mismatch; compare input coverage, filters, and load batches before declaring the serving value
+  - id: nothing_blocks
+    text: Nothing; a successful build is stronger evidence than an independently computed total.
+  - id: slow_profile_only
+    text: Only a slow Query Profile; a fast service query can tolerate a three-order discrepancy.
+  - id: count_mismatch
+    text: The mismatch; compare input coverage, filters, and load batches before declaring the serving value
       correct.
-  - id: d
-    text: D. A missing dashboard screenshot; the chart is the independent source of truth.
-  answer: c
-  explanation: 'A: Build success says the statement ran, not that it used the intended population. B: Performance
-    evidence cannot resolve a business mismatch. C: Correct. An independent detail query at the same cut and filter
-    exposes a result that needs investigation. D: A chart typically reads the same service value and is not independent
+  - id: missing_screenshot
+    text: A missing dashboard screenshot; the chart is the independent source of truth.
+  answer: count_mismatch
+  explanation: 'An independent detail query at the same cut and filter exposes a result that needs investigation
+    before publication. Build success says the statement ran, not that it used the intended population. Performance
+    evidence cannot resolve a business mismatch. A chart typically reads the same service value, so it is not independent
     evidence.'
 - id: q4
   objective: Use window functions without accidentally changing row grain.
@@ -64,18 +65,19 @@ questions:
     The dashboard needs one row per day with APP orders and cumulative gross amount across all channels. What should
     the two rows show?
   options:
-  - id: a
-    text: A. Jan 1 APP=2, cumulative=40; Jan 2 APP=1, cumulative=60, because STORE is excluded from every measure.
-  - id: b
-    text: B. Three rows, one per input channel; the window function itself determines the requested day grain.
-  - id: c
-    text: C. Jan 1 APP=2, cumulative=70; Jan 2 APP=1, cumulative=20, because each day starts a new running total.
-  - id: d
-    text: D. Jan 1 APP=2, cumulative=70; Jan 2 APP=1, cumulative=90, after first aggregating to day grain.
-  answer: d
-  explanation: 'A: APP is the conditional count, but gross amount includes both channels. B: A window annotates
-    its input rows; daily aggregation must establish the day grain first. C: The second cumulative value must include
-    the previous day. D: Correct. Daily gross is 70 then 20, so the running totals are 70 and 90.'
+  - id: store_excluded_everywhere
+    text: Jan 1 APP=2, cumulative=40; Jan 2 APP=1, cumulative=60, because STORE is excluded from every measure.
+  - id: one_row_per_channel
+    text: Three rows, one per input channel; the window function itself determines the requested day grain.
+  - id: daily_reset
+    text: Jan 1 APP=2, cumulative=70; Jan 2 APP=1, cumulative=20, because each day starts a new running total.
+  - id: aggregate_then_running_total
+    text: Jan 1 APP=2, cumulative=70; Jan 2 APP=1, cumulative=90, after first aggregating to day grain.
+  answer: aggregate_then_running_total
+  explanation: 'After aggregating to day grain, daily gross is 70 and then 20, so the running totals are 70 and
+    90, while the APP order counts are 2 and 1. APP is only the condition of the order count; gross amount includes
+    both channels. A window annotates its input rows, so daily aggregation must establish the day grain first. The
+    second cumulative value must include the previous day.'
 - id: q5
   objective: Verify a result-preserving optimization using actual Profile counters and explicitly bounded latency
     samples.
@@ -83,37 +85,37 @@ questions:
     disabled, their executed Query Profiles show 240,000 scanned rows for detail and 60 for a service table. Twenty
     warmed, sequential timing samples have similar empirical 95th percentiles (P95). Which conclusion is supported?
   options:
-  - id: a
-    text: A. The service query scanned fewer rows in these executions; this sample does not establish lower production
+  - id: fewer_rows_scanned_only
+    text: The service query scanned fewer rows in these executions; this sample does not establish lower production
       latency.
-  - id: b
-    text: B. The scan-row ratio proves the service query will always have proportionally lower wall-clock latency.
-  - id: c
-    text: C. Similar P95 values prove both queries must have scanned the same amount of data.
-  - id: d
-    text: D. Twenty concurrency-one samples establish the production dashboard service-level agreement (SLA) under
+  - id: proportional_latency
+    text: The scan-row ratio proves the service query will always have proportionally lower wall-clock latency.
+  - id: same_scanned_data
+    text: Similar P95 values prove both queries must have scanned the same amount of data.
+  - id: production_sla
+    text: Twenty concurrency-one samples establish the production dashboard service-level agreement (SLA) under
       hundreds of simultaneous readers.
-  answer: a
-  explanation: 'A: Correct. Executed counters support the scan-work conclusion, while bounded same-host samples
-    do not establish production latency or concurrency capacity. B: Planning, scheduling and fixed overhead also
-    affect latency; fewer rows do not imply a proportional wall-clock speedup. C: Similar latency can coexist with
-    different scanned rows. D: A small sequential experiment does not reproduce production concurrency, data distribution
-    or failure conditions.'
+  answer: fewer_rows_scanned_only
+  explanation: 'The executed counters support the scan-work conclusion, while bounded same-host samples do not
+    establish production latency or concurrency capacity. Planning, scheduling and fixed overhead also affect latency,
+    so fewer rows do not imply a proportional wall-clock speedup. Similar latency can coexist with different scanned
+    rows. A small sequential experiment does not reproduce production concurrency, data distribution or failure
+    conditions.'
 - id: q6
   objective: Choose exact or approximate distinct counts according to the business tolerance.
   prompt: A loyalty payout requires an exact monthly count of unique buyers. A high-traffic trend chart can tolerate
     a stated 2% estimation error. Which choice matches the two contracts?
   options:
-  - id: a
-    text: A. Use an approximate distinct estimate for both; a small expected error has no payout impact.
-  - id: b
-    text: B. Use exact distinct counting for the payout and an approximate method only for the trend chart, with
+  - id: approximate_for_both
+    text: Use an approximate distinct estimate for both; a small expected error has no payout impact.
+  - id: exact_payout_approximate_trend
+    text: Use exact distinct counting for the payout and an approximate method only for the trend chart, with
       its tolerance documented.
-  - id: c
-    text: C. Sum each day’s distinct-buyer count for both; buyers returning on another day cannot be counted twice.
-  - id: d
-    text: D. Count all orders for both; multiple orders from one buyer still represent one unique buyer.
-  answer: b
-  explanation: 'A: Even a small estimate error can change a financial payout, which requires exactness. B: Correct.
-    The business tolerance determines whether approximation is acceptable. C: Adding daily distinct counts double-counts
-    buyers active on multiple days. D: Order count and unique-buyer count answer different questions.'
+  - id: sum_daily_distinct
+    text: Sum each day’s distinct-buyer count for both; buyers returning on another day cannot be counted twice.
+  - id: count_orders
+    text: Count all orders for both; multiple orders from one buyer still represent one unique buyer.
+  answer: exact_payout_approximate_trend
+  explanation: 'The business tolerance of each contract determines whether approximation is acceptable. Even a
+    small estimation error can change a financial payout, which requires exactness. Adding daily distinct counts
+    double-counts buyers who are active on several days. Order count and unique-buyer count answer different questions.'

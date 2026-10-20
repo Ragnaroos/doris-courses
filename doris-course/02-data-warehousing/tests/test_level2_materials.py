@@ -8,7 +8,7 @@ from pathlib import Path
 import nbformat
 import yaml
 
-ROOT = Path(__file__).resolve().parents[3] / "doris-course/02-data-warehousing"
+ROOT = Path(__file__).resolve().parents[1]
 LEVEL2 = ROOT / "level2"
 
 
@@ -37,12 +37,15 @@ class Level2MaterialsTest(unittest.TestCase):
             self.assertEqual(len(re.findall(r"^\d+\. ", goals, re.MULTILINE)), 6, path)
             for question in payload["questions"]:
                 with self.subTest(quiz=quiz.name, question=question["id"]):
-                    self.assertEqual([option["id"] for option in question["options"]], ["a", "b", "c", "d"])
+                    # Options are shown shuffled, so they are named, not lettered.
+                    option_ids = [option["id"] for option in question["options"]]
+                    self.assertEqual(len(set(option_ids)), 4)
+                    self.assertTrue(all(len(option_id) > 1 for option_id in option_ids), option_ids)
                     self.assertEqual(len({option["text"] for option in question["options"]}), 4)
-                    self.assertIn(question["answer"], {option["id"] for option in question["options"]})
+                    self.assertIn(question["answer"], option_ids)
                     for option in question["options"]:
-                        self.assertIn(f"{option['id'].upper()}: ", question["explanation"])
-                    self.assertIn(f"{question['answer'].upper()}: Correct.", question["explanation"])
+                        self.assertNotRegex(option["text"], r"^[A-D]\. ")
+                    self.assertNotRegex(question["explanation"], r"(^|\s)[A-D]: ")
 
     def test_new_notebooks_are_source_only_and_valid(self):
         notebooks = sorted(LEVEL2.glob("module*/*.ipynb"))

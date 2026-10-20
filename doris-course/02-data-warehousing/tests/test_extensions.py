@@ -9,9 +9,8 @@ from unittest.mock import Mock
 
 import nbformat
 
-REPO = Path(__file__).resolve().parents[3]
-ROOT = REPO / "doris-course/02-data-warehousing"
-RUNNER = REPO / "maintenance/02-data-warehousing/scripts/run_labs.py"
+ROOT = Path(__file__).resolve().parents[1]
+RUNNER = ROOT / "scripts/run_labs.py"
 
 
 class ExtensionsTest(unittest.TestCase):
@@ -122,16 +121,8 @@ class ExtensionsTest(unittest.TestCase):
             exec(compile(source,"profile-cell","exec"),dict(lab=lab))
         lab.execute.assert_called_with("SET enable_profile = %s", (False,))
 
-    def test_backlog_distinguishes_optional_integrations(self):
-        text = (REPO / "maintenance/02-data-warehousing/integration-backlog.md").read_text()
-        self.assertNotRegex(text,r'\bD0[1-7]\b')
-        for label in ('Module 5.6', 'Module 5.7', 'Module 5.8', 'Module 5.9', '不是当前结课门槛', 'Lab 5A / 5B 均选做'):
-            self.assertIn(label,text)
-        self.assertNotIn("仍需交付的持续集成实验", text)
-        self.assertNotIn("不能因主线与扩展全部通过而宣布完整 Level 1 已结课验收", text)
-
     def test_readings_separate_main_scope_and_optional_integrations(self):
-        level = REPO / "doris-course/02-data-warehousing/level1"
+        level = ROOT / "level1"
         expectations = {
             "README.md": ("not required to set up external pipelines", "continuous ingestion Labs are all optional", "optional05_kafka_routine_load.ipynb", "optional05_flink_mysql_cdc.ipynb"),
             "module05-ingestion/course.md": (

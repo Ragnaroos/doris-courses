@@ -1,0 +1,68 @@
+# Repository checks and the offline tests of every course. Nothing here needs
+# Docker or a running Doris; the labs themselves are verified by running them.
+name: CI
+
+on:
+  pull_request:
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Repository checks
+    runs-on: ubuntu-24.04
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+      - name: Install the check dependencies
+        run: python -m pip install -r tools/requirements.txt
+      - name: Links
+        run: python tools/check_links.py doris-course README.md CONTRIBUTING.md
+      - name: Notebook outputs
+        run: python tools/check_notebook_outputs.py --strict
+      - name: Quiz structure
+        run: python tools/check_quiz_balance.py
+      - name: Secrets, local paths and email addresses
+        run: python tools/check_sensitive_info.py
+      - name: Tests of the checks
+        run: python -m unittest discover -s tools/tests -v
+
+  tests:
+    name: Offline tests (${{ matrix.package }})
+    runs-on: ubuntu-24.04
+    strategy:
+      fail-fast: false
+      matrix:
+        package: [common, 01-real-time-analytics, 02-data-warehousing, 03-observability]
+    defaults:
+      run:
+        working-directory: doris-course/${{ matrix.package }}
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: |
+            doris-course/*/requirements.txt
+            doris-course/*/pyproject.toml
+      - name: Install
+        # Courses install the shared runtime through `-e ../common` in their
+        # requirements, so pip runs in the course directory.
+        run: |
+          if [ -f requirements.txt ]; then
+            python -m pip install -r requirements.txt
+          else
+            python -m pip install -e .
+          fi
+      - name: Test
+        run: python -m unittest discover -s tests -v

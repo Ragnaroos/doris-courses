@@ -6,7 +6,7 @@ import re
 import unittest
 from urllib.parse import unquote, urlsplit
 
-ROOT = Path(__file__).resolve().parents[3] / "doris-course/02-data-warehousing"
+ROOT = Path(__file__).resolve().parents[1]
 SKIP = {".runtime", ".venv", ".ipynb_checkpoints", "__pycache__"}
 
 

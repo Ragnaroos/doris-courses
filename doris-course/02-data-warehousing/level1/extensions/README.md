@@ -23,12 +23,11 @@ it does not modify main-course business tables, delete historical files from obj
 Object storage experiments reuse the course object storage from Lab 4 (Silo) and write to an independent random path each time. On failure, preserve job status and output before troubleshooting.
 Allow 80–115 minutes in total; this is additional lab time, not video duration.
 
-Maintainers can run the full regression from the repository root using Python with the above dependencies installed:
+Maintainers can run the full regression from the course directory using Python with the above dependencies installed:
 
 ```bash
 DW_ALLOW_WRITES=yes DW_DATABASE=dw_course_l1_extensions_check \
-  .venv/bin/python maintenance/02-data-warehousing/scripts/run_labs.py \
-  --iceberg --solutions --extensions
+  .venv/bin/python scripts/run_labs.py --iceberg --solutions --extensions
 ```
 
 If main-course results already exist, use `--extensions-only` instead. The script does not save notebook execution outputs.

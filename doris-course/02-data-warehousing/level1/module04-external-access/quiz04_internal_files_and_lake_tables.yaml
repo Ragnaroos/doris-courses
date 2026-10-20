@@ -5,69 +5,69 @@ questions:
   objective: "Distinguish Doris internal tables, Parquet files, Iceberg tables, and External Catalogs."
   prompt: "A teammate finds Parquet files in object storage and assumes they already form an Iceberg table that Doris will manage after creating an External Catalog. Which design note corrects that assumption?"
   options:
-  - id: a
-    text: "A. Parquet is a file format, Iceberg manages table metadata and data files, and a Catalog provides an external access entry point"
-  - id: b
-    text: "B. A directory containing only Parquet files already constitutes an Iceberg table"
-  - id: c
-    text: "C. Creating an External Catalog copies external data into Doris internal tables"
-  - id: d
-    text: "D. After an External Catalog is created, Doris takes over file organization and transactions for external tables"
-  answer: a
-  explanation: "A: Correct. File formats, lake table formats, and access entry points are different layers. B: Iceberg also requires table metadata; a data-file directory alone is not enough to identify an Iceberg table. C: A Catalog establishes an access entry point; it does not mean data has been loaded or automatically copied. D: Establishing an access entry point does not transfer responsibility for managing external tables; you still need to understand the external system's metadata and transaction boundaries."
+  - id: format_table_and_catalog_layers
+    text: "Parquet is a file format, Iceberg manages table metadata and data files, and a Catalog provides an external access entry point"
+  - id: parquet_directory_is_iceberg
+    text: "A directory containing only Parquet files already constitutes an Iceberg table"
+  - id: catalog_copies_data
+    text: "Creating an External Catalog copies external data into Doris internal tables"
+  - id: doris_manages_external_tables
+    text: "After an External Catalog is created, Doris takes over file organization and transactions for external tables"
+  answer: format_table_and_catalog_layers
+  explanation: "File formats, lake table formats, and access entry points are different layers: Parquet stores data, Iceberg manages table metadata and data files, and a Catalog provides access. Iceberg also requires table metadata, so a directory of Parquet files alone is not an Iceberg table. Creating a Catalog establishes an access entry point; it does not load or copy the data into internal tables. An access entry point also does not move the management of external tables to Doris; you still need to understand the external system's metadata and transaction boundaries."
 - id: q2
   objective: "Choose between direct external queries and loading into internal tables based on exploration and repeated-analysis needs."
   prompt: "Historical orders already exist in the lake. What is a reasonable starting point when exploring a question for the first time?"
   options:
-  - id: a
-    text: "A. Migrate the entire data lake before starting the first analytical query"
-  - id: b
-    text: "B. Evaluate direct external queries first, then assess loading and refresh costs for repeated analysis"
-  - id: c
-    text: "C. Run INSERT INTO SELECT once, then treat the internal results as automatically synchronized data"
-  - id: d
-    text: "D. Materialize orders and all dimensions into a wide table before performing any join analysis"
-  answer: b
-  explanation: "A: Exploration does not necessarily require a full migration; evaluate access paths to existing data first. B: Correct. Solve the current problem first, then decide whether to materialize based on performance, freshness, and cost. C: A one-time load saves only the current results; continuous synchronization requires a separate design. D: Doris supports multi-table joins; prebuilding a wide table is not necessary for every scenario."
+  - id: migrate_everything_first
+    text: "Migrate the entire data lake before starting the first analytical query"
+  - id: query_directly_first
+    text: "Evaluate direct external queries first, then assess loading and refresh costs for repeated analysis"
+  - id: one_load_stays_synchronized
+    text: "Run INSERT INTO SELECT once, then treat the internal results as automatically synchronized data"
+  - id: wide_table_first
+    text: "Materialize orders and all dimensions into a wide table before performing any join analysis"
+  answer: query_directly_first
+  explanation: "Solve the current question with direct external queries first, then decide whether to load and materialize based on performance, freshness, and cost. Exploration does not require a full migration; evaluate access paths to the existing data first. A one-time INSERT INTO SELECT saves only the current results; continuous synchronization requires a separate design. Doris supports multi-table joins, so prebuilding a wide table is not necessary for every scenario."
 - id: q3
   objective: "Explain how Catalog, Database, and Table identify an external table."
   prompt: "Two external Catalogs, lake_prod and lake_test, both contain reporting.orders. The current Catalog is internal, but a report must read the production lake table. Which reference selects that exact object?"
   options:
-  - id: a
-    text: "A. reporting.orders, because a two-part name searches every Catalog for a matching table"
-  - id: b
-    text: "B. lake_prod.orders.reporting, because the table name follows the Catalog"
-  - id: c
-    text: "C. lake_prod.reporting, because a Catalog and Database together identify one table"
-  - id: d
-    text: "D. lake_prod.reporting.orders, identifying Catalog, Database, and Table"
-  answer: d
-  explanation: "A: A two-part name is resolved in the current Catalog, which is internal here; it does not search all Catalogs. B: This swaps the Database and Table positions. C: A Catalog and Database identify a namespace, not a specific table. D: Correct. The three-part name selects the production Catalog, its reporting Database, and its orders Table without relying on the current Catalog."
+  - id: two_part_name
+    text: "reporting.orders, because a two-part name searches every Catalog for a matching table"
+  - id: database_and_table_swapped
+    text: "lake_prod.orders.reporting, because the table name follows the Catalog"
+  - id: catalog_and_database_only
+    text: "lake_prod.reporting, because a Catalog and Database together identify one table"
+  - id: three_part_name
+    text: "lake_prod.reporting.orders, identifying Catalog, Database, and Table"
+  answer: three_part_name
+  explanation: "The three-part name lake_prod.reporting.orders selects the production Catalog, its reporting Database, and its orders Table without relying on the current Catalog. A two-part name is resolved in the current Catalog, which is internal here; it does not search all Catalogs. lake_prod.orders.reporting swaps the Database and Table positions. A Catalog and Database identify a namespace, not a specific table."
 - id: q4
   objective: "Identify duplicate dimension records or missing matches by comparing results before and after a join."
   prompt: "After a LEFT JOIN with customers, 100 lake orders become 103 rows and the total amount increases. What is the most appropriate next step?"
   options:
-  - id: a
-    text: "A. Check for multiple matches on customer join keys and verify the affected orders"
-  - id: b
-    text: "B. Switch to INNER JOIN to guarantee that each order matches exactly once"
-  - id: c
-    text: "C. Apply DISTINCT to all results and use the deduplicated amount directly in reports"
-  - id: d
-    text: "D. Change SUM to AVG to avoid adding duplicate amounts"
-  answer: a
-  explanation: "A: Correct. Multiple matching rows on the right multiply orders on the left; locate the join keys and detail records involved. B: INNER JOIN does not eliminate multiple matches and may also lose unmatched orders. C: DISTINCT does not guarantee the correct business grain; duplicates with different field values remain. D: Average amount and total amount are different metrics."
+  - id: check_duplicate_matches
+    text: "Check for multiple matches on customer join keys and verify the affected orders"
+  - id: switch_to_inner_join
+    text: "Switch to INNER JOIN to guarantee that each order matches exactly once"
+  - id: apply_distinct
+    text: "Apply DISTINCT to all results and use the deduplicated amount directly in reports"
+  - id: switch_to_average
+    text: "Change SUM to AVG to avoid adding duplicate amounts"
+  answer: check_duplicate_matches
+  explanation: "Multiple matching customer rows on the right multiply orders on the left, so locate the join keys and detail records involved. An INNER JOIN does not eliminate multiple matches and may also lose unmatched orders. DISTINCT does not guarantee the correct business grain; duplicates with different field values remain. Average amount and total amount are different metrics, so switching to AVG changes the question."
 - id: q5
   objective: "With an Iceberg environment available, verify the same batch of orders through direct queries, joins, and after loading."
   prompt: "A team reads a fixed Iceberg snapshot directly, then loads its orders into an internal table. Both paths show four orders totaling 170, but a reviewer suspects one customer ID changed. Which check can establish consistency?"
   options:
-  - id: a
-    text: "A. Confirm that the external query succeeds and the internal table exists, then assume the data is consistent"
-  - id: b
-    text: "B. Compare row counts and total amounts without checking order identifiers or other fields"
-  - id: c
-    text: "C. Compare the same snapshot's order IDs and fields row by row, plus counts, amounts, and joins against the same customer-dimension version"
-  - id: d
-    text: "D. Compare whether external and internal query durations are similar and infer consistent results from the timing"
-  answer: c
-  explanation: "A: A successful query and an existing table prove accessibility, not content consistency. B: Equal counts and totals can hide a changed customer ID or offsetting amounts. C: Correct. Use the same lake snapshot and dimension version, then compare each order and its fields alongside aggregate and join checks. D: Similar durations reflect execution performance, not equal business results."
+  - id: access_succeeds
+    text: "Confirm that the external query succeeds and the internal table exists, then assume the data is consistent"
+  - id: counts_and_totals_only
+    text: "Compare row counts and total amounts without checking order identifiers or other fields"
+  - id: compare_rows_same_snapshot
+    text: "Compare the same snapshot's order IDs and fields row by row, plus counts, amounts, and joins against the same customer-dimension version"
+  - id: compare_durations
+    text: "Compare whether external and internal query durations are similar and infer consistent results from the timing"
+  answer: compare_rows_same_snapshot
+  explanation: "Use the same lake snapshot and customer-dimension version, then compare each order and its fields alongside the aggregate and join checks. A successful query and an existing table prove accessibility, not content consistency. Equal counts and totals can hide a changed customer ID or offsetting amounts. Similar durations reflect execution performance, not equal business results."

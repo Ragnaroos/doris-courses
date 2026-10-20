@@ -8,114 +8,114 @@ questions:
     is based on order date, reports filter order_date, and ingestion batches include late-arriving orders from earlier
     days. Which partition design aligns cleanup and reporting?
   options:
-  - id: a
-    text: A. Monthly partitions by ingestion date, keeping every ingestion batch in one partition
-  - id: b
-    text: B. Yearly partitions by order_date to reduce the number of definitions
-  - id: c
-    text: C. No partitions; distribute by order_id and remove expired rows with conditional DELETE
-  - id: d
-    text: D. Monthly partitions by order_date, using the same time for expiry and query filters
-  answer: d
-  explanation: 'A: A January order arriving in February would be missed by January''s cleanup and its order-date
-    filter would not align with partition pruning. B: An annual boundary cannot remove just one expired month while
-    retaining the others; row-level deletion would be needed instead. C: Hash distribution does not provide monthly
-    retention boundaries, and conditional deletion need not reclaim physical space immediately. D: Correct. Cleanup
-    addresses one month without changing adjacent months, and order_date filters can prune the same boundaries.'
+  - id: monthly_by_ingestion_date
+    text: Monthly partitions by ingestion date, keeping every ingestion batch in one partition
+  - id: yearly_by_order_date
+    text: Yearly partitions by order_date to reduce the number of definitions
+  - id: no_partitions
+    text: No partitions; distribute by order_id and remove expired rows with conditional DELETE
+  - id: monthly_by_order_date
+    text: Monthly partitions by order_date, using the same time for expiry and query filters
+  answer: monthly_by_order_date
+  explanation: 'With monthly partitions by order_date, cleanup addresses one month without changing adjacent months,
+    and order_date filters can prune the same boundaries. With partitions by ingestion date, a January order arriving
+    in February would be missed by January''s cleanup, and its order-date filter would not align with partition
+    pruning. An annual boundary cannot remove just one expired month while retaining the others; row-level deletion
+    would be needed instead. Hash distribution does not provide monthly retention boundaries, and conditional deletion
+    need not reclaim physical space immediately.'
 - id: q2
   objective: Distinguish partitions, buckets, tablets, replicas, rowsets, and segments
   prompt: One monthly partition in a production order table has six buckets and three replicas per tablet. SHOW
     TABLETS FROM orders PARTITION (p202505) returns 18 rows but only six distinct TabletId values. How should the
     output be read?
   options:
-  - id: a
-    text: A. The month has 18 partitions, one per output row
-  - id: b
-    text: B. The month has 18 distinct tablets with one replica each
-  - id: c
-    text: C. The month has six tablets; each tablet's three replicas contribute three output rows
-  - id: d
-    text: D. The month has six rowsets, each represented by three segments
-  answer: c
-  explanation: 'A: The inspection is scoped to one partition. B: Six distinct tablet identities do not become 18
-    tablets because they have replicas. C: Correct. Six buckets give six tablets, and three replicas each yield
-    18 rows. D: SHOW TABLETS lists tablet replicas rather than rowsets or segments.'
+  - id: eighteen_partitions
+    text: The month has 18 partitions, one per output row
+  - id: eighteen_tablets
+    text: The month has 18 distinct tablets with one replica each
+  - id: six_tablets_three_replicas
+    text: The month has six tablets; each tablet's three replicas contribute three output rows
+  - id: six_rowsets
+    text: The month has six rowsets, each represented by three segments
+  answer: six_tablets_three_replicas
+  explanation: 'Six buckets give six tablets, and three replicas of each yield 18 rows. The inspection is scoped
+    to one partition, so the rows are not partitions. Six distinct tablet identities do not become 18 tablets because
+    they have replicas. SHOW TABLETS lists tablet replicas rather than rowsets or segments.'
 - id: q3
   objective: Perform partition-level lifecycle operations without clearing the whole table
   prompt: A test table has monthly partitions for April and May. April must be emptied and reloaded using its existing
     boundary. May must remain unchanged. Which operation meets the scope?
   options:
-  - id: a
-    text: A. Truncate the whole table, then reload May
-  - id: b
-    text: B. Truncate only April's partition, retaining a same-name empty partition for reload
-  - id: c
-    text: C. Drop April and assume its original boundary remains defined automatically
-  - id: d
-    text: D. Delete every row from the whole table, then restore the months
-  answer: b
-  explanation: 'A: Whole-table truncation changes May too. B: Correct. Partition truncation retains April''s boundary
-    for reload and leaves May outside scope. C: Dropping removes the definition, which must be recreated before
-    reload. D: An unconditional whole-table delete also affects May and ignores the known boundary.'
+  - id: truncate_whole_table
+    text: Truncate the whole table, then reload May
+  - id: truncate_april_partition
+    text: Truncate only April's partition, retaining a same-name empty partition for reload
+  - id: drop_april
+    text: Drop April and assume its original boundary remains defined automatically
+  - id: delete_all_rows
+    text: Delete every row from the whole table, then restore the months
+  answer: truncate_april_partition
+  explanation: 'Truncating only April''s partition retains its boundary for the reload and leaves May outside
+    the scope. Whole-table truncation changes May too. Dropping April removes its definition, which must be recreated
+    before the reload. An unconditional whole-table delete also affects May and ignores the known boundary.'
 - id: q4
   objective: Distinguish query visibility, metadata changes, physical space reclamation, and the role of Compaction
   prompt: In a storage-compute coupled deployment, an operator drops an archived April partition without FORCE.
     Queries no longer show April and SHOW PARTITIONS omits it, but disk usage has not decreased. Which explanation
     fits all three observations?
   options:
-  - id: a
-    text: A. Query visibility and metadata changed; recycle-bin retention and asynchronous cleanup can release space
+  - id: logical_removal_before_reclamation
+    text: Query visibility and metadata changed; recycle-bin retention and asynchronous cleanup can release space
       later
-  - id: b
-    text: B. The drop necessarily failed; a partition cannot disappear from metadata until disk usage falls
-  - id: c
-    text: C. April was hidden by conditional DELETE and its definition remains until Compaction removes the partition
-  - id: d
-    text: D. The archive necessarily failed; neither query visibility nor the missing partition says anything about
+  - id: drop_failed
+    text: The drop necessarily failed; a partition cannot disappear from metadata until disk usage falls
+  - id: conditional_delete
+    text: April was hidden by conditional DELETE and its definition remains until Compaction removes the partition
+  - id: archive_failed
+    text: The archive necessarily failed; neither query visibility nor the missing partition says anything about
       the drop
-  answer: a
-  explanation: 'A: Correct. Logical removal, metadata changes, and physical reclamation are separate stages; omitting
-    FORCE preserves recycle-bin retention. B: The query and metadata evidence already establish logical changes,
-    even while files remain. C: This is DROP PARTITION, not a delete predicate, and its effect does not wait for
-    Compaction. D: Archive success needs independent checks and cannot be inferred from current disk usage.'
+  answer: logical_removal_before_reclamation
+  explanation: 'Logical removal, metadata changes, and physical reclamation are separate stages, and omitting
+    FORCE preserves recycle-bin retention. The query and metadata evidence already establish the logical changes,
+    even while files remain. This is DROP PARTITION, not a delete predicate, and its effect does not wait for Compaction.
+    Archive success needs independent checks and cannot be inferred from current disk usage.'
 - id: q5
   objective: Write a maintenance runbook with a tested recovery source and an explicit snapshot cutoff
   prompt: A coupled-mode ordinary table was force-dropped after a full repository backup. The upstream system can
     no longer replay it, and recycle-bin recovery is unavailable. The repository contains a usable snapshot from
     09:00; four additional orders arrived at 09:10 before deletion. What recovery claim is justified?
   options:
-  - id: a
-    text: A. RECOVER can restore all orders because every DROP, including FORCE, retains the original table.
-  - id: b
-    text: B. A FINISHED backup status proves all post-snapshot orders were included without another restore test.
-  - id: c
-    text: C. Restore the snapshot and call the recovered state current; later orders are automatically inferred
+  - id: recover_after_force
+    text: RECOVER can restore all orders because every DROP, including FORCE, retains the original table.
+  - id: finished_backup_is_proof
+    text: A FINISHED backup status proves all post-snapshot orders were included without another restore test.
+  - id: snapshot_is_current
+    text: Restore the snapshot and call the recovered state current; later orders are automatically inferred
       from row counts.
-  - id: d
-    text: D. Restore into an isolated target and reconcile the 09:00 cutoff; the four later orders remain unrecovered
+  - id: restore_and_report_gap
+    text: Restore into an isolated target and reconcile the 09:00 cutoff; the four later orders remain unrecovered
       without another source.
-  answer: d
-  explanation: 'A: FORCE bypasses the recycle-bin fallback assumed by this proposal. B: Backup completion does not
-    validate restore or include later writes. C: Snapshot data cannot reconstruct unknown later orders. D: Correct.
-    Test the restore and its recorded cutoff, and report the missing post-snapshot writes rather than claiming zero
-    data loss.'
+  answer: restore_and_report_gap
+  explanation: 'Test the restore and its recorded cutoff, and report the missing post-snapshot writes rather than
+    claiming zero data loss. A FORCE drop bypasses the recycle bin that RECOVER relies on. Backup completion does
+    not validate a restore or include later writes. Snapshot data cannot reconstruct unknown later orders.'
 - id: q6
   objective: Record before-and-after maintenance evidence with SHOW PARTITIONS, SHOW TABLETS, and SHOW CREATE TABLE
   prompt: An archived monthly partition will be dropped. Afterward, the team must show that the target month is
     gone and adjacent months remain complete, while retaining physical-layout evidence for investigation. Which
     evidence set is sufficient?
   options:
-  - id: a
-    text: A. Only the final whole-table row count; a lower total identifies which month was removed
-  - id: b
-    text: B. Only the pre-change SHOW CREATE TABLE; it proves every month's final row count
-  - id: c
-    text: C. The table definition, before-and-after partition metadata, independent target and adjacent-month counts,
+  - id: total_row_count
+    text: Only the final whole-table row count; a lower total identifies which month was removed
+  - id: pre_change_definition
+    text: Only the pre-change SHOW CREATE TABLE; it proves every month's final row count
+  - id: full_evidence_set
+    text: The table definition, before-and-after partition metadata, independent target and adjacent-month counts,
       archive reconciliation, and relevant tablet layout
-  - id: d
-    text: D. Only the final SHOW TABLETS; replica rows replace partition boundaries and business counts
-  answer: c
-  explanation: 'A: A total cannot identify the removed month or prove adjacent-month completeness. B: The table
-    definition describes structure, not post-change business values. C: Correct. These checks cover boundaries,
-    changes, logical values, archive readiness, and physical layout. D: Replica listings are not business row counts,
-    and a final snapshot alone cannot locate the change.'
+  - id: final_tablet_listing
+    text: Only the final SHOW TABLETS; replica rows replace partition boundaries and business counts
+  answer: full_evidence_set
+  explanation: 'Together these checks cover boundaries, changes, logical values, archive readiness, and physical
+    layout. A total cannot identify the removed month or prove adjacent-month completeness. The table definition
+    describes structure, not post-change business values. Replica listings are not business row counts, and a final
+    snapshot alone cannot locate the change.'
