@@ -15,8 +15,8 @@ The files in this directory are layered on the upstream Compose files:
 
 - `compose.dog.yml` (Compose project `doris-obs`) renames the containers and the
   network, publishes the host ports on 127.0.0.1 only, runs Doris 4.1.3 with its
-  metadata and data in two volumes, and bind-mounts the Doris FE and BE log
-  directories under `.runtime/doris-logs/`. Module 2 reads the FE log from there.
+  metadata and data in two volumes, and bind-mounts the Doris FE log directory
+  to `.runtime/doris-logs/fe/`. Module 2 reads the FE log from there.
   It also adds the Mailpit service, points Grafana's SMTP settings at it, and runs
   the DOG Collector in the Docker host's UTS namespace with a second
   configuration file.

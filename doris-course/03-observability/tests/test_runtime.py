@@ -21,6 +21,7 @@ from doris_course.doris_client import (
     LITEFUSE_PORTS,
     LOCAL_MODEL_COMPOSE_FILE,
     LOCAL_MODEL_PORTS,
+    FLAGS_FILE,
     EnvironmentNotReady,
 )
 
@@ -164,6 +165,12 @@ class RuntimeTests(unittest.TestCase):
             self.assertEqual("--volumes" in script[litefuse:model], volumes)
             self.assertEqual("--volumes" in script[model:collectors], volumes)
             self.assertEqual("--volumes" in script[core:], volumes)
+            # The log collector saves its read position when it stops; without the data, the position goes too.
+            self.assertLess(script.index('docker stop -t 5 "$name"', collectors), script.index("docker rm -f", collectors))
+            self.assertEqual("rm -rf .runtime/collector-state" in script[core:], volumes)
+            # The flag page edits a file of the upstream checkout; teardown restores the pinned version.
+            reset = f"git -C .runtime/ai-observe-stack checkout -- {FLAGS_FILE}"
+            self.assertEqual(reset in script[core:], volumes)
 
     def test_shell_runs_from_the_course_root(self):
         lab = object.__new__(ObservabilityLab)
@@ -320,6 +327,117 @@ class GrafanaAlertingTests(unittest.TestCase):
         self.assertEqual(read.call_args.args[0],
                          f"{lab.grafana_url}/api/v1/provisioning/alert-rules/u2/export?format=yaml")
         self.assertEqual(log.call_args.kwargs, {"opened": True})
+
+
+def flag_page(variant, value=0.5):
+    """flagd's ResolveAll answer with paymentFailure at ``variant`` and one other flag."""
+    return json.dumps({"flags": {
+        "adFailure": {"reason": "STATIC", "variant": "off", "boolValue": False, "metadata": {}},
+        "paymentFailure": {"reason": "STATIC", "variant": variant, "doubleValue": value, "metadata": {}},
+    }}).encode()
+
+
+class FeatureFlagTests(unittest.TestCase):
+    def lab(self):
+        return object.__new__(ObservabilityLab)
+
+    def test_wait_asks_flagd_through_the_storefront_until_the_flag_has_the_variant(self):
+        lab = self.lab()
+        with patch("doris_course.doris_client.urllib.request.urlopen") as urlopen, \
+             patch("doris_course.doris_client.time.sleep") as sleep, \
+             patch("doris_course.doris_client.show_sql") as statement, \
+             patch("doris_course.doris_client.show_frame"):
+            urlopen.return_value.__enter__.return_value.read.side_effect = [flag_page("off", 0), flag_page("50%")]
+            frame = lab.wait_for_feature_flag("paymentFailure", "50%")
+        self.assertEqual(sleep.call_count, 1)
+        self.assertEqual(frame.to_dict("records"), [{"flag": "paymentFailure", "variant": "50%", "value": 0.5}])
+        request = urlopen.call_args.args[0]
+        url = f"{lab.demo_url}/flagservice/flagd.evaluation.v1.Service/ResolveAll"
+        self.assertEqual((request.full_url, request.get_method()), (url, "POST"))
+        # The learner sees the same request as a curl command.
+        self.assertIn(f'"{url}"', statement.call_args.args[1])
+        self.assertTrue(statement.call_args.args[1].startswith("curl -s -X POST"))
+
+    def test_a_flag_that_keeps_another_variant_stops_with_the_steps_of_the_flag_page(self):
+        lab = self.lab()
+        clock = itertools.count(0, 100)
+        with patch("doris_course.doris_client.urllib.request.urlopen") as urlopen, \
+             patch("doris_course.doris_client.time.monotonic", side_effect=lambda: next(clock)), \
+             patch("doris_course.doris_client.time.sleep"), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.card") as card:
+            urlopen.return_value.__enter__.return_value.read.return_value = flag_page("off", 0)
+            with self.assertRaises(EnvironmentNotReady):
+                lab.wait_for_feature_flag("paymentFailure", "50%", timeout_seconds=150)
+        message, kind, title = card.call_args.args
+        self.assertEqual((kind, title), ("fail", "paymentFailure is not 50%"))
+        self.assertIn(f"{lab.demo_url}/feature", message)
+        self.assertIn("paymentFailure is off", message)
+
+    def test_an_unknown_flag_and_a_stopped_demo_stop_with_a_card(self):
+        lab = self.lab()
+        clock = itertools.count(0, 100)
+        with patch("doris_course.doris_client.urllib.request.urlopen") as urlopen, \
+             patch("doris_course.doris_client.time.monotonic", side_effect=lambda: next(clock)), \
+             patch("doris_course.doris_client.time.sleep"), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.card") as card:
+            urlopen.return_value.__enter__.return_value.read.return_value = flag_page("50%")
+            with self.assertRaises(EnvironmentNotReady):
+                lab.wait_for_feature_flag("paymentFailures", "50%", timeout_seconds=150)
+        self.assertIn("no feature flag named paymentFailures", card.call_args.args[0])
+        with patch("doris_course.doris_client.urllib.request.urlopen",
+                   side_effect=urllib.error.URLError("Connection refused")), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady):
+                lab.wait_for_feature_flag("paymentFailure", "50%")
+        self.assertEqual(card.call_args.args[1:], ("fail", "The demo's flag service does not answer"))
+        self.assertIn("lab.start_demo()", card.call_args.args[0])
+
+    def test_the_flags_file_is_the_one_that_the_demo_mounts_for_flagd(self):
+        upstream = Path(__file__).resolve().parents[1] / ".runtime/ai-observe-stack"
+        compose = upstream / "doris-opentelemetry-demo/docker-compose.yml"
+        if not compose.is_file():
+            self.skipTest("the pinned DOG stack is not checked out in .runtime/")
+        import yaml
+        flagd = yaml.safe_load(compose.read_text())["services"]["flagd"]
+        self.assertIn("./src/flagd:/etc/flagd", flagd["volumes"])
+        self.assertTrue((upstream / FLAGS_FILE).is_file())
+
+
+class GrafanaDashboardTests(unittest.TestCase):
+    def test_the_dashboard_is_found_by_its_exact_title_and_listed_by_panel(self):
+        lab = object.__new__(ObservabilityLab)
+        found = json.dumps([{"uid": "u0", "title": "Payment incident (copy)"}, {"uid": "u1", "title": "Payment incident"}])
+        dashboard = json.dumps({"dashboard": {"panels": [
+            {"title": "Orders per minute", "type": "timeseries",
+             "targets": [{"format": "time_series", "rawSql": "SELECT 1"}]},
+            {"title": "Notes", "type": "text"},
+        ]}})
+        with patch.object(ObservabilityLab, "_read", side_effect=[found, dashboard]) as read, \
+             patch("doris_course.doris_client.show_sql") as statement, \
+             patch("doris_course.doris_client.show_frame"):
+            frame = lab.grafana_dashboard("Payment incident")
+        # Grafana's anonymous viewer may read dashboards; the learner sees the requests.
+        self.assertEqual(read.call_args_list[0].args[0],
+                         f"{lab.grafana_url}/api/search?type=dash-db&query=Payment%20incident")
+        self.assertEqual(read.call_args_list[1].args[0], f"{lab.grafana_url}/api/dashboards/uid/u1")
+        self.assertIn("curl -s", statement.call_args.args[1])
+        self.assertEqual(frame.to_dict("records"), [
+            {"panel": "Orders per minute", "visualization": "timeseries", "format": "time_series", "sql": "SELECT 1"},
+            {"panel": "Notes", "visualization": "text", "format": None, "sql": ""},
+        ])
+
+    def test_a_dashboard_that_was_not_saved_stops_with_a_card(self):
+        lab = object.__new__(ObservabilityLab)
+        with patch.object(ObservabilityLab, "_read", return_value="[]"), \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady):
+                lab.grafana_dashboard("Payment incident")
+        self.assertEqual(card.call_args.args[1:], ("fail", "Grafana has no dashboard named 'Payment incident'"))
+        self.assertIn("Save dashboard", card.call_args.args[0])
 
 
 class LitefuseTests(unittest.TestCase):

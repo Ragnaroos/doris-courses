@@ -1,110 +1,118 @@
-title: "Module 2 Quiz: Ingesting Observability Data"
-description: Six questions check how logs, metrics, and traces move through OpenTelemetry (OTel) pipelines
-  into Doris, including pull versus push, batching, retry boundaries, and what a seemingly successful
-  trace export actually proves.
+title: 'Module 2 Quiz: Ingesting Observability Data'
+description: Six questions check whether you can read the parts of a Collector pipeline, choose push and
+  pull receivers, predict batching, tell which exporter settings apply only to new tables, judge what
+  an export call proves, and explain which services send which signals.
 questions:
-- id: choose_log_collection_boundary
-  objective: Place file-log collection in the correct pipeline stage
-  prompt: A Doris Frontend (FE) writes rotating log files. A Collector container receives a read-only
-    mount of the FE log directory and can reach Doris on the DOG network. Which pipeline design matches
-    the Lab's log-ingest boundary?
+- id: name_the_pipeline_parts
+  objective: Describe what the receivers, processors, exporters, and extensions of a Collector pipeline
+    do.
+  prompt: The rows of Lab 2's log collector arrive in Doris with service_name doris-fe, although fe.log
+    never names its service. Which part of the pipeline sets it?
   options:
-  - id: doris_reads_disk
-    text: Grafana reads the mounted log file and writes each dashboard row into Doris
-  - id: grafana_file
-    text: The Collector stores logs only in Grafana, while Doris remains responsible only for metrics
-  - id: collector_sql
-    text: Doris reads the mounted log file directly and uses the Collector only as a metrics gateway
-  - id: filelog_to_doris
-    text: A file-log receiver reads the mounted file, processors parse it, and a Doris exporter writes
-      rows
-  answer: filelog_to_doris
-  explanation: The Collector receives the file through a read-only mount, parses its records, and exports
-    them to Doris. Grafana is a visualization layer and does not collect the file into Doris.
+  - id: resource_processor
+    text: The resource processor, which sets the attribute service.name on every record
+  - id: filelog_receiver
+    text: The filelog receiver, which takes the service name from the name of the file
+  - id: doris_exporter
+    text: The Doris exporter, which names each row after the container in which the collector runs
+  - id: file_storage
+    text: The file_storage extension, which records the service of each file that it reads
+  answer: resource_processor
+  explanation: The resource processor adds resource attributes to every record that passes through it,
+    and the exporter writes service.name into service_name. The filelog receiver records the file's name
+    in the attribute log.file.name, not a service name. The exporter maps attributes to columns and does
+    not invent a service name. The file_storage extension only keeps the receiver's read position; it
+    is not on the data path.
 - id: distinguish_pull_and_push
-  objective: Distinguish scrape-based metrics from pushed traces
-  prompt: Doris FE and Backend (BE) endpoints expose Prometheus metrics. A Python application pushes spans
-    to an OpenTelemetry Protocol (OTLP) endpoint. Which statement describes the receivers needed by the
-    Collector?
+  objective: Choose a receiver for a source that pushes its telemetry and for one that must be pulled.
+  prompt: The Doris FE and BE publish their metrics at /metrics and wait to be asked. A Python program
+    sends its spans over OTLP. Which receivers does a collector need?
   options:
-  - id: prometheus_otlp
-    text: A Prometheus receiver scrapes Doris metrics; an OTLP receiver accepts application spans
-  - id: otlp_prometheus
-    text: An OTLP receiver scrapes Doris metrics; a Prometheus receiver waits for application spans
-  - id: file_for_both
-    text: Both sources must be written to a shared log file before the Collector can read them
-  - id: grafana_receivers
-    text: Grafana is the receiver for both sources, and Doris only stores Grafana panel definitions
-  answer: prometheus_otlp
-  explanation: Prometheus metrics are pulled from scrape endpoints, while OTLP is a push protocol used
-    by instrumented applications. Separate receivers can feed one or more Doris export pipelines.
+  - id: prometheus_and_otlp
+    text: A prometheus receiver that scrapes /metrics, and an otlp receiver that the program can reach
+  - id: otlp_for_both
+    text: One otlp receiver for both, because Doris pushes its metrics over OTLP once it is configured
+  - id: prometheus_for_both
+    text: One prometheus receiver for both, because it can also scrape spans from the Python program
+  - id: filelog_for_both
+    text: A filelog receiver for both, after both sources write their telemetry to a shared file
+  answer: prometheus_and_otlp
+  explanation: The FE and BE publish Prometheus text and wait, so a prometheus receiver must pull it,
+    on an interval. The Python program pushes over OTLP, so the collector needs an otlp receiver on a
+    port that the program can reach, such as Lab 2's 127.0.0.1:24328. Doris does not push its metrics
+    over OTLP, a prometheus receiver cannot fetch spans from a program, and writing both to a file would
+    add a step that neither source needs.
 - id: predict_batch_export_timing
-  objective: Predict batching behavior
-  prompt: A Collector batch processor is configured with a send size of 2,000 records and a timeout of
-    5 seconds. Only 20 valid records arrive during the first second, and no error occurs. When should
-    those records normally be exported?
+  objective: Predict when a batch processor sends its data, and what a sending queue and retries guarantee.
+  prompt: A batch processor has send_batch_size 10000 and timeout 10s. A program sends one span, and nothing
+    else arrives. When does the collector export the span?
   options:
-  - id: next_day
-    text: Only after the Collector restarts and flushes its disk queue
-  - id: immediately
-    text: Immediately, because any non-empty batch is exported at once
   - id: at_timeout
-    text: At approximately the 5-second timeout, unless the batch fills sooner
-  - id: never
-    text: Never, because a timeout sends only batches that reached the send size
+    text: About 10 seconds after the batch started, when its timeout passes
+  - id: immediately
+    text: At once, because a batch with a single span has nothing to wait for
+  - id: when_full
+    text: Only after 10,000 spans have arrived, because a batch leaves only when it is full
+  - id: on_restart
+    text: When the collector restarts, because a timeout writes the batch to disk
   answer: at_timeout
-  explanation: Batching exports when the size threshold is reached or when the timeout expires. A small
-    batch is delayed until the timeout rather than being discarded.
-- id: judge_trace_print_evidence
-  objective: Evaluate whether a print statement proves export
-  prompt: Python code creates a span with a BatchSpanProcessor, exits the span context, and prints Data
-    sent successfully!. Doris currently has no matching span row. Which conclusion is best supported?
+  explanation: A batch processor sends a batch when it reaches send_batch_size or when its timeout passes,
+    whichever comes first, so a single span leaves after about 10 seconds. This is why Lab 2's span appears
+    in Doris within about 20 seconds. Sending each span at once would defeat batching, and a batch does
+    not wait for 10,000 spans when its timeout has passed. Batches stay in memory; nothing is written
+    to disk, which is also why a sending queue does not survive a crash.
+- id: table_settings_apply_at_creation
+  objective: Explain which settings of the Doris exporter apply only when it creates a table.
+  prompt: 'otel_logs exists, with daily partitions kept for 7 days. You set history_days: 30 and create_schema:
+    true in a collector''s Doris exporter and restart the collector. What happens to otel_logs?'
   options:
-  - id: grafana_required
-    text: Doris accepts spans only after Grafana opens the trace panel
-  - id: durable_export
-    text: The span is durable in Doris because the program printed a success message
-  - id: queued_not_exported
-    text: The span may still be queued in the batch processor; the print does not prove Doris received
-      it
-  - id: otlp_broken
-    text: OTLP cannot export traces after a span context closes
-  answer: queued_not_exported
-  explanation: A batch span processor can export asynchronously. A print statement only proves that the
-    application reached that line; it does not prove that the span was flushed to the Collector or stored
-    by Doris.
-- id: map_signals_to_target_tables
-  objective: Route telemetry by its data shape
-  prompt: A pipeline receives periodic http.server.duration numeric samples and a text exception event
-    containing a trace identifier. The team wants time-series analysis for the samples and full-text search
-    for the exception. Which mapping is appropriate?
+  - id: nothing_changes
+    text: 'Nothing: CREATE TABLE IF NOT EXISTS leaves the existing table as it is'
+  - id: keeps_30_days
+    text: The table keeps 30 days of partitions from now on, because the exporter alters it
+  - id: recreated
+    text: The exporter drops the table and creates it again with 30 days, losing the old rows
+  - id: refuses_to_start
+    text: The collector refuses to start, because its setting differs from the table's
+  answer: nothing_changes
+  explanation: 'The exporter applies its table settings only when it creates a table. With create_schema:
+    true it runs CREATE TABLE IF NOT EXISTS, which does nothing to an existing table, so otel_logs keeps
+    its 7 days. The exporter does not alter tables, never drops them, and does not compare its settings
+    with the table''s, so the collector starts normally.'
+- id: judge_flush_evidence
+  objective: Judge what a successful export call shows and what only a query in Doris shows.
+  prompt: Python code ends a span, calls provider.force_flush(), and prints Flushed the span. A query
+    for its trace ID in otel_traces returns no row. Which conclusion is best supported?
   options:
-  - id: metrics_logs
-    text: Store duration samples in the metrics table and the exception event in the logs table
-  - id: logs_metrics
-    text: Store duration samples in the logs table and the exception event in the metrics table
-  - id: traces_only
-    text: Store both records only in the traces table as span attributes
-  - id: one_payload
-    text: Store both records in one untyped text column without distinguishing their shape
-  answer: metrics_logs
-  explanation: Numeric time-series samples fit the metrics model. Text events with attributes fit the
-    logs model. The trace identifier supports correlation, but it does not make every record a trace span.
-- id: reason_about_retry_queue
-  objective: Reason about exporter retry and queue limits
-  prompt: The Doris exporter becomes unavailable for two minutes. Its sending queue and retry-on-failure
-    behavior are enabled, and the queue has not filled. What is the most accurate expectation?
+  - id: export_not_proven
+    text: The flush shows only that an export was attempted; check the collector and query again
+  - id: span_stored
+    text: The span is stored in Doris, because force_flush() reports a failed export with an exception
+  - id: query_wrong
+    text: The query must be wrong, because a flushed span is in Doris when the flush call returns
+  - id: grafana_needed
+    text: The span becomes visible in Doris only after Grafana has opened its trace once
+  answer: export_not_proven
+  explanation: 'force_flush() waits for the export attempt but does not report whether it succeeded: when
+    the collector cannot be reached, the SDK only logs a warning. Even a span that the collector accepted
+    still waits for its batch and its load into Doris, so the next step is to check the collector and
+    query again. A flush does not raise an exception on failure, a successful flush does not put the row
+    in Doris at once, and Grafana has no part in loading data.'
+- id: explain_missing_payment_logs
+  objective: Find the evidence of one request in each signal, and tell which services send which signals.
+  prompt: A failed order's trace has error spans in payment and checkout. otel_logs has the proxy's access
+    log line with the order's trace ID, but no row from payment or checkout. What is the best explanation?
   options:
-  - id: disable_batch
-    text: Retries automatically disable batching and guarantee one request per record
-  - id: bounded_delivery
-    text: The Collector retries within configured limits; queued data is not guaranteed forever or across
-      a Collector crash
-  - id: permanent_storage
-    text: Every queued record is permanently durable and will survive any Collector restart
-  - id: direct_array
-    text: Doris pulls the records directly from the application's memory after recovery
-  answer: bounded_delivery
-  explanation: A sending queue and retry settings provide bounded buffering and retry behavior. They do
-    not turn the pipeline into an unlimited durable message system, so long outages or Collector loss
-    can still lose data.
+  - id: not_sent_to_collector
+    text: Payment and checkout write their logs only to their containers' output, not to a Collector
+  - id: errors_filtered
+    text: The Doris exporter loads only log records of severity INFO or lower, so errors are dropped
+  - id: logs_come_later
+    text: Their logs arrive hours later, because logs are exported after the traces of a request
+  - id: stored_with_traces
+    text: Their records have a trace ID, so Doris stores them in otel_traces instead of otel_logs
+  answer: not_sent_to_collector
+  explanation: In the demo, payment and checkout write their logs only to their containers' output, where
+    docker logs shows them, and send no logs to a Collector; the proxy and services such as cart and currency
+    do. The Doris exporter loads every log record whatever its severity, logs are not held back until
+    a trace is complete, and a log record goes to otel_logs whether or not it has a trace ID.

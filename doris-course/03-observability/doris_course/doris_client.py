@@ -9,6 +9,7 @@ import shlex
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -121,6 +122,10 @@ def _scan_reported(profile: str) -> bool:
 # its last evaluation. Grafana's anonymous viewer, which the DOG stack enables, may
 # read it, so the Labs do not depend on the admin password.
 GRAFANA_RULES_PATH = "/api/prometheus/grafana/api/v1/rules"
+# The demo's flag service, flagd, answers through the storefront's proxy, which
+# routes /flagservice/ to it; the flag page, /feature, edits FLAGS_FILE.
+FLAGD_RESOLVE_ALL_PATH = "/flagservice/flagd.evaluation.v1.Service/ResolveAll"
+FLAGS_FILE = "doris-opentelemetry-demo/src/flagd/demo.flagd.json"  # in the upstream checkout
 GRAFANA_HINT = "Check that the DOG stack is running with the cells in Module 1, then rerun this cell."
 MAILPIT_HINT = ("Mailpit starts with the DOG stack: run lab.prepare_environment() in Module 1 again, "
                 "then rerun this cell.")
@@ -176,6 +181,8 @@ class ObservabilityLab:
     RUNTIME_DIRECTORY = ".runtime"
     STACK_DIRECTORY = "ai-observe-stack"
     DORIS_LOG_DIRECTORY = "doris-logs"
+    # Where the Module 2 log collector keeps its read position (file_storage).
+    COLLECTOR_STATE_DIRECTORY = "collector-state"
     DEMO_PORT = env.DEMO_PORT
 
     def __init__(
@@ -552,6 +559,39 @@ class ObservabilityLab:
         show_log(f"The rule {rule!r} as provisioning YAML", text, opened=True)
         return text
 
+    def grafana_dashboard(self, title: str) -> pd.DataFrame:
+        """Show the panels of a saved Grafana dashboard, with the SQL of each, and return them.
+
+        Reads the dashboard from Grafana's API as Grafana's anonymous viewer, so
+        it does not depend on the admin password; the requests are shown first,
+        so that they can be repeated with curl.
+        """
+        search = f"{self.grafana_url}/api/search?type=dash-db&query={urllib.parse.quote(title)}"
+        show_sql(
+            f"Find the dashboard {title!r}, then read it, from Grafana's API",
+            f'curl -s "{search}"\ncurl -s "{self.grafana_url}/api/dashboards/uid/<uid of the dashboard>"',
+        )
+        found = [item for item in json.loads(self._read(search, "Grafana", GRAFANA_HINT)) if item.get("title") == title]
+        if not found:
+            self._failure(
+                f"Grafana has no dashboard named {title!r}",
+                "Save the dashboard in Grafana: click Save dashboard, enter exactly this title, and click Save. "
+                "Then rerun this cell.",
+            )
+            raise EnvironmentNotReady(f"Grafana has no dashboard named {title!r}.")
+        uid = found[0]["uid"]
+        dashboard = json.loads(self._read(f"{self.grafana_url}/api/dashboards/uid/{uid}", "Grafana",
+                                          GRAFANA_HINT)).get("dashboard") or {}
+        rows = [
+            {"panel": panel.get("title"), "visualization": panel.get("type"),
+             "format": target.get("format"), "sql": target.get("rawSql", "")}
+            for panel in dashboard.get("panels") or []
+            for target in panel.get("targets") or [{}]
+        ]
+        frame = pd.DataFrame(rows, columns=["panel", "visualization", "format", "sql"])
+        show_frame(f"The panels of {title} · {self.grafana_url}/d/{uid}", frame)
+        return frame
+
     def connect(
         self,
         *,
@@ -663,7 +703,7 @@ demo_compose() {{
                                        env.MAILPIT_CONTAINER))
         script = self._compose_script(r"""
 echo "[1/4] Prepare the local runtime directory"
-mkdir -p .runtime/doris-logs/fe .runtime/doris-logs/be
+mkdir -p .runtime/doris-logs/fe
 
 echo "[2/4] Check out the pinned DOG stack"
 """ + CHECKOUT_STACK + r"""
@@ -798,9 +838,59 @@ demo_compose ps
         )
 
     def stop_demo(self) -> None:
-        """Stop and remove the demo containers. The telemetry already in Doris stays."""
+        """Stop and remove the demo containers. The telemetry already in Doris stays, and so do its feature flags."""
         # Compose finds a project's containers and networks by their labels, without the files.
         self.shell(f"docker compose -p {env.DEMO_PROJECT} down", title="Stop the OpenTelemetry demo")
+
+    def _feature_flags(self, url: str) -> dict:
+        """Every feature flag of the demo, as the flag service resolves it now."""
+        request = urllib.request.Request(url, data=b'{"context": {}}', method="POST",
+                                         headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return json.loads(response.read().decode("utf-8")).get("flags") or {}
+        except (OSError, http.client.HTTPException, ValueError) as error:
+            self._failure(
+                "The demo's flag service does not answer",
+                f"Could not read {url} ({error}). Check that the demo runs: run lab.start_demo() in "
+                "Module 1, then rerun this cell.",
+            )
+            raise EnvironmentNotReady("the demo's flag service does not answer.")
+
+    def wait_for_feature_flag(self, flag: str, variant: str, *, timeout_seconds: int = 180) -> pd.DataFrame:
+        """Wait until the demo's flag service serves ``variant`` for ``flag``, then show the flag.
+
+        Set the flag in the demo's flag page, {demo_url}/feature. This asks the
+        flag service, flagd, through the storefront's proxy, as the storefront's
+        pages do in the browser; the request is shown first, so that it can be
+        repeated with curl.
+        """
+        url = self.demo_url + FLAGD_RESOLVE_ALL_PATH
+        show_sql(
+            f"Ask the demo's flag service for its flags until {flag} is {variant} "
+            f"(every 2 seconds for up to {timeout_seconds} seconds)",
+            f"curl -s -X POST -H 'Content-Type: application/json' -d '{{\"context\": {{}}}}' \"{url}\"",
+        )
+        started = time.monotonic()
+        while True:
+            found = self._feature_flags(url).get(flag)
+            elapsed = time.monotonic() - started
+            if found is not None and found.get("variant") == variant:
+                break
+            if elapsed >= timeout_seconds:
+                if found is None:
+                    message = f"The demo has no feature flag named {flag}. Check the name in {self.demo_url}/feature."
+                else:
+                    message = (f"{flag} is {found.get('variant')}, not {variant}. Open {self.demo_url}/feature, "
+                               f"choose {variant} in the {flag} card, click save, then rerun this cell.")
+                self._failure(f"{flag} is not {variant}", message)
+                raise EnvironmentNotReady(f"{flag} was not {variant} within {timeout_seconds} seconds.")
+            time.sleep(2)
+        value = next((found[key] for key in ("doubleValue", "boolValue", "stringValue", "intValue") if key in found),
+                     None)
+        frame = pd.DataFrame([{"flag": flag, "variant": found.get("variant"), "value": value}])
+        show_frame(f"{flag} in the demo's flag service · after {elapsed:.0f} seconds", frame)
+        return frame
 
     def _set_be_private_endpoint(self) -> None:
         """Make the FE redirect Stream Loads from other containers to an address where they reach the BE.
@@ -1010,38 +1100,60 @@ echo "[3/3] Show the model server"
 
         With keep_data=True, prepare_environment() and start_litefuse() later
         start Doris, Grafana, and Litefuse again with the same data, and
-        start_local_model() does not download the model again.
+        start_local_model() does not download the model again. Without it, the
+        Module 2 log collector's read position goes too, since it describes how
+        much of the FE log the removed Doris had loaded, and the demo's feature
+        flags go back to off.
         """
         volumes = "" if keep_data else " --volumes"
+        state = f"{self.RUNTIME_DIRECTORY}/{self.COLLECTOR_STATE_DIRECTORY}"
+        stack = f"{self.RUNTIME_DIRECTORY}/{self.STACK_DIRECTORY}"
+        if keep_data:
+            forget = ('echo "[6/6] Keep the Module 2 log collector\'s read position and the demo\'s feature flags"\n'
+                      f'echo "Kept {state}/ and the flags for the next start."')
+        else:
+            # The flag page saves the flags to a file of the upstream checkout; the pinned commit has them all off.
+            forget = f"""echo "[6/6] Forget where the Module 2 log collector stopped reading, and turn the demo's feature flags off"
+rm -rf {state}
+if [ -d {stack}/.git ]; then
+  git -C {stack} checkout -- {FLAGS_FILE}
+fi"""
         containers = " ".join((*env.MODULE2_COLLECTORS, env.CPU_LOAD_CONTAINER))
         # Compose finds each project's containers, networks, and volumes by their labels,
         # so this also works after .runtime/ was deleted. The demo Collector, Litefuse,
         # and the Module 2 collectors are attached to the doris-obs network: remove them first.
         script = f"""set -euo pipefail
 
-echo "[1/5] Remove the OpenTelemetry demo"
+echo "[1/6] Remove the OpenTelemetry demo"
 docker compose -p {env.DEMO_PROJECT} down
 
-echo "[2/5] Remove Litefuse"
+echo "[2/6] Remove Litefuse"
 docker compose -p {env.LITEFUSE_PROJECT} down{volumes}
 
-echo "[3/5] Remove the local model of Module 7's optional lab"
+echo "[3/6] Remove the local model of Module 7's optional lab"
 docker compose -p {env.LOCAL_MODEL_PROJECT} down{volumes}
 
-echo "[4/5] Remove the Module 2 collectors and the Module 8 CPU load"
+echo "[4/6] Remove the Module 2 collectors and the Module 8 CPU load"
 for name in {containers}; do
   if docker container inspect "$name" >/dev/null 2>&1; then
-    docker rm -f "$name"
+    # Stop first, so that the log collector saves its read position.
+    docker stop -t 5 "$name" >/dev/null 2>&1 || true
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    echo "$name"
   fi
 done
 
-echo "[5/5] Remove the DOG core services"
+echo "[5/6] Remove the DOG core services"
 docker compose -p {env.PROJECT} down{volumes}
+
+{forget}
 """
         self.shell(script, title="Remove the observability environment")
         self.connection = None
-        kept = ("The volumes of Doris, Grafana, Litefuse, and the local model were kept." if keep_data
-                else "Their volumes were removed too.")
+        kept = ("The volumes of Doris, Grafana, Litefuse, and the local model were kept, and so were the "
+                "Module 2 log collector's read position and the demo's feature flags." if keep_data
+                else "Their volumes were removed too, and so was the Module 2 log collector's read position; "
+                "the demo's feature flags are off again.")
         card(
             f"Removed the course containers and networks. {kept} The upstream checkout and the "
             f"Doris logs stay in {self.RUNTIME_DIRECTORY}/; delete that directory if you no longer need them.",

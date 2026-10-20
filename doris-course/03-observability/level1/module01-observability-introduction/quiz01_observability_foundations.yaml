@@ -1,109 +1,124 @@
-title: "Module 1 Quiz: Observability Foundations in the DOG Stack"
-description: Six questions check whether you can choose the right telemetry signal, assign responsibilities
-  across Doris, OpenTelemetry, and Grafana (DOG), and judge whether the available evidence proves that
-  telemetry reached the expected destination.
+title: 'Module 1 Quiz: Observability Foundations in the DOG Stack'
+description: Six questions check whether you can choose a telemetry signal, read the fields that join
+  spans, divide the work of the DOG stack, follow the demo's telemetry into Doris, judge the evidence
+  that it arrived, and confirm the payment failure.
 questions:
-- id: select_signal_for_request_path
-  objective: Choose the telemetry signal for a request-path question
-  prompt: A checkout request crosses three services. The team needs the timing of each hop and the parent-child
-    relationship between operations. Which telemetry signal directly models that request path?
+- id: choose_signal_for_failing_step
+  objective: Choose logs, metrics, or traces for an operational question.
+  prompt: Customers report that some orders fail. For one failed order, the engineer on call needs to
+    see which services the request passed through and which step returned the error. Which signal answers
+    this directly?
   options:
-  - id: metrics
-    text: Metrics, because one numeric time series can represent every hop
   - id: traces
-    text: Traces, because spans record operations and their parent-child relationships
-  - id: dashboard
-    text: A Grafana dashboard, because panels create the request hierarchy
+    text: Traces, because the order's spans in each service share one trace ID and mark the failed step
+  - id: metrics
+    text: Metrics, because a counter of failed charges per minute shows the path of each failed order
   - id: logs
-    text: Logs, because each line records a complete request path
+    text: Logs, because every service writes a line for each request that names the service that failed
+  - id: dashboard
+    text: A dashboard, because its panels join the services of one request into a single view
   answer: traces
-  explanation: Traces represent a request as a set of related spans, including timing and parent-child
-    relationships. Logs and metrics can be correlated with a trace, but neither signal directly encodes
-    the request hierarchy.
-- id: interpret_running_collector_with_empty_table
-  objective: Judge what an unhealthy data path does and does not prove
-  prompt: The OpenTelemetry (OTel) Collector process has been running for 12 minutes. During that period,
-    the Doris log table received no rows and a Grafana log query returned no results. Which conclusion
-    is best supported by this evidence?
+  explanation: 'Traces follow one request across services: every span of the order carries its trace ID,
+    and the span where the step failed has an error status. A counter of failed charges says how often
+    orders fail, not which path one order took. Logs hold only what each service chooses to write, and
+    in the demo the payment and checkout services send none. A dashboard shows what its queries return;
+    it does not join the spans of a request by itself.'
+- id: join_spans_by_their_ids
+  objective: Explain how the trace ID and the parent span ID join the spans of one request.
+  prompt: In otel_traces, span A has the span ID 7f3a and no parent span ID. Span B has the same trace
+    ID as A and the parent span ID 7f3a. Span C has a different trace ID. What do these fields say?
   options:
-  - id: grafana_deletes
-    text: Grafana must be deleting rows before display
-  - id: metrics_required
-    text: Doris cannot accept logs unless metrics are also being ingested
-  - id: stack_healthy
-    text: The whole DOG stack is healthy because the Collector is running
-  - id: possible_pipeline_failure
-    text: The Collector can be running while its receiver input or Doris export path is failing; inspect
-      both stages
-  answer: possible_pipeline_failure
-  explanation: A running process only proves that the Collector process is alive. It does not prove that
-    the log receiver is reading records or that the Doris exporter is delivering them. Those stages must
-    be checked separately.
+  - id: b_child_of_a
+    text: B is a child of A in the same request, and C belongs to another request
+  - id: c_parent_of_a
+    text: C is the parent of A, because A has no parent span ID of its own
+  - id: same_service
+    text: A and B were written by the same service, because they share a trace ID
+  - id: b_reports_error
+    text: B failed, because a span with a parent span ID reports an error to its parent
+  answer: b_child_of_a
+  explanation: 'Every span of a request has the request''s trace ID, and a span''s parent span ID is the
+    span ID of the span that started it. B has A''s trace ID and A''s span ID as its parent, so it is
+    A''s child in the same request, and A, without a parent, is the root span. C has another trace ID,
+    so it belongs to another request and cannot be A''s parent. A shared trace ID does not mean a shared
+    service: context propagation carries the trace ID from service to service. The parent span ID says
+    nothing about errors; the status code does.'
 - id: assign_dog_responsibilities
-  objective: Distinguish collection, storage, and visualization responsibilities
-  prompt: A platform team must ingest logs, metrics, and traces from many services, retain them for SQL
-    analysis, and expose operational views. Which responsibility split matches the DOG architecture?
+  objective: Assign collection, storage, and visualization to the parts of the DOG stack.
+  prompt: A team adopts the DOG stack for the logs, metrics, and traces of many services. Which division
+    of work matches the stack?
   options:
   - id: collector_doris_grafana
-    text: OTel Collector receives and exports telemetry; Doris stores and queries it; Grafana visualizes
+    text: The Collector receives and exports telemetry, Doris stores and queries it, and Grafana shows
       it
-  - id: grafana_store
-    text: Grafana stores telemetry; Doris collects it; the OTel Collector renders charts
-  - id: doris_collect
-    text: Doris collects from applications; Grafana stores the raw data; the OTel Collector only authenticates
-      users
-  - id: app_storage
-    text: Each application stores all telemetry locally; Doris and Grafana only cache the latest request
+  - id: grafana_stores
+    text: Grafana stores the telemetry in its dashboards, Doris collects it, and the Collector draws charts
+  - id: doris_collects
+    text: Doris pulls telemetry from each service, Grafana keeps the raw records, and the Collector signs
+      users in
+  - id: services_store
+    text: Each service keeps its own telemetry, and Doris and Grafana only cache the latest requests
   answer: collector_doris_grafana
-  explanation: The OTel Collector owns collection and export, Doris provides analytical storage and query,
-    and Grafana owns visualization. Keeping these responsibilities separate is the purpose of the DOG
-    stack.
-- id: prove_demo_telemetry_reached_dog
-  objective: Select the strongest end-to-end evidence
-  prompt: After generating traffic from the demo storefront, which observation is the strongest evidence
-    that request-specific traces completed the path into Doris and are visible through Grafana?
+  explanation: 'The OpenTelemetry Collector receives telemetry, processes it, and exports it; Doris stores
+    it in tables and answers SQL over it; Grafana shows it in searches, traces, dashboards, and alerts.
+    Grafana stores no telemetry, only its dashboards and settings. Doris does not collect from the services:
+    the Collector''s exporter loads the data into it. The services do not keep their telemetry: they send
+    it to a Collector.'
+- id: follow_demo_telemetry_path
+  objective: Trace the path that the demo's telemetry takes from a service to a table in Doris.
+  prompt: The demo's own Collector stops, while the DOG Collector and Doris keep running. What happens
+    to the telemetry in Doris?
   options:
-  - id: demo_page
-    text: The demo storefront page loads without an error
+  - id: demo_rows_stop
+    text: Rows from the demo's services stop, while the DOG Collector's own host metrics keep arriving
+  - id: services_switch
+    text: The services send directly to the DOG Collector instead, so nothing changes in Doris
+  - id: doris_pulls_later
+    text: Doris pulls the missing telemetry from the services once the demo's Collector is back
+  - id: all_tables_stop
+    text: Every table in Doris stops receiving rows, because all of the telemetry passes through the demo's
+      Collector
+  answer: demo_rows_stop
+  explanation: 'The demo''s services send their telemetry over OTLP to the demo''s Collector, which forwards
+    it to the DOG Collector, so nothing from the demo reaches Doris while it is stopped. The DOG Collector''s
+    own host metrics do not pass through the demo''s Collector and keep arriving. The services send to
+    the Collector that they are configured for and do not switch to another. Doris does not pull telemetry
+    from the services: the exporter pushes it, and data that never reached a Collector is lost.'
+- id: prove_demo_telemetry_reached_doris
+  objective: Judge what evidence shows that telemetry reached Doris.
+  prompt: After you start the demo, which observation best shows that its traces reached Doris?
+  options:
+  - id: recent_rows
+    text: otel_traces has rows from the last few minutes, sent by the demo's services
   - id: containers_running
-    text: The Doris, Collector, and Grafana containers are in the running state
-  - id: request_rows_visible
-    text: New request-specific trace rows are present in Doris and can be queried through Grafana
-  - id: config_readable
-    text: The Collector can read its YAML configuration file
-  answer: request_rows_visible
-  explanation: Request-specific rows visible through the storage and visualization layers provide end-to-end
-    evidence. A running page or process proves only that an earlier part of the path is available.
-- id: choose_signal_for_cpu_trend
-  objective: Choose telemetry for time-based operational analysis
-  prompt: An operations team needs 15-second CPU-utilization samples for each Doris node over seven days,
-    with trend and percentile panels. Which signal is designed for this requirement?
+    text: All 23 demo containers and the four containers of the DOG stack are running
+  - id: storefront_answers
+    text: The storefront page loads, and you can add a product to the cart without an error
+  - id: collector_ready
+    text: The DOG Collector's log says that it is ready and has started its trace pipeline
+  answer: recent_rows
+  explanation: 'Recent rows in otel_traces from the demo''s services are the end of the path: the spans
+    were sent, forwarded, exported, and loaded. Running containers show only that the processes started.
+    A working storefront shows that the services answer requests, not that their telemetry left them.
+    A ready Collector can receive data, but its log does not show that any spans passed through it or
+    that Doris loaded them.'
+- id: confirm_payment_failure
+  objective: Start a failure with a feature flag and confirm it in the telemetry.
+  prompt: You set the demo's flag paymentFailure to 50% and saved it. Which observation confirms that
+    the failure is happening?
   options:
-  - id: dashboard
-    text: A dashboard, because the dashboard becomes the source of the samples
-  - id: logs
-    text: Application logs, because one log line is emitted for every CPU sample
-  - id: metrics
-    text: Metrics, because numeric samples have timestamps and dimensions for time-series analysis
-  - id: traces
-    text: Traces, because the longest span represents CPU utilization
-  answer: metrics
-  explanation: Metrics are timestamped numeric samples with dimensions such as node, which makes them
-    the appropriate signal for utilization trends and percentile analysis.
-- id: infer_signal_pipeline_independence
-  objective: Reason about independent signal pipelines
-  prompt: Checkout metrics remain visible after a new test, but no new checkout traces arrive. Traces
-    from another service still arrive. Which conclusion is best supported?
-  options:
-  - id: independent_pipeline
-    text: The checkout trace instrumentation or its trace-delivery path can fail independently of checkout
-      metrics
-  - id: grafana_hides
-    text: Grafana cannot display traces when metrics are displayed at the same time
-  - id: doris_restart
-    text: Doris must have restarted and disabled only the trace table
-  - id: metrics_prove_traces
-    text: Checkout traces must have arrived because checkout metrics arrived
-  answer: independent_pipeline
-  explanation: Logs, metrics, and traces can use different receivers, exporters, and application instrumentation.
-    Success in one signal pipeline does not prove that another signal pipeline is healthy.
+  - id: error_spans
+    text: New spans of oteldemo.CheckoutService/PlaceOrder have the status STATUS_CODE_ERROR
+  - id: flag_page
+    text: The flag page shows 50% in the paymentFailure card after you reload it
+  - id: error_logs
+    text: New log rows of severity ERROR from the payment service appear in otel_logs, one per failed
+      charge
+  - id: host_cpu
+    text: The host's CPU rises, because the payment service retries every failed charge
+  answer: error_spans
+  explanation: 'The checkout service records each order as a PlaceOrder span, whose status is STATUS_CODE_ERROR
+    when the payment fails, so new error spans confirm that orders now fail. The flag page shows only
+    the setting that you saved, not its effect. The payment service writes its errors only to its container''s
+    output, so no error rows arrive in otel_logs. The failure adds no CPU load: the payment service rejects
+    the charge at once and retries nothing.'

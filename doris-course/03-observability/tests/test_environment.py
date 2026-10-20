@@ -249,9 +249,53 @@ class EnvironmentTests(unittest.TestCase):
             exporter = config["exporters"]["doris"]
             with self.subTest(config=path.name):
                 self.assertEqual(exporter["endpoint"], f"http://{environment.DORIS_CONTAINER}:8040")
-                self.assertEqual(exporter["mysql_endpoint"], f"{environment.DORIS_CONTAINER}:9030")
                 # The DOG Collector writes UTC into the same tables, which partition by UTC days.
                 self.assertEqual(exporter["timezone"], "UTC")
+                # The DOG Collector created the tables in Module 1. Settings that the exporter uses only
+                # to create tables would have no effect, and creating the trace tables again would
+                # reset the exporter's otel_traces_graph job.
+                self.assertIs(exporter["create_schema"], False)
+                for setting in ("mysql_endpoint", "history_days", "create_history_days", "replication_num"):
+                    self.assertNotIn(setting, exporter)
+
+    def test_module2_log_collector_reads_the_directory_and_keeps_its_read_position(self):
+        config = yaml.safe_load((MODULE2_LAB.parent / "otel_for_logs.yaml").read_text())
+        state = config["extensions"]["file_storage"]["directory"]
+        self.assertEqual(config["service"]["extensions"], ["file_storage"])
+        receiver = config["receivers"]["filelog"]
+        self.assertEqual(receiver["storage"], "file_storage")
+        # The FE rotates fe.log by renaming it; a mounted directory shows the new file, a mounted file does not.
+        self.assertEqual(receiver["include"], ["/var/log/doris-fe/fe.log"])
+        cell = next(source for path, source in notebook_sources()
+                    if path == MODULE2_LAB and "--name doris-obs-log2doris " in source)
+        self.assertIn('-v "$DORIS_FE_LOG_DIR:/var/log/doris-fe:ro"', cell)
+        self.assertIn('STATE_DIR="$PWD/.runtime/collector-state/log2doris"', cell)
+        self.assertIn(f'-v "$STATE_DIR:{state}"', cell)
+        # The collector writes its read position to a directory of the learner's.
+        self.assertIn('--user "$(id -u):$(id -g)"', cell)
+        # A running collector saves its position only when it stops gracefully.
+        self.assertLess(cell.index("docker stop doris-obs-log2doris"), cell.index("docker run"))
+        self.assertNotIn("docker rm -f", cell)
+
+    def test_module2_collectors_have_only_the_receivers_that_receive_data(self):
+        metrics = yaml.safe_load((MODULE2_LAB.parent / "otel_for_metrics.yaml").read_text())
+        # Nothing can reach an OTLP receiver whose port is not published.
+        self.assertEqual(list(metrics["receivers"]), ["prometheus"])
+        self.assertEqual(metrics["service"]["pipelines"]["metrics"]["receivers"], ["prometheus"])
+        # Doris publishes no units; the course does not invent them.
+        self.assertNotIn("transform", metrics.get("processors", {}))
+        # With max_filter_ratio 1, a load that rejects every row still counts as a success.
+        self.assertNotIn("max_filter_ratio", metrics["exporters"]["doris"].get("headers", {}))
+        traces = yaml.safe_load((MODULE2_LAB.parent / "otel_for_traces.yaml").read_text())
+        # Only OTLP/HTTP is published on the host (DORIS_OBS_TRACES_OTLP_HTTP_PORT).
+        self.assertEqual(list(traces["receivers"]["otlp"]["protocols"]), ["http"])
+
+    def test_doris_mounts_only_the_fe_log_directory(self):
+        doris = load_compose(ENVIRONMENT_DIR / "compose.dog.yml")["services"]["doris"]
+        logs = [volume for volume in doris["volumes"]["value"] if "/log" in volume]
+        # Module 2 reads the FE log; nothing reads the BE log on the host.
+        self.assertEqual(logs, ["${DORIS_OBS_COURSE_ROOT:?set DORIS_OBS_COURSE_ROOT}/.runtime/doris-logs/fe:"
+                                "/opt/apache-doris/fe/log"])
 
     def test_module2_spans_go_to_the_trace_collector(self):
         """Lab 2 sends its span to doris-obs-traces2doris, not to the DOG Collector."""
