@@ -179,7 +179,7 @@ Open [Lab 2: Observe Storage and Write Batches](lab02_observe_storage.ipynb). Yo
 4. Compare a query's plan with the scan counters of its Query Profile.
 5. Practice: one date in both tables, and why the sort key does not help that filter.
 
-You need the course sandbox from Module 1. The [Level 1 extension labs](../extensions/README.md) repeat these observations on 100,000 rows.
+You need the course sandbox from Module 1. The optional [extension Lab on batches, partitions, and Profile](../extensions/extension23_physical_design.ipynb) repeats these observations on 100,000 rows.
 
 ## Summary
 

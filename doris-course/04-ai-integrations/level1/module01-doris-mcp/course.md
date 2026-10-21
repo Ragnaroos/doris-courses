@@ -842,7 +842,7 @@ to tell their statements apart. The Host's conversation history adds the
 prompts behind each call.
 
 Further reading, optional: the Data Warehousing course's
-[11.4 Put a Boundary Around MCP Access](../../../02-data-warehousing/level2/module11-bi-and-ai/course.md#114-put-a-boundary-around-mcp-access)
+[11.5 Bound What an AI Tool Can Read](../../../02-data-warehousing/level2/module11-bi-and-ai/course.md#115-bound-what-an-ai-tool-can-read)
 and [Module 12: Publishing, Permissions, and Audit](../../../02-data-warehousing/level3/module12-publishing-permissions-audit/course.md)
 show scoped grants, column privileges, and row policies for consumers.
 

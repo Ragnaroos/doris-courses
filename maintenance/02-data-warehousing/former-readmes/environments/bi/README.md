@@ -3,7 +3,8 @@
 Run Lab 9's independent case, Lab 10's payment metrics, and then Lab 11. Its explicit `build_payment_dashboard(lab, start=True)` call builds/starts this service, creates a view-only Doris reader, provisions three charts, and verifies real chart-query values. Open the emitted URL to review their rendering and SQL.
 
 - Pinned Superset 4.1.2 and pydoris 1.1.0; native mysqlclient dependencies are built into the image.
-- Allow about 2 GiB additional RAM and an internet connection for the first build. The service binds loopback port 51888 only.
+- Allow about 2 GiB additional RAM and an internet connection for the first build. The service binds loopback port 51888 only; to use another, start Jupyter with `DW_BI_PORT` set, for example `DW_BI_PORT=61888 .venv/bin/jupyter lab`.
+- The helper checks the port before it starts anything. When the start fails, its message says whether the image could not be downloaded or built (internet access), Docker ran out of memory, or the service did not become healthy; `docker compose --project-name doris-warehousing-bi --file environments/bi/compose.yml logs --tail 80` shows the service's log.
 - Public **local teaching UI** credentials: `course_admin` / `course_local_only`. The generated Doris reader password is separate and is not displayed.
 - SQLite metadata, a fixed teaching secret and HTTP are not a production deployment. Never publish this port on a public interface.
 - From the course root, stop without deleting metadata:

@@ -13,8 +13,9 @@ services:
     environment:
       MINIO_ROOT_USER: course_backup
       MINIO_ROOT_PASSWORD: course_backup_local_only
+    # Change the host port with DW_BACKUP_S3_PORT before starting Jupyter (dw_course/environment.py).
     ports:
-      - '127.0.0.1:51910:9000'
+      - '127.0.0.1:${DW_BACKUP_S3_PORT:-51910}:9000'
     volumes:
       - backup-objects:/data
     healthcheck:

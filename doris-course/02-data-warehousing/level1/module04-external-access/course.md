@@ -168,7 +168,7 @@ Open [Lab 4: Query an Iceberg Table and Its Files](lab04_query_iceberg.ipynb). Y
 4. Read the table's data file with the S3 table function and load it into `orders_from_file`.
 5. Practice: the second day's orders, with missing customers counted, and the plans of the lake and the internal table.
 
-You need the course sandbox from Module 1. The Lab starts Silo and an Iceberg REST Catalog on 127.0.0.1:51900 and 51818; the first start downloads their images. See the [lake table environment notes](../../environments/lakehouse/README.md) for the ports and stopping them. The sample is the ten orders of Module 1, under the WWI data's MIT license.
+You need the course sandbox from Module 1. The Lab starts Silo and an Iceberg REST Catalog on 127.0.0.1:51900 and 51818; the first start downloads their images. The course README's [Environment](../../README.md#environment) section lists the ports and their variables, and its [Clean up](../../README.md#clean-up) section says how to stop and remove the lake. The sample is the ten orders of Module 1, under the WWI data's MIT license.
 
 ## Summary
 

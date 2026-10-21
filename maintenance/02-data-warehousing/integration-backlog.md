@@ -2,7 +2,7 @@
 
 更新于 2026-09-20。课程讲义、七个主线 Lab、三份基础扩展 Notebook 与两个持续接入选做 Lab 是不同交付物；
 “有讲解”“手工验证片段”“已有可重跑 Notebook”分开记录，不能互相替代。
-数据基线以课程 `datasets/README.md`、manifest 和独立预期文件为准。
+数据基线以课程 README 的 Dataset 一节、manifest 和独立预期文件为准（原 `datasets/README.md` 在 `former-readmes/datasets/README.md`）。
 运行条件与结果见 [VALIDATION.md](VALIDATION.md)。
 
 ## 已有可运行材料
@@ -20,9 +20,9 @@
 | Module 6 | 13 输入 → 10 合格、3 拒收；完整质量对账与错误注入；扩展独立表加列和 INT→BIGINT，检查任务与下游投影 | 更复杂 Schema Change、真实动态新鲜度、调度集成 |
 | Module 7 | 主线部分更新、软删除、SQL DELETE、乱序和人工重放；扩展导入删除版本裁决、暂存事件内容冲突检测 | 主线模拟重放不能代替真实恢复；选做 Lab 5B 仅覆盖受控 Savepoint 恢复；多写者原子拒收；不能把暂存检查叫作生产冲突处理服务 |
 
-持续接入选做入口：[Lab 5A / 5B 环境与运行说明](../../doris-course/02-data-warehousing/environments/streaming/README.md)。
+持续接入选做入口：[Lab 5A / 5B 环境与运行说明](former-readmes/environments/streaming/README.md)。
 
-基础扩展入口：[Level 1 扩展实验](../../doris-course/02-data-warehousing/level1/extensions/README.md)。
+基础扩展入口：[Level 1 扩展实验](former-readmes/level1/extensions/README.md)。
 扩展在独立 ext_* 表执行，不修改主线数据，不增加视频数。需要 PyArrow 的扩展依赖单独安装。
 
 ## 介绍型内容与可选的后续集成验证

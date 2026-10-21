@@ -19,10 +19,10 @@ Complete each module in the order **Course → Lab → Quiz**. The course explai
 
 | Module | Topic | Materials |
 | --- | --- | --- |
-| 8 | Views and Materialized Views | [Course](module08-views-materialized-views/course.md) · [Lab](module08-views-materialized-views/lab08_views_and_materialized_views.ipynb) · [Quiz](module08-views-materialized-views/quiz08_views_and_materialized_views.ipynb) |
-| 9 | Warehouse Modeling and Joins | [Course](module09-modeling-and-joins/course.md) · [Lab](module09-modeling-and-joins/lab09_modeling_and_joins.ipynb) · [Quiz](module09-modeling-and-joins/quiz09_modeling_and_joins.ipynb) |
-| 10 | Metric Processing and Delivery | [Course](module10-metric-processing/course.md) · [Lab](module10-metric-processing/lab10_metric_processing.ipynb) · [Quiz](module10-metric-processing/quiz10_metric_processing.ipynb) |
-| 11 | BI and AI Applications | [Course](module11-bi-and-ai/course.md) · [Lab](module11-bi-and-ai/lab11_bi_and_ai_delivery.ipynb) · [Quiz](module11-bi-and-ai/quiz11_bi_and_ai.ipynb) |
+| 8 | Views and Materialized Views | [Course](../../../../doris-course/02-data-warehousing/level2/module08-views-materialized-views/course.md) · [Lab](../../../../doris-course/02-data-warehousing/level2/module08-views-materialized-views/lab08_views_and_materialized_views.ipynb) · [Quiz](../../../../doris-course/02-data-warehousing/level2/module08-views-materialized-views/quiz08_views_and_materialized_views.ipynb) |
+| 9 | Warehouse Modeling and Joins | [Course](../../../../doris-course/02-data-warehousing/level2/module09-modeling-and-joins/course.md) · [Lab](../../../../doris-course/02-data-warehousing/level2/module09-modeling-and-joins/lab09_modeling_and_joins.ipynb) · [Quiz](../../../../doris-course/02-data-warehousing/level2/module09-modeling-and-joins/quiz09_modeling_and_joins.ipynb) |
+| 10 | Metric Processing and Delivery | [Course](../../../../doris-course/02-data-warehousing/level2/module10-metric-processing/course.md) · [Lab](../../../../doris-course/02-data-warehousing/level2/module10-metric-processing/lab10_metric_processing.ipynb) · [Quiz](../../../../doris-course/02-data-warehousing/level2/module10-metric-processing/quiz10_metric_processing.ipynb) |
+| 11 | BI and AI Applications | [Course](../../../../doris-course/02-data-warehousing/level2/module11-bi-and-ai/course.md) · [Lab](../../../../doris-course/02-data-warehousing/level2/module11-bi-and-ai/lab11_bi_and_ai_delivery.ipynb) · [Quiz](../../../../doris-course/02-data-warehousing/level2/module11-bi-and-ai/quiz11_bi_and_ai.ipynb) |
 
 ## What you will be able to do
 

@@ -8,7 +8,7 @@ from pathlib import Path
 import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
-LESSONS = sorted(ROOT.glob("level1/module*/course.md"))
+LESSONS = sorted(ROOT.glob("level*/module*/course.md"))
 READING = ROOT / "level1/module05-ingestion/optional05_continuous_ingestion.md"
 
 
@@ -26,8 +26,9 @@ def quiz_for(path, text):
 
 
 class LessonTests(unittest.TestCase):
-    def test_every_level1_module_has_a_lesson(self):
-        self.assertEqual([lesson.parent for lesson in LESSONS], sorted(ROOT.glob("level1/module*")))
+    def test_every_module_has_a_lesson(self):
+        self.assertEqual([lesson.parent for lesson in LESSONS], sorted(ROOT.glob("level*/module*")))
+        self.assertEqual(len(LESSONS), 14)
 
     def test_a_lesson_names_its_module_as_its_lab_and_quiz_do(self):
         for path in LESSONS:
@@ -42,6 +43,37 @@ class LessonTests(unittest.TestCase):
                 header = "".join(json.loads(lab.read_text())["cells"][0]["source"])
                 self.assertIn(f"**{heading}** · [Lesson](course.md) · [Quiz]({quiz_yaml.with_suffix('.ipynb').name})", header)
                 self.assertIn(f"]({lab.name})", lesson)
+                # The Lab's cover shows the title and the minutes that the lesson gives it.
+                lab_title = re.search(rf"^## Lab {number}: (.+)$", lesson, re.M)[1]
+                lab_minutes = re.search(r"Estimated time \| About \d+ minutes: reading \d+, Lab (\d+)", lesson)[1]
+                self.assertIn(f">LAB {number} · DATA WAREHOUSING WITH APACHE DORIS</div>", header)
+                self.assertIn(f'font-size:30px;line-height:1.3;font-weight:750;margin:0 0 10px">{lab_title}</div>', header)
+                self.assertIn(f"Plan about {lab_minutes} minutes", header)
+                self.assertEqual(header.count("<div"), header.count("</div>"))
+                quiz_header = "".join(json.loads(quiz_yaml.with_suffix(".ipynb").read_text())["cells"][0]["source"])
+                self.assertIn(f">QUIZ {int(number):02d} · DATA WAREHOUSING WITH APACHE DORIS</div>", quiz_header)
+                self.assertIn(f'font-size:30px;line-height:1.3;font-weight:750;margin:0 0 10px">{name}</div>', quiz_header)
+                self.assertEqual(quiz_header.count("<div"), quiz_header.count("</div>"))
+
+    def test_the_course_readme_lists_every_module_and_port(self):
+        from dw_course.environment import BACKUP_PORTS, BI_PORTS, LAKE_PORTS, SANDBOX_PORTS
+
+        readme = (ROOT / "README.md").read_text()
+        for heading in ("Who this course is for", "What you will learn", "Course outline", "Environment",
+                        "Get started", "Dataset", "Clean up", "Troubleshooting"):
+            self.assertIn(f"\n## {heading}\n", readme)
+        outline = readme.split("## Course outline", 1)[1].split("\n## ", 1)[0]
+        rows = re.findall(r"^\| (\d) \| \[(Module \d+: [^\]]+)\]\(([^)]+)\) \| [^|]+ \| (\d+) min \|$", outline, re.M)
+        self.assertEqual([path for _, _, path, _ in rows], [str(path.relative_to(ROOT)) for path in LESSONS])
+        for level, heading, path, minutes in rows:
+            with self.subTest(module=heading):
+                lesson = (ROOT / path).read_text()
+                self.assertTrue(lesson.startswith(f"# {heading}\n"))
+                self.assertEqual(path.split("/")[0], f"level{level}")
+                self.assertIn(f"Estimated time | About {minutes} minutes:", lesson)
+        environment = readme.split("## Environment", 1)[1].split("\n## ", 1)[0]
+        for variable, (port, _) in {**SANDBOX_PORTS, **LAKE_PORTS, **BI_PORTS, **BACKUP_PORTS}.items():
+            self.assertRegex(environment, rf"\| {port} \| [^|]+ \| `{variable}` \|")
 
     def test_a_lesson_has_the_sections_of_the_course_template(self):
         for path in LESSONS:
@@ -78,6 +110,25 @@ class LessonTests(unittest.TestCase):
                 # One question per objective, in the lesson's own words.
                 self.assertEqual(sorted(question["objective"] for question in quiz["questions"]),
                                  sorted(objectives(text)))
+
+    def test_level2_and_3_lessons_label_the_statements_that_write(self):
+        # Level 1's examples have their own rules in test_course.py.
+        for path in LESSONS:
+            if path.parts[-3] == "level1":
+                continue
+            lesson = path.read_text()
+            blocks = re.findall(r"(?:^((?:[^\n]+\n)?[^\n]+)\n\n(<!-- reading-only-example -->)\n)?^```sql\n(.*?)^```",
+                                lesson, re.M | re.S)
+            self.assertTrue(blocks, path)
+            for label, marker, block in blocks:
+                with self.subTest(lesson=path.parent.name, block=block.split("\n", 1)[0]):
+                    if marker:
+                        # A statement that writes shows what the Lab runs, or that nothing runs it.
+                        self.assertRegex(label, r"^(?:.+\n)?\*\*SQL reading example: .+\.\*\*")
+                        self.assertRegex(label, r"Do not (?:rerun it after|run (?:it|them) outside) the Lab|not executed in the Lab")
+                        continue
+                    for statement in (s.strip() for s in block.split(";") if s.strip()):
+                        self.assertRegex(statement, r"^(SELECT|WITH|EXPLAIN|SHOW)\b")
 
     def test_external_links_point_at_versioned_doris_documentation(self):
         for path in [*LESSONS, READING]:

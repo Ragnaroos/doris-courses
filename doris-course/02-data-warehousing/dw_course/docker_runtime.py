@@ -210,11 +210,22 @@ def connect_sandbox(*, module=None):
 RELOADABLE_TABLES = {"wwi_customers", "wwi_products"}
 
 
+# The tables each Lab reads from earlier Labs: (rows when complete, the Lab that writes them).
+PREREQUISITES = {
+    6: {"wwi_customers": (663, 5)},
+    7: {"wwi_products": (227, 5), "customers": (663, 6), "orders_clean": (10, 6)},
+    8: {"orders_current": (11, 7), "order_events": (18, 7)},
+    9: {"customers": (663, 6), "orders_current": (11, 7), "order_events": (18, 7)},
+    10: {"orders_fact_l2": (11, 9), "dwd_orders_l2": (8, 9), "dwd_payments_l2": (6, 9), "customers_case_dim_l2": (5, 9)},
+    11: {"daily_order_metrics_l2": (3, 10)},
+    12: {"orders_fact_l2": (11, 9), "bi_order_metrics_l2": (2, 11)},
+}
+LAB_STEPS = {5: "Lab 5 (historical import)", 6: "Lab 6 (quality checks)", 7: "Lab 7 (current state and replay)",
+             9: "Lab 9 (modeling and joins)", 10: "Lab 10 (metric processing)", 11: "Lab 11 (BI and AI consumers)"}
+
+
 def _check_prerequisites(lab, module):
-    requirements = {
-        6: {"wwi_customers": (663, 5)},
-        7: {"wwi_products": (227, 5), "customers": (663, 6), "orders_clean": (10, 6)},
-    }.get(module, {})
+    requirements = PREREQUISITES.get(module, {})
     if not requirements:
         return
     existing = {row[0] for row in lab.query("SHOW TABLES")}
@@ -227,11 +238,10 @@ def _check_prerequisites(lab, module):
             missing.append(table)
             upstream.add(source)
     if missing:
-        steps = {5: "Lab 5 (historical import)", 6: "Lab 6 (quality checks)"}
         verb = "is" if len(missing) == 1 else "are"
         raise SetupRequired(
             f"Lab {module} needs data in {lab.database}: {', '.join(missing)} {verb} missing or incomplete. "
-            f"Complete {', then '.join(steps[number] for number in sorted(upstream))} "
+            f"Complete {', then '.join(LAB_STEPS[number] for number in sorted(upstream))} "
             "in this same database. Return here and rerun this cell. No lab tables have been reset.",
             labs=tuple(sorted(upstream)),
         )

@@ -1,5 +1,5 @@
 {
-  "note": "Independent teaching case, not WWI history or the Level 1 replay state. All timestamps use Asia/Shanghai. One successful payment per order; refunds are separate. Amounts use teaching currency units; no tax or currency conversion. Customer regions are a current lookup, not historical slowly changing dimension (SCD) versions.",
+  "note": "Independent teaching case, not WWI history or the Level 1 replay state. All timestamps use Asia/Shanghai. One successful payment per order; refunds are separate, and order 2102 is refunded in part. Order counts and order amounts leave out cancelled orders; a created-order cohort counts every order created in the window. Amounts use teaching currency units; no tax or currency conversion. Customer regions are a current lookup, not historical slowly changing dimension (SCD) versions.",
   "as_of": "2026-01-04 00:00:00",
   "window_start": "2026-01-01 00:00:00",
   "window_end": "2026-01-04 00:00:00",
@@ -41,7 +41,7 @@
       101,
       "2026-01-02 09:00:00",
       "150.00",
-      "REFUNDED",
+      "PARTIALLY_REFUNDED",
       3
     ],
     [
@@ -180,7 +180,9 @@
     "raw_orders": 10,
     "valid_deliveries": 9,
     "clean_orders": 8,
-    "order_amount": "850.00",
+    "clean_order_amount": "850.00",
+    "reported_orders": 7,
+    "order_amount": "800.00",
     "raw_payments": 7,
     "unique_payments": 6,
     "paid_before_as_of": 5,
@@ -216,8 +218,8 @@
       [
         "2026-01-03",
         "WEST",
-        3,
-        "200.00"
+        2,
+        "150.00"
       ]
     ],
     "payment_daily": [

@@ -20,11 +20,21 @@ LAKE_PORTS = {
     "DW_LAKE_S3_PORT": (51900, "Lake object storage (Silo)"),
     "DW_LAKE_REST_PORT": (51818, "Iceberg REST Catalog"),
 }
+# The optional Superset dashboard of Lab 11 (environments/bi/compose.yml).
+BI_PORTS = {
+    "DW_BI_PORT": (51888, "Superset web UI and API"),
+}
+# The optional backup repository of Lab 13 (environments/backup/compose.yml).
+BACKUP_PORTS = {
+    "DW_BACKUP_S3_PORT": (51910, "Backup object storage (Silo)"),
+}
+# The ports of each optional service that dw_course.sidecars starts, by service name.
+SERVICE_PORTS = {"bi": BI_PORTS, "backup": BACKUP_PORTS}
 
 
 def port(variable):
     """Return the host port that ``variable`` sets, or the course default."""
-    default, _ = {**SANDBOX_PORTS, **LAKE_PORTS}[variable]
+    default, _ = {**SANDBOX_PORTS, **LAKE_PORTS, **BI_PORTS, **BACKUP_PORTS}[variable]
     return env_port(variable, default)
 
 

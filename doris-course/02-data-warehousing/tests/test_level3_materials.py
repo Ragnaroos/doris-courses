@@ -31,30 +31,8 @@ class Level3MaterialsTest(unittest.TestCase):
             payload = yaml.safe_load(quiz.read_text())
             self.assertEqual(len(payload["questions"]), 6, quiz)
             self.assertEqual([len(q["options"]) for q in payload["questions"]], [4] * 6)
-
-    def test_quizzes_name_their_options_and_track_reading_goals(self):
-        for module in self.modules:
-            guide = (LEVEL3 / module / "course.md").read_text()
-            goals = guide.split("### Learning Objectives\n", 1)[1].split("\n## ", 1)[0]
-            objectives = {
-                re.sub(r"[.;]$", "", goal.replace("`", ""))
-                for goal in re.findall(r"^\d+\. (.+)$", goals, re.MULTILINE)
-            }
-            quiz = next((LEVEL3 / module).glob("quiz*.yaml"))
-            questions = yaml.safe_load(quiz.read_text())["questions"]
-            self.assertEqual(len({q["objective"] for q in questions}), len(questions), quiz)
-            for question in questions:
-                with self.subTest(quiz=quiz.name, question=question["id"]):
-                    self.assertIn(question["objective"], objectives)
-                    # Options are shown shuffled, so they are named, not lettered.
-                    option_ids = [option["id"] for option in question["options"]]
-                    self.assertEqual(len(set(option_ids)), 4)
-                    self.assertTrue(all(len(option_id) > 1 for option_id in option_ids), option_ids)
-                    self.assertEqual(len({option["text"] for option in question["options"]}), 4)
-                    self.assertIn(question["answer"], option_ids)
-                    for option in question["options"]:
-                        self.assertNotRegex(option["text"], r"^[A-D]\. ")
-                    self.assertNotRegex(question["explanation"], r"(^|\s)[A-D]: ")
+            # test_lessons.py checks the objectives, and test_course.py the options and explanations.
+            self.assertEqual(len({q["objective"] for q in payload["questions"]}), 6, quiz)
 
     def test_new_notebooks_are_source_only_and_valid(self):
         notebooks = sorted(LEVEL3.glob("module*/*.ipynb"))
@@ -70,57 +48,12 @@ class Level3MaterialsTest(unittest.TestCase):
                     self.assertFalse(cell.get("outputs"), path)
                     self.assertIsNone(cell.get("execution_count"), path)
 
-    def test_guides_follow_the_level1_learning_structure(self):
-        required_sections = (
-            "Course Information",
-            "Module Goal",
-            "Learning Objectives",
-            "Module Schedule",
-            "Hands-on Lab",
-            "Module Summary",
-            "Knowledge Quiz",
-            "Official References",
-        )
-        for module in self.modules:
-            guide = (LEVEL3 / module / "course.md").read_text()
-            for section in required_sections:
-                self.assertIn(section, guide, module)
-            self.assertGreaterEqual(len(guide), 4000, module)
-
-    def test_labs_explain_verify_and_clean_up_the_work(self):
-        required_markdown = ("What You Will Do", "Prerequisites", "Independent Exercise", "Reference Explanation", "Lab Review")
-        for path in sorted(LEVEL3.glob("module*/lab*.ipynb")):
-            notebook = nbformat.read(path, as_version=4)
-            nbformat.validate(notebook)
-            markdown = "\n".join(cell.source for cell in notebook.cells if cell.cell_type == "markdown")
-            source = "\n".join(cell.source for cell in notebook.cells if cell.cell_type == "code")
-            for cell in notebook.cells:
-                if cell.cell_type == "code":
-                    ast.parse(cell.source, filename=str(path))
-                    self.assertFalse(cell.get("outputs"), path)
-                    self.assertIsNone(cell.get("execution_count"), path)
-            for section in required_markdown:
-                self.assertIn(section, markdown, path)
-            self.assertGreaterEqual(markdown.count("## "), 5, path)
-            self.assertIn("expect(", source, path)
-            self.assertIn("TODO:", source, path)
-
-    def test_exercise_precedes_answer_and_reference(self):
-        for path in sorted(LEVEL3.glob("module*/lab*.ipynb")):
-            notebook = nbformat.read(path, as_version=4)
-            sources = [cell.source for cell in notebook.cells]
-            prompt = next(i for i, source in enumerate(sources) if source.startswith("## Independent Exercise"))
-            answer = next(i for i, source in enumerate(sources) if "# TODO:" in source)
-            reference = next(i for i, source in enumerate(sources) if source.startswith("<details>\n<summary>Reference Explanation"))
-            self.assertLess(prompt, answer, path)
-            self.assertLess(answer, reference, path)
-
     def test_labs_use_the_scoped_sandbox_connection(self):
         for path in sorted(LEVEL3.glob("module*/lab*.ipynb")):
             notebook = nbformat.read(path, as_version=4)
             source = "\n".join(cell.source for cell in notebook.cells if cell.cell_type == "code")
             self.assertIn("from dw_course.docker_runtime import connect_sandbox", source, path)
-            self.assertIn("lab = connect_sandbox()", source, path)
+            self.assertRegex(source, r"lab = connect_sandbox\((module=\d+)?\)", path)
 
     def test_operational_labs_keep_scope_explicit(self):
         for path in sorted(LEVEL3.glob("module*/*.ipynb")):
@@ -136,8 +69,16 @@ class Level3MaterialsTest(unittest.TestCase):
         path = LEVEL3 / "module14-resource-isolation/lab14_resource_isolation.ipynb"
         notebook = nbformat.read(path, as_version=4)
         code = [cell.source for cell in notebook.cells if cell.cell_type == "code"]
-        for forbidden in ("SET PROPERTY", "CREATE USER", "WORKLOAD GROUP normal", "SET GLOBAL"):
+        for forbidden in ("CREATE USER", "WORKLOAD GROUP normal", "SET GLOBAL", "SET PROPERTY '", "SET PROPERTY FOR 'root'"):
             self.assertNotIn(forbidden, "\n".join(code))
+        # The one account property that the Lab sets is the temporary user's default group,
+        # and it is set back to normal in a finally block, so that the groups can be dropped.
+        properties = [source for source in code if "SET PROPERTY" in source]
+        self.assertEqual(len(properties), 1)
+        self.assertIn("with temporary_user(", properties[0])
+        resets = ["\n".join(ast.unparse(statement) for statement in node.finalbody)
+                  for node in ast.walk(ast.parse(properties[0])) if isinstance(node, ast.Try)]
+        self.assertTrue(any("'default_workload_group' = 'normal'" in reset for reset in resets))
 
         rule_cells = [source for source in code if "CREATE SQL_BLOCK_RULE" in source]
         self.assertEqual(len(rule_cells), 1)
@@ -160,15 +101,6 @@ class Level3MaterialsTest(unittest.TestCase):
         self.assertEqual([setup.index(statement) for statement in order],
                          sorted(setup.index(statement) for statement in order))
         self.assertLess(code.index(setup), code.index(rule_cells[0]))
-
-    def test_level3_root_links_exist(self):
-        readme = (LEVEL3 / "README.md").read_text()
-        for link in (
-            "module12-publishing-permissions-audit",
-            "module13-storage-lifecycle",
-            "module14-resource-isolation",
-        ):
-            self.assertIn(link, readme)
 
     def test_level3_local_links_resolve(self):
         for path in sorted(LEVEL3.rglob("*")):

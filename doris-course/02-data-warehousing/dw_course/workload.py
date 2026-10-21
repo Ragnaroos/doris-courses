@@ -37,9 +37,15 @@ class QueryOutcome:
 SESSION_DEFAULTS = {"enable_sql_cache": False}
 
 
-def open_session(lab, **session):
-    """Open another connection to the lab database and apply session variables."""
+def open_session(lab, *, user=None, **session):
+    """Open another connection to the lab database and apply session variables.
+
+    ``user`` is a dw_course.access.Reader: the session then runs as that ordinary
+    user instead of the lab's administrator.
+    """
     session = {**SESSION_DEFAULTS, **session}
+    if user is not None:
+        return user.connect(**session)
     names = [identifier(name) for name in session]
     connection = pymysql.connect(
         host=lab.connection.host, port=lab.connection.port,
@@ -56,9 +62,9 @@ def open_session(lab, **session):
     return connection
 
 
-def run_query(lab, label, statement, **session):
+def run_query(lab, label, statement, *, user=None, **session):
     """Run one statement in its own session; a Doris error is part of the outcome."""
-    connection = open_session(lab, **session)
+    connection = open_session(lab, user=user, **session)
     started = time.monotonic()
     error = None
     try:
@@ -76,9 +82,9 @@ def run_query(lab, label, statement, **session):
 class BackgroundQuery:
     """Start run_query on a worker thread; result() waits for its outcome."""
 
-    def __init__(self, lab, label, statement, **session):
+    def __init__(self, lab, label, statement, *, user=None, **session):
         executor = ThreadPoolExecutor(max_workers=1)
-        self._future = executor.submit(run_query, lab, label, statement, **session)
+        self._future = executor.submit(run_query, lab, label, statement, user=user, **session)
         executor.shutdown(wait=False)
 
     def result(self, timeout=60):

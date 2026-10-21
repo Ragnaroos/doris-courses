@@ -28,11 +28,15 @@ class CaseLedgerTest(unittest.TestCase):
                 current[order] = dict(customer=customer, created=created, amount=value, status=status, version=version)
         self.assertEqual(valid, case['expected']['valid_deliveries'])
         self.assertEqual(len(current), case['expected']['clean_orders'])
-        self.assertEqual(sum(r['amount'] for r in current.values()), Decimal(case['expected']['order_amount']))
-        self.assertEqual(current[2102]['status'], 'REFUNDED')
+        self.assertEqual(sum(r['amount'] for r in current.values()), Decimal(case['expected']['clean_order_amount']))
+        self.assertEqual(current[2102]['status'], 'PARTIALLY_REFUNDED')
+        # Order totals leave out cancelled orders (the contract that Quiz 10 and the main line use).
+        reported = [row for row in current.values() if row['status'] != 'CANCELLED']
+        self.assertEqual(len(reported), case['expected']['reported_orders'])
+        self.assertEqual(sum(r['amount'] for r in reported), Decimal(case['expected']['order_amount']))
         regions = dict(case['customers'])
         daily = defaultdict(lambda: [0, Decimal(0)])
-        for row in current.values():
+        for row in reported:
             key = (row['created'][:10], regions[row['customer']])
             daily[key][0] += 1
             daily[key][1] += row['amount']
@@ -121,17 +125,30 @@ class ServiceAndAPITest(unittest.TestCase):
     def test_attach_only_course_container_and_restore_session(self):
         lab = Mock()
         outputs = ['our-doris\n','our-superset\n',json.dumps({'doris-warehousing-bi_default':{}}),json.dumps({'original_default':{}})]
-        with patch.object(sidecars.subprocess,'check_output',side_effect=outputs), patch.object(sidecars.subprocess,'run') as run:
+        with patch.object(sidecars, 'check_host_ports') as ports, \
+             patch.object(sidecars.subprocess,'check_output',side_effect=outputs), \
+             patch.object(sidecars.subprocess,'run',return_value=Mock(stdout='')) as run:
             sidecars.start_service(lab,'bi',start=True)
+            self.assertEqual(ports.call_args.args[1], 'doris-warehousing-bi')
             self.assertEqual(run.call_args_list[-1].args[0], ['docker','network','connect','--alias','course-doris','doris-warehousing-bi_default','our-doris'])
             lab.restore_session.assert_called_once()
 
     def test_existing_network_does_not_duplicate_attachment(self):
         lab = Mock(); net={'doris-warehousing-bi_default':{}}
-        with patch.object(sidecars.subprocess,'check_output',side_effect=['ours','sidecar',json.dumps(net),json.dumps(net)]), patch.object(sidecars.subprocess,'run') as run:
+        with patch.object(sidecars, 'check_host_ports'), \
+             patch.object(sidecars.subprocess,'check_output',side_effect=['ours','sidecar',json.dumps(net),json.dumps(net)]), \
+             patch.object(sidecars.subprocess,'run',return_value=Mock(stdout='')) as run:
             sidecars.start_service(lab,'bi',start=True)
             self.assertEqual(run.call_count,1)
             lab.restore_session.assert_not_called()
+
+    def test_missing_course_container_points_to_lab_1(self):
+        from dw_course.onboarding import SetupRequired
+        with patch.object(sidecars, 'check_host_ports'), \
+             patch.object(sidecars.subprocess,'check_output',return_value=''), \
+             patch.object(sidecars.subprocess,'run',return_value=Mock(stdout='')):
+            with self.assertRaisesRegex(SetupRequired, 'Open Lab 1'):
+                sidecars.start_service(Mock(),'backup',start=True)
 
     def test_superset_error_does_not_echo_credentials(self):
         api=bi.SupersetAPI.__new__(bi.SupersetAPI);api.session=Mock()

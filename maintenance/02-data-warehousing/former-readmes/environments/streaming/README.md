@@ -2,8 +2,8 @@
 
 These independent optional labs do not change the completion requirements for the seven main labs:
 
-- [Lab 5A: Kafka → Routine Load](../../level1/module05-ingestion/optional05_kafka_routine_load.ipynb): continuous consumption, progress, pause/resume, duplicate orders, and state updates.
-- [Lab 5B: MySQL → Flink CDC → Doris](../../level1/module05-ingestion/optional05_flink_mysql_cdc.ipynb): a single-table snapshot, inserts/updates/deletes, checkpoints, and controlled savepoint stop/restore. Module 7 can reuse this lab.
+- [Lab 5A: Kafka → Routine Load](../../../../../doris-course/02-data-warehousing/level1/module05-ingestion/optional05_kafka_routine_load.ipynb): continuous consumption, progress, pause/resume, duplicate orders, and state updates.
+- [Lab 5B: MySQL → Flink CDC → Doris](../../../../../doris-course/02-data-warehousing/level1/module05-ingestion/optional05_flink_mysql_cdc.ipynb): a single-table snapshot, inserts/updates/deletes, checkpoints, and controlled savepoint stop/restore. Module 7 can reuse this lab.
 
 ## Prerequisites and startup
 

@@ -1,234 +1,208 @@
 # Module 9: Warehouse Modeling and Joins
 
-| Course Information | Details |
+| Course information | Value |
 | --- | --- |
 | Course | Data Warehousing with Apache Doris · Level 2 |
-| Product scope | Apache Doris 4.x; examples use the course's 4.1.3 sandbox |
-| Prerequisites | Level 1 orders and customers; Module 8 views |
-| Suggested time | About 113 minutes: reading 45, Lab 60, Quiz 8; first-start image downloads/builds are additional |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox from Module 1; `customers` from Lab 6; `orders_current` and `order_events` from Lab 7 |
+| Estimated time | About 112 minutes: reading 42, Lab 60, quiz 10 |
 
-[Level 2 contents](../README.md) · [Open Lab 9](lab09_modeling_and_joins.ipynb) · [Open Quiz 9](quiz09_modeling_and_joins.ipynb)
+[Course README](../../README.md) · [Open Lab 9](lab09_modeling_and_joins.ipynb) · [Open Quiz 9](quiz09_modeling_and_joins.ipynb)
 
-## Module Goal
+## Module goal
 
-A team first queries an order table, then asks for sales by customer region, product category, or date. A join looks easy—until Finance finds that a 100-unit order became 200 units. This module starts with **grain**, the precise meaning of one row. It then connects warehouse layers and fact/dimension modeling to logical join results, physical join plans, and checks that detect duplicate or missing matches.
+Model the orders as a fact and the customers as a dimension, join them without losing or doubling an order, and run a chain of warehouse layers that keeps every delivery and can be rebuilt.
 
-## Learning Objectives
+## Learning objectives
 
-After this module, you should be able to:
+After completing this module, you will be able to:
 
-1. State the grain of a fact and a dimension table before joining them.
-2. Choose a table model and key based on whether source records append or overwrite current state.
-3. Check one-to-one versus one-to-many join cardinality using rows, distinct keys, and amounts.
-4. Find missing dimensions with a left join or anti-join.
-5. Read join type, distribution, exchanges, and scans in `EXPLAIN` without confusing a plan with actual runtime evidence.
-6. Keep replayable raw inputs separate from modeled detail and report-ready aggregates.
+1. State the grain of a fact table and a dimension table before joining them.
+2. Choose a table model and key from whether a source appends records or replaces current state.
+3. Check a join for lost and duplicated rows with row counts, distinct keys, and amounts.
+4. Find facts whose dimension row is missing with a left join or an anti-join.
+5. Read a join's type and distribution in EXPLAIN without taking a plan for a measurement.
+6. Keep raw deliveries, validated detail, and aggregates in separate layers that can be rebuilt.
 
-## Module Schedule
+## Module structure
 
-| Section | Question | Time |
-| --- | --- | ---: |
-| 9.1 Warehouse layers | Why keep raw data as well as report-ready data? | 12 min |
-| 9.2 Grain and joins | Why can a join double an amount? | 15 min |
-| 9.3 Physical joins | Where do matching rows meet? | 10 min |
-| 9.4 Acceptance checks | How do we verify keys, rows, and amounts together? | 8 min |
-| Lab 9 / Quiz 9 | Existing foundations and extended core evidence | 60 / 8 min |
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 9.1 Give Each Layer a Job | 8 min | ODS, DWD, DWS, and ADS, and what Level 1 already built |
+| 9.2 Declare the Grain | 8 min | What one row of a fact and of a dimension means, and which table model keeps it |
+| 9.3 Joins That Lose or Double Rows | 8 min | Two failures, and the joins that show or hide them |
+| 9.4 How the Plan Joins | 6 min | Broadcast, shuffle, bucket shuffle, and colocate |
+| 9.5 Accept a Join | 5 min | Four checks that one total cannot replace |
+| 9.6 A Chain on a Case of Its Own | 7 min | From deliveries to a published summary, by rebuilding |
+| Lab 9 | 60 min | Build the order fact and the customer dimension, check their join, read its plan, and run the chain |
+| Quiz 9 | 10 min | Six questions on these objectives |
 
-## 9.1 Give Each Warehouse Layer a Job
+## 9.1 Give Each Layer a Job
 
-Suppose an incoming order has a damaged amount. BI must still publish a valid daily total, while the data team must retain evidence of the rejected record. Keeping only the final aggregate loses that evidence; keeping only raw input makes every report repeat cleaning logic.
+A damaged amount arrives with a batch of orders. The dashboard must still show valid daily totals, and the data team must keep the bad record to fix and reload it. A warehouse that keeps only the final totals loses the evidence; one that keeps only raw input makes every report repeat the cleaning. Layers give each job its own tables:
 
-| Question | Logical layer | Responsibility |
-| --- | --- | --- |
-| What did the source actually send? | ODS | Preserve ingested records and source context. |
-| Which orders passed validation? | DWD | Clean detail at a declared business grain. |
-| What are daily regional totals? | DWS | Reusable aggregates at a declared grain. |
-| What does a dashboard query? | ADS | Published consumer results and contracts. |
+| Layer | Question it answers | Also known as | In this course |
+| --- | --- | --- | --- |
+| ODS, Operational Data Store | What did the sources send? | Raw or staging layer | Lab 6's `orders_raw`, Lab 7's `event_deliveries`, Lab 9's `ods_*` tables |
+| DWD, Data Warehouse Detail | Which records passed, at the business grain? | Cleaned or core layer | `orders_clean`, `orders_current`, `order_events`; Lab 9's `orders_fact_l2` and `dwd_*` tables |
+| DWS, Data Warehouse Summary | Which aggregates do reports reuse? | Aggregate layer, part of a mart | Lab 10's `daily_order_metrics_l2`, Lab 9's `dws_orders_region_day_l2` |
+| ADS, Application Data Service | What does a consumer read? | Serving layer, the mart's interface | Lab 11's `bi_order_metrics_l2`, Lab 9's `ads_orders_region_day_l2` |
 
 ```text
-Source → ODS (raw) → DWD (validated detail) → DWS (aggregates) → ADS (delivery)
-             │                  │
-             └→ rejected rows   └→ detail drill-down
+Sources → ODS (every delivery) → DWD (valid detail) → DWS (reused aggregates) → ADS (what consumers read)
+              │                       │
+              └→ rejected records     └→ drill-down to the detail
 ```
 
-ODS/DWD/DWS/ADS are **modeling conventions**, not four Doris storage engines. Prefixing four tables does not create a trustworthy pipeline. Describe how data is transformed, when each result is refreshed, how rejected records are preserved, and how a failed batch is rerun. A layer may be a table or a view; it need not copy every column.
+The four names are a modeling convention, not kinds of Doris tables: a layer can be a table or a view, and prefixing four tables does not make a pipeline. What makes one is written down: how each layer is computed from the one before, when it is refreshed, where rejected records go, and how a failed batch is rerun. Level 1 already built the first two layers without naming them; Labs 9 to 11 add the others.
 
-## 9.2 Join at the Right Grain
+## 9.2 Declare the Grain
 
-A **fact** records a business process or measure, such as an order amount, item quantity, or payment event. A **dimension** explains it, such as customer name, region, or product category. Grain comes before column selection:
+A **fact** records a business event or measure: an order, a line of an order, a payment. A **dimension** describes it: the customer's name, a product's category, a region. Before you join them, say what one row of each means, its **grain**:
 
-| Object | One row means | Not equivalent to |
+| Table | One row is | It is not |
 | --- | --- | --- |
-| Current order | One order's current snapshot | Every state-change event |
-| Order item | One item line within an order | A whole-order amount |
-| Payment event | One payment action | The order's accumulated paid amount |
-| Current customer dimension | One customer's current attributes | All historical attribute versions |
+| `orders_fact_l2` | One order as it is now, dated by the event that created it | Every event of the order |
+| `order_events` | One event of an order | The order's current state |
+| `payments` | One payment | An order's paid amount |
+| `customers_dim_l2` | One customer's current attributes | Every earlier version of the customer |
 
-### Why can a customer key appear twice?
+Lab 9's order fact keeps all 11 orders of Lab 7's current state, the cancelled 900002 too, with their status, amounts, and region, which is the sales region where the order was booked; a report decides with its filter whether a cancelled order counts. Its dimension keeps all 663 WWI customers of Lab 6, one row each.
 
-A common mistake is to append a source update into a **Duplicate Key** current-state dimension. Suppose a customer changes region from `EAST` to `WEST`: appending both rows means that an order now matches the customer twice. A **Unique Key** table keyed by `customer_id` is the right model for a dimension that should expose only one current row. Duplicate Key remains useful for raw deliveries or intentional history; it does not enforce business-key uniqueness. An Aggregate Key model is for compatible additive aggregates, not a current customer attribute.
+The table model follows from how the source writes:
 
-The same duplication can come from a manual retry or from storing historical versions without an effective-time rule. If history is required, keep version boundaries such as `valid_from` and `valid_to`, make them non-overlapping for each customer, and join an order to the version that was valid at its business event time. Selecting only `valid_to IS NULL` answers a different question: “What is this customer's **current** region?” It does not reconstruct the region at order time.
+| Source | Model and key | Why |
+| --- | --- | --- |
+| Raw deliveries, an event history | Duplicate Key | Every row is a record to keep, duplicates included |
+| A current state, such as a customer's attributes | Unique Key on the business key | A new row for the key replaces the old one |
+| Additive measures that only grow | Aggregate Key with `SUM` | Rows with the same key are added up |
 
-### A small counterexample
+A Duplicate Key table organizes rows by its key; it does not stop a second row for an order. The order fact is rebuilt from the current state in each run, and its grain is checked with `COUNT(*)` against `COUNT(DISTINCT order_id)`. A Unique Key dimension cannot hold two current rows for one customer; a Duplicate Key one can, as soon as a load appends a changed customer instead of replacing it.
 
-The following self-contained query has two orders. Customer 1 appears twice in the dimension; customer 2 appears once:
+When reports need the customer's attributes at the time of each order, not today's, keep versions with validity boundaries, `valid_from` and `valid_to`, that do not overlap for a customer, and join each order to the version valid at its event time. Taking the rows with `valid_to IS NULL` answers a different question: the customer's current attributes. This course's dimension keeps only the current ones.
+
+## 9.3 Joins That Lose or Double Rows
+
+Two different faults break a join. A dimension row that matches twice doubles the fact's measures; a dimension row that is missing drops the fact, or leaves it without attributes. A self-contained example: customer 1 has two rows in the dimension, customer 2 one.
 
 ```sql
 WITH facts AS (
     SELECT 1 AS order_id, 1 AS customer_id, 100 AS amount
     UNION ALL SELECT 2, 2, 200
 ), dim AS (
-    SELECT 1 AS customer_id, 'EAST' AS region
-    UNION ALL SELECT 1, 'WEST'
-    UNION ALL SELECT 2, 'EAST'
+    SELECT 1 AS customer_id, 'Tailspin Toys (Head Office)' AS customer_name
+    UNION ALL SELECT 1, 'Tailspin Toys, head office'
+    UNION ALL SELECT 2, 'Tailspin Toys (Sylvanite, MT)'
 )
-SELECT COUNT(*) AS joined_rows, SUM(f.amount) AS joined_amount
+SELECT COUNT(*) AS joined_rows, COUNT(DISTINCT f.order_id) AS orders, SUM(f.amount) AS joined_amount
 FROM facts f
 JOIN dim d ON f.customer_id = d.customer_id;
 ```
 
-| Order | Amount | Dimension match | Amount after join |
-| --- | ---: | --- | ---: |
-| 1 | 100 | `EAST` | 100 |
-| 1 | 100 | `WEST` | 100 again |
-| 2 | 200 | `EAST` | 200 |
-| **Total** | **300 before** | **3 joined rows** | **400 after** |
+The result is 3 rows, 2 orders, and 400 for orders worth 300: order 1 counts twice. `COUNT(DISTINCT order_id)` still says 2, so it alone misses the inflation, and `SUM(DISTINCT amount)` is no repair: two orders of the same amount would count once. Compare rows, distinct orders, and the amount before and after the join, and check the dimension's key separately.
 
-`COUNT(DISTINCT order_id)` would still be 2 and therefore miss the amount inflation. `SUM(DISTINCT amount)` is not a repair: two different orders may legitimately have the same amount, and that expression would count it only once. Instead, compare **row count, distinct order count, and amount** before and after a join, and check the dimension's key separately.
+The join type decides what happens to a fact without a match:
 
-### Missing matches are a separate problem
-
-| Join | Which fact rows survive? | Typical use |
+| Join | Which facts it keeps | Use it to |
 | --- | --- | --- |
-| `INNER JOIN` | Only matched combinations | Analyze known customers, but missing orders disappear. |
-| `LEFT JOIN` | Every fact row; unmatched dimension columns become `NULL` | Keep all orders and expose missing customers. |
-| `FULL OUTER JOIN` | Unmatched rows from both sides | Reconcile two sets. |
-| `LEFT SEMI JOIN` | A fact row once if a match exists | Filter to a customer set. |
-| `LEFT ANTI JOIN` | Only fact rows without a match | Find missing dimensions. |
+| `INNER JOIN` | Only the matched ones | Analyze facts whose dimension is known; a missing customer's orders disappear |
+| `LEFT JOIN` | All of them; the dimension's columns are `NULL` without a match | Keep every order and see which lack a customer |
+| `FULL OUTER JOIN` | The unmatched rows of both sides too | Reconcile two sets (Module 10) |
+| `LEFT SEMI JOIN` | Each fact once, if a match exists | Filter facts by a set of dimension rows |
+| `LEFT ANTI JOIN` | Only the facts without a match | Find missing dimension rows |
 
-After Lab 9, find unmatched customer IDs with a left join:
+After Lab 9, this anti-join, written as a left join, finds the orders without a customer:
 
 ```sql
-SELECT f.customer_id, COUNT(*) AS orders_without_dimension
+SELECT f.customer_id, COUNT(*) AS orders_without_customer
 FROM orders_fact_l2 f
-LEFT JOIN customers_dim_l2 d ON f.customer_id = d.customer_id
+LEFT JOIN customers_dim_l2 d ON d.customer_id = f.customer_id
 WHERE d.customer_id IS NULL
 GROUP BY f.customer_id;
 ```
 
-An empty result means all current Lab orders found a customer. Do not use an inner join as this check: it silently removes the very rows you are trying to find. Duplicates and missing matches may occur together, so test them independently.
+An empty result means that every order has its customer. An inner join cannot do this check: it removes exactly the rows that you are looking for. Both faults can happen at once and hide each other in a total, which Lab 9 shows.
 
-## 9.3 Separate Join Meaning from Data Movement
+## 9.4 How the Plan Joins
 
-The logical join (`INNER`, `LEFT`, and so on) defines which rows appear. The physical strategy determines how Doris moves data to perform the match:
+The logical join says which rows appear; the physical join says how Doris brings the matching rows together:
 
-| Strategy | Data movement | When it may help |
+| Distribution | What moves | When it fits |
 | --- | --- | --- |
-| Broadcast | Send one side to every relevant node | Small dimension joined to a large fact |
-| Shuffle | Redistribute rows by join key | Both sides are large |
-| Bucket Shuffle | Reuse an existing compatible distribution on one side | Join and distribution keys align |
-| Colocate | Match compatible colocated buckets locally | Tables share a valid colocation layout |
+| `BROADCAST` | One side, usually the smaller, is sent to every instance that scans the other | A small dimension and a large fact |
+| `PARTITIONED`, a shuffle | Both sides are redistributed by the join key | Two large sides |
+| `BUCKET_SHUFFLE` | Only one side moves, to the buckets of the other | The join key is the other side's bucketing key |
+| `COLOCATE` | Nothing: matching buckets are already together | Tables that share a colocation group and its bucketing |
 
-Putting `HASH(customer_id)` in two DDL statements does **not** by itself establish colocation. The course sandbox has one BE and one bucket; it teaches plan interpretation, not a multi-node performance comparison.
+`EXPLAIN` shows the choice on the join node: in Lab 9, `join op: INNER JOIN(BROADCAST)[]` with the condition on `customer_id`, and an exchange that sends the customers to the scan of the orders. `HASH(customer_id)` in two tables' definitions does not make them colocated: that needs a colocation group. The plan is Doris's choice for this data and its statistics; a Query Profile records what an execution actually did. With one BE and one bucket, the sandbox teaches how to read a plan, not how the strategies compare on a cluster.
 
-Inspect a plan after Lab 9:
+A **Runtime Filter** is another part of a join plan: during execution, Doris builds a filter from the join keys of one side and applies it to the scan of the other, so rows that cannot match are skipped early. It changes how much is read, never which rows the join returns, and it does not fix a duplicated dimension key.
 
-```sql
-EXPLAIN
-SELECT f.order_id, d.customer_name
-FROM orders_fact_l2 f
-JOIN customers_dim_l2 d ON d.customer_id = f.customer_id;
-```
+## 9.5 Accept a Join
 
-Look for join type, distribution mode, exchange nodes, and scanned objects. `EXPLAIN` describes the chosen plan; **Query Profile** records what happened during actual execution. Neither a plausible plan nor a fast single-node example proves production performance.
-
-## 9.4 Accept a Join with Multiple Checks
-
-Lab 9 builds `orders_fact_l2` and `customers_dim_l2`. The former represents one order snapshot per row in this controlled sample; its Duplicate Key model does not enforce business uniqueness. The latter represents one customer's **current** attributes and uses `UNIQUE KEY(customer_id)`.
-
-Compare before and after a left join:
-
-```sql
-SELECT 'before_join' AS stage,
-       COUNT(*) AS row_count,
-       COUNT(DISTINCT order_id) AS order_count,
-       SUM(order_amount) AS amount
-FROM orders_fact_l2
-UNION ALL
-SELECT 'after_left_join',
-       COUNT(*),
-       COUNT(DISTINCT f.order_id),
-       SUM(f.order_amount)
-FROM orders_fact_l2 f
-LEFT JOIN customers_dim_l2 d ON f.customer_id = d.customer_id
-ORDER BY stage;
-```
+Lab 9 compares the order fact before and after its left join with the customers:
 
 | Stage | Rows | Distinct orders | Amount |
 | --- | ---: | ---: | ---: |
-| Before join | 10 | 10 | 1400.00 |
-| After left join | 10 | 10 | 1400.00 |
+| Before the join | 11 | 11 | 1510.00 |
+| After the left join | 11 | 11 | 1510.00 |
 
-Also check that the dimension's customer IDs are unique and the missing-dimension query returns no rows. If the totals differ, determine whether duplicate dimension keys inflated facts or a mistaken inner join dropped them. Passing just one check is insufficient.
+The dimension's key is unique (663 rows, 663 customers) and the anti-join is empty. Then a faulty copy of the dimension, without customer 2 and with customer 1 twice, shows what each check catches:
 
-## 9.5 Put the Four Responsibilities into One Executable Chain
+| Join with the faulty dimension | Rows | Distinct orders | Amount | Unmatched orders |
+| --- | ---: | ---: | ---: | ---: |
+| `LEFT JOIN` | 12 | 11 | 1610.00 | 1 |
+| `INNER JOIN` | 11 | 10 | 1410.00 | 0 |
 
-The main Lab now creates a small ODS → DWD → DWS → ADS chain. A separate, committed teaching fixture supplies eight business orders over three dates, one older repeated order version, one malformed amount, six distinct payments including a future one, and a repeated payment delivery. These are deliberately new data: enough variation to test payment windows and repeat purchase later, without claiming to reconstruct WWI payment history.
+The inner join returns 11 rows, the fact's own number, which looks right; only the distinct orders and the amount show that an order is missing and another counted twice. Accept a join when the dimension's key is unique, no fact lacks its dimension row, and rows, distinct keys, and amounts agree before and after.
 
-ODS preserves ten order deliveries and seven payment deliveries. DWD keeps eight valid current orders and six distinct payments. The duplicate order is resolved by business version, not arrival time; the duplicate payment is resolved by its stable payment ID under this fixture's identical-content rule. A different payload for the same ID needs conflict handling. Retaining raw deliveries makes both decisions reviewable.
+## 9.6 A Chain on a Case of Its Own
 
-DWS joins the current customer dimension and aggregates order amount by order date and region. ADS publishes that result as a narrow view. Its five rows represent five date/region combinations, not five orders. The total must still reconcile to the eight cleaned orders and 850.00 of original order amount. A refund does not erase an order or redefine this measure as net collections.
+Level 1's orders were created on two days and paid twice, too few for the payment metrics of Module 10. The warehouse case in `datasets/warehouse_case.json` has 8 orders of 5 customers over three days, with a delivery that repeats, an older version that arrives late, a malformed amount, a payment after the reporting cutoff, and a partial refund. Lab 9 runs it through all four layers:
 
-| Evidence | What it supports | What it does not support |
-| --- | --- | --- |
-| Raw delivery IDs and rejected amount | Input coverage and traceability | Business order uniqueness |
-| Latest valid order per business key/version | Current-state result for the declared rule | Every possible CDC conflict policy |
-| Independent detail and ADS row comparison | Grain and amount reconciliation | Production query speed |
-| Explicit rebuild followed by equal outputs | Repeatable snapshot processing | A continuously scheduled or transactional multi-layer pipeline |
+| Layer | Tables | Rows | What happens |
+| --- | --- | ---: | --- |
+| ODS | `ods_order_deliveries_l2`, `ods_payment_deliveries_l2` | 10 and 7 | Every delivery kept as it came, the bad amount as text |
+| DWD | `dwd_orders_l2`, `dwd_payments_l2` | 8 and 6 | One current order per order ID, by version; one payment per payment ID |
+| DWS | `dws_orders_region_day_l2` | 5 | Orders and order amount per day and region, without the cancelled order: 7 orders, 800.00 |
+| ADS | `ads_orders_region_day_l2` | 5 | The summary under the names that a dashboard reads |
 
-Module 10 reads these DWD tables; Module 11 reads its paid-metric outputs. This makes the learning path executable end to end. The snapshot rebuild is intentionally visible: appending the same aggregate a second time is not an idempotent refresh. No external CDC connector, scheduler, or multi-table atomicity is implied.
+The DWD step keeps the latest version of each order with a window function, `ROW_NUMBER() OVER (PARTITION BY order_id ORDER BY event_version DESC, input_id DESC)`: it numbers the deliveries of each order from the highest version down, and the query keeps number 1. Module 10 explains window functions. So the late delivery of order 2102 with version 1 does not turn it back from `PARTIALLY_REFUNDED` to `CREATED`. A payment ID that arrives twice is one payment, because the case declares that a repeated ID carries the same content; the same ID with a different amount would be a conflict to resolve, not a duplicate to drop.
 
-### Runtime Filter: reduce work without changing join meaning
+The counts differ from layer to layer, 10, 8, and 5, because each layer has its own grain; the amount ties them together: the 800.00 of the summary is the DWD orders' 850.00 without the cancelled order's 50.00. The chain is rebuilt from ODS in each run, and the rebuild gives the same rows again. Inserting the summary a second time would count every order twice: an aggregate is reproducible when it is rebuilt from its detail, not when it is appended. The chain runs as a batch in the Lab; it implies no scheduler, no change-data capture, and no transaction across the layers.
 
-A Runtime Filter is produced from join-side values during execution and can remove probe-side rows that cannot match. It is not a permission policy or a fix for duplicate dimension keys. For an inner join where only a small set of customer IDs qualifies, it may reduce scan work; for other SQL shapes, selectivities and scan sources, benefit differs. Read the filter and exchange nodes in the plan, then use Profile to inspect actual work. A single-BE example does not establish Broadcast, Shuffle or Colocate behavior across nodes. See [Doris Runtime Filter](https://doris.apache.org/docs/4.x/query-acceleration/optimization-technology-principle/runtime-filter/).
+## Lab 9: Order Facts, Customer Dimensions, and a Warehouse Chain
 
-## Hands-on Lab: Order Facts and Customer Dimensions
+Open [Lab 9: Order Facts, Customer Dimensions, and a Warehouse Chain](lab09_modeling_and_joins.ipynb). You:
 
-Open [Lab 9](lab09_modeling_and_joins.ipynb) after completing Level 1 Labs 5 and 6 in the same course database. The Lab creates its own `_l2` fact and dimension tables, joins them, checks missing customers, reconciles rows and amounts, and reads the plan. A read-only CTE then removes customer 2 and duplicates customer 1 to expose both join failure modes without changing the dimension table.
+1. Build `orders_fact_l2`, 11 orders and 1510.00, and `customers_dim_l2`, 663 customers, and check their grain.
+2. Join them, look for missing customers, and compare rows, orders, and the amount before and after.
+3. Add up the orders per region, and read the join's type and distribution in the plan.
+4. Join the orders with a faulty dimension, and read what each check shows.
+5. Run the case through ODS, DWD, DWS, and ADS, and reconcile its published rows.
+6. Practice: repair the faulty dimension.
 
-| Input or result | Expected in this sample |
-| --- | --- |
-| Fact source | Ten simulated orders from Lab 5 |
-| Customer source | WWI customers with IDs 1–20 from Lab 6 |
-| Region | A `known` teaching placeholder, not a real geographic classification |
-| Fact rows / dimension rows | 10 / 20 |
-| Joined rows / amount | 10 / 1400.00 |
-| Missing customer matches | 0 |
-| Flawed left / inner joins | 11 rows / 1500.00 and 10 rows / 1300.00; distinct-order and unmatched checks reveal why neither is correct |
+You need the course sandbox and the tables of Labs 6 and 7. Module 10 reads the order fact and the case's DWD tables.
 
-### Independent exercise
+## Summary
 
-Repair the Lab's flawed CTE in a new query cell so every fact order has exactly one dimension match. Both inner and left joins should return 10 rows, 10 distinct orders, 1400.00 in amount, and no unmatched orders. This requires checking key uniqueness, missing matches, row counts, and measures separately; one matching total is not enough.
+- Say what one row of each table means before you join them: an order as it is now, a customer's current attributes, a delivery, a summary per day and region.
+- Duplicate Key keeps every record, Unique Key replaces a key's row, Aggregate Key adds up measures; only a check of `COUNT(*)` against distinct keys shows that a Duplicate Key fact kept its grain.
+- A duplicated dimension key doubles measures and a missing one drops or blanks facts; compare rows, distinct keys, and amounts before and after the join.
+- Find facts without a dimension row with a left join and `IS NULL`, an anti-join; an inner join hides them.
+- `EXPLAIN` shows a join's type and its distribution, such as `INNER JOIN(BROADCAST)`; it is Doris's plan, not a measurement of the execution.
+- Keep ODS, DWD, DWS, and ADS apart and rebuild each from the layer before it; the counts differ by grain, and the amounts reconcile.
 
-## Module Summary
+## Quiz 9
 
-- Warehouse layers separate raw evidence, validated detail, reusable aggregates, and consumer delivery; names alone do not implement a pipeline.
-- Grain is the meaning of one row. Joining to multiple matching dimension rows multiplies a fact's measures.
-- A current-state customer dimension needs a key model and process that yield one current row per customer; intentional history needs valid-time rules.
-- Inner joins can hide missing dimensions; left joins and anti-joins make them observable.
-- Verify joins with unique keys, unmatched rows, row counts, distinct business keys, and amounts.
-- Logical join semantics and physical data movement are different; use `EXPLAIN` and Query Profile for different evidence.
-
-## Knowledge Quiz 9: Warehouse Modeling and Joins
-
-Open [Quiz 9](quiz09_modeling_and_joins.ipynb) to check grain, table-model choice, join cardinality, missing dimensions, plan reading, and replayable warehouse layers.
+Open [Quiz 9: Warehouse Modeling and Joins](quiz09_modeling_and_joins.ipynb). It has six single-choice questions and needs no running environment.
 
 Next module: [Module 10: Metric Processing and Delivery](../module10-metric-processing/course.md).
 
-## Official References
+## References
 
-- [JOIN semantics](https://doris.apache.org/docs/4.x/query-data/join/)
-- [Table models](https://doris.apache.org/docs/4.x/table-design/data-model/overview/)
-- [Colocation Join](https://doris.apache.org/docs/4.x/query-acceleration/colocation-join/)
-- [Query Profile](https://doris.apache.org/docs/4.x/query-acceleration/query-profile/)
+- [Apache Doris: Join](https://doris.apache.org/docs/4.x/query-data/join/)
+- [Apache Doris: Table Model Overview](https://doris.apache.org/docs/4.x/table-design/data-model/intro/)
+- [Apache Doris: Colocation Join](https://doris.apache.org/docs/4.x/query-acceleration/colocation-join/)
+- [Apache Doris: Runtime Filter](https://doris.apache.org/docs/4.x/query-acceleration/optimization-technology-principle/runtime-filter/)
+- [Apache Doris: Query Profile](https://doris.apache.org/docs/4.x/query-acceleration/query-profile/)

@@ -1,87 +1,87 @@
 title: "Module 8 Quiz: Views and Materialized Views"
-description: Six scenario-based multiple-choice questions. No database connection required.
+description: "Six single-choice questions; no database connection required. View explanations after submitting."
 questions:
-- id: q1
-  objective: Distinguish a logical view from a stored materialized result.
-  prompt: Three teams need the same positive-order filter. Each query must include newly committed orders, and the current detail query is already fast. What should they share first?
+- id: view_or_stored_result
+  objective: "Distinguish a regular view's saved query from a materialized view's stored result."
+  prompt: "Three teams must use one definition of daily orders. Every query must include the orders committed a second earlier, and the query is already fast enough. What should they share?"
   options:
   - id: regular_view
-    text: A regular view containing the reviewed filter; it reads the current base-table result when queried.
+    text: "A regular view of the definition, which runs its query on the current tables each time"
   - id: manual_refresh_mv
-    text: A manually refreshed materialized view (MV); its stored result changes automatically on every base-table write.
-  - id: daily_copied_table
-    text: A daily copied table; a copy has the same freshness as its source without another load.
-  - id: separate_queries
-    text: Three separate queries, because a regular view must store its own rows before consumers can use it.
+    text: "A materialized view refreshed by hand, which picks up each committed order as it arrives"
+  - id: nightly_copy
+    text: "A table that a job copies from the result every night, as fresh as the orders it copies"
+  - id: three_queries
+    text: "Three copies of the query, because a regular view must store its rows before it is read"
   answer: regular_view
-  explanation: 'A regular view shares the reviewed query definition without introducing a separate refresh boundary, so each query reads the current base-table result. A manually triggered MV stores a result that can lag after a write. A copied table also needs an explicit update path. Separate copies of the query invite filter drift, and a regular view does not need to store rows.'
-- id: q2
-  objective: Choose a refresh strategy based on freshness and cost requirements.
-  prompt: A batch of orders normally finishes near 02:00 but can finish 20 minutes late. Refreshing the stored daily result takes four minutes. The dashboard opens at 03:00 and must contain the completed batch. Which trigger fits this requirement best?
+  explanation: "A regular view saves the query, not its result, so every read runs it on the current tables and includes the newest orders, with no refresh to manage. A materialized view refreshed by hand keeps its last result until the next refresh. A nightly copy is as old as its last run. Three copies of a query drift apart, and a regular view stores no rows."
+- id: refresh_scope
+  objective: "Choose a refresh trigger and scope from the freshness that consumers need and the cost of a refresh."
+  prompt: "A materialized view groups orders by date and region. It is partitioned by the order date of its fact table and joins an unpartitioned customer table. A load adds orders to one date, and later a customer's region is corrected. What does REFRESH ... AUTO recompute after each change?"
   options:
-  - id: fixed_time_refresh
-    text: Run a fixed refresh at 02:01 and treat its successful completion as proof that the late batch was included.
-  - id: refresh_turned_off
-    text: Turn refresh off after the initial build; the dashboard query will incorporate later writes into the stored result.
-  - id: refresh_after_batch
-    text: Trigger a refresh after the batch succeeds, wait for it to finish, and verify the published batch before 03:00.
-  - id: refresh_every_row
-    text: Refresh after every row even though the consumer only needs one completed daily batch.
-  answer: refresh_after_batch
-  explanation: 'Linking the refresh to batch completion and checking its result matches the stated cut and deadline. A late batch can arrive after 02:01, so a timed refresh may publish the previous cut. The initial build does not keep a manually triggered result current. Per-row refresh adds unnecessary work and is not implied by a daily freshness requirement.'
-- id: q3
-  objective: Validate a materialized view using metadata and results.
-  prompt: Creating an MV returned success, but its first refresh is still running. A colleague wants to publish its daily total now because the object appears in the database. What evidence is still missing?
+  - id: one_date_then_all
+    text: "After the load, that date's partition; after the correction, every partition"
+  - id: one_date_both
+    text: "Only the changed date both times, since AUTO adds each changed row to the stored sums"
+  - id: all_both
+    text: "Every partition both times, because AUTO recomputes the whole result on each refresh"
+  - id: nothing
+    text: "Nothing either time, because a partitioned materialized view follows its tables at once"
+  answer: one_date_then_all
+  explanation: "Doris maps each partition of the materialized view to a date of the fact table, so new orders of one date refresh that partition; the unpartitioned customer table maps to no date, so a change there makes every partition stale. AUTO recomputes partitions from their rows; it never adds rows to an old sum. It recomputes everything only when it cannot tell which partitions changed. An asynchronous materialized view changes only when it is refreshed."
+- id: check_after_create
+  objective: "Check a materialized view's state and rows instead of trusting a successful CREATE."
+  prompt: "CREATE MATERIALIZED VIEW returned success a moment ago, and a colleague wants to publish the stored daily totals now. What still has to be checked?"
   options:
-  - id: object_name_only
-    text: Only the object name; a successful creation response already proves the stored rows are complete.
-  - id: refresh_state_and_comparison
-    text: A finished refresh state and a comparison of the same dates and filters with an independent base-table aggregation.
-  - id: dashboard_speed
-    text: A short dashboard response time; fast queries prove both freshness and amount correctness.
-  - id: view_definition_text
-    text: The text of the view definition; it proves the current refresh used all source batches.
-  answer: refresh_state_and_comparison
-  explanation: 'The refresh state shows that the stored result was built, while a like-for-like base-table query checks its values. Creation and a completed refresh are separate events. Latency is not a correctness or freshness check. A definition describes the intended logic, not which data has actually been materialized.'
-- id: q4
-  objective: Use EXPLAIN rather than guessing to verify query rewrite.
-  prompt: An MV exists for a daily aggregation. The dashboard query names only the base table; its EXPLAIN plan scans that base table and does not scan the MV. The result is correct. What can you conclude?
+  - id: state_and_rows
+    text: "That mv_infos reports RefreshState SUCCESS, and that its rows equal the base tables' totals"
+  - id: nothing_more
+    text: "Nothing more: a successful CREATE means that the first build finished with every row"
+  - id: fast_query
+    text: "That a query of it is fast, because a fast answer shows that the build read all the rows"
+  - id: definition_text
+    text: "That SHOW CREATE shows the definition, since the stored rows follow from it"
+  answer: state_and_rows
+  explanation: "The build runs as a task after CREATE returns: RefreshState says whether it succeeded, and comparing the stored rows with the same totals from the base tables shows that they are right. A successful CREATE only accepted the definition. Speed says nothing about completeness. The definition says what should be stored, not what was."
+- id: explain_rewrite
+  objective: "Read in EXPLAIN whether a query was rewritten to use a materialized view, and why it was not."
+  prompt: "A materialized view stores the daily totals of orders_view_l2. A dashboard asks the view for one day, WHERE order_date = '2026-01-01'. EXPLAIN scans the base tables and lists the materialized view as not usable, with Rewrite compensate predicate by view fail. What does that show?"
   options:
-  - id: name_proves_rewrite
-    text: Transparent rewrite occurred because an MV with a matching name exists.
-  - id: correct_numbers_prove_rewrite
-    text: Transparent rewrite occurred because the returned numbers are correct.
-  - id: mv_was_refreshed
-    text: The MV must have been refreshed, since the base-table query returned current numbers.
-  - id: no_mv_hit
-    text: This plan does not show an MV hit; investigate rewrite eligibility separately from result correctness.
-  answer: no_mv_hit
-  explanation: 'The plan is evidence of the selected scan, and it scans only the base table; value checks answer a different question. The existence of a matching MV does not establish plan selection. A base-table scan can return correct data without any rewrite. A direct base-table query says nothing about the MV''s refresh state.'
-- id: q5
-  objective: Keep a published view contract stable while changing its implementation.
-  prompt: Two dashboards consume a view with one row per day and the columns order_date, order_count, and gross_amount. They allow up to ten minutes of data lag. An MV stores the same grain and meanings; the team verified that its completed refresh includes every source batch required by that freshness rule. How should the serving implementation change?
+  - id: filter_not_applied
+    text: "Doris could not apply this filter to the stored rows, so it did not rewrite this query"
+  - id: rewrite_happened
+    text: "The query was rewritten anyway, since a materialized view of the same totals exists"
+  - id: view_broken
+    text: "The materialized view is broken, because a healthy one answers every query of its tables"
+  - id: wrong_answer
+    text: "The answer is wrong, because a plan that skips the materialized view reads stale rows"
+  answer: filter_not_applied
+  explanation: "The scans and the not usable entry say that this query was not rewritten, and the reason says why: Doris 4.1.3 turns DATE(event_time) = '2026-01-01' into a range on event_time, a column that the stored rows do not keep. A materialized view that exists is not a rewrite. It answers only the queries whose grain, columns, and filters it can serve. Reading the base tables gives the current answer, more slowly; it is not stale."
+- id: stable_contract
+  objective: "Keep a published view's names and meanings stable when its implementation changes."
+  prompt: "Two dashboards read a view with one row per day and the columns order_date, order_count, and gross_amount. A materialized view now stores the same grain and meanings, and its refresh meets their freshness rule. How should the team speed them up?"
   options:
-  - id: view_points_to_mv
-    text: Point the view at the MV, keep its published columns and meanings, and compare results at the same data cut before switching consumers.
-  - id: expose_mv_directly
-    text: Give dashboards the MV name and its physical columns; keeping the old view would prevent acceleration.
-  - id: add_customer_id
-    text: Add customer_id to each daily row without changing the declared grain, so future filters need no new contract.
-  - id: rename_gross_amount
-    text: Rename gross_amount to revenue during the switch; the MV will make the two business measures equivalent.
-  answer: view_points_to_mv
-  explanation: 'The verified refresh meets the stated freshness limit, and comparing the same data cut checks the values while consumers keep a stable contract. Giving dashboards the MV name and its physical columns couples them to implementation details. Customer-level data needs a finer grain or a separate interface, not an unexplained column on a daily total. A storage change cannot turn order amount into recognized revenue.'
-- id: q6
-  objective: Decide whether repeated query cost justifies maintaining a stored result.
-  prompt: One report runs a costly unchanged daily aggregation hundreds of times each hour. Consumers accept a ten-minute delay, and the team can monitor refresh failures. Which trade-off is reasonable?
+  - id: point_view_at_mv
+    text: "Let the view read the materialized view, keep its columns, and compare both answers first"
+  - id: expose_mv
+    text: "Give the dashboards the materialized view's name and columns, since the view would stop the speedup"
+  - id: add_customer
+    text: "Add customer_id to the daily view as well, so that later customer filters need no new contract"
+  - id: rename_amount
+    text: "Rename gross_amount to revenue during the switch, since stored order amount is revenue"
+  answer: point_view_at_mv
+  explanation: "Consumers depend on the view's names and meanings, so its implementation can change underneath them after the old and the new answer are compared for the same data. Pointing dashboards at the materialized view ties them to an implementation. A customer column in a daily row changes the grain, which needs a new interface. Storing order amount does not make it revenue."
+- id: worth_storing
+  objective: "Decide whether repeated queries justify storing and maintaining a result."
+  prompt: "Which of these justifies an asynchronous materialized view?"
   options:
-  - id: keep_recalculating
-    text: Keep recalculating from detail; repeated cost is irrelevant once the query is logically correct.
-  - id: regular_view_only
-    text: Use only a regular view; saving the query definition also saves its aggregate result.
-  - id: materialize_at_report_grain
-    text: Maintain a materialized result at the report grain, with a measured refresh cadence and freshness checks.
-  - id: copy_per_dashboard
-    text: Copy the aggregation into each dashboard, so each team can refresh independently without shared monitoring.
-  answer: materialize_at_report_grain
-  explanation: 'Heavy reuse can justify storage and refresh work when the lag is allowed and monitored. Correct logic does not remove the repeated compute cost. A regular view stores its definition, not the result. Separate copies increase cost and create inconsistent cuts of the same metric.'
+  - id: repeated_costly_query
+    text: "A costly daily aggregation that dashboards run hundreds of times an hour, if 10 minutes old is fine"
+  - id: one_off
+    text: "A one-off exploration of last year's orders that an analyst runs once, to answer one question for a meeting"
+  - id: tiny_table
+    text: "A query of a ten-row table that already answers in a few milliseconds each time it runs"
+  - id: changing_shapes
+    text: "Ad hoc questions whose grouping and filters change with every query that analysts write"
+  answer: repeated_costly_query
+  explanation: "A stored result pays when the same costly query is asked often and its consumers accept a monitored delay: one refresh serves many reads. A one-off question is answered before a stored result could pay for itself. A tiny table gains nothing worth a refresh to watch. Changing query shapes would need a different stored result each time."

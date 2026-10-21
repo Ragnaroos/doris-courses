@@ -56,7 +56,11 @@ def parquet_paths(directory=None):
     for name, entry in manifest()["tables"].items():
         path = root / f"{name}.parquet"
         if not path.is_file():
-            raise FileNotFoundError(f"Missing {path}; prepare the local WWI data package as described in datasets/README.md.")
+            raise FileNotFoundError(
+                f"Missing {path}. Without DW_WWI_DATA_DIR, Lab 5 unpacks datasets/wwi/wwi-core.tar.gz into "
+                ".runtime/wwi/ when that directory does not exist: delete an incomplete .runtime/wwi/ and run the "
+                "cell again. With DW_WWI_DATA_DIR, the directory must hold every file of datasets/wwi/manifest.json."
+            )
         digest = hashlib.sha256()
         with path.open("rb") as stream:
             for block in iter(lambda: stream.read(1024 * 1024), b""):

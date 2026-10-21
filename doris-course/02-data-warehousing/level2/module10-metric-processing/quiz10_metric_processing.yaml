@@ -1,121 +1,87 @@
 title: "Module 10 Quiz: Metric Processing and Delivery"
-description: Six scenario-based multiple-choice questions. No database connection required.
+description: "Six single-choice questions; no database connection required. View explanations after submitting."
 questions:
-- id: q1
-  objective: Define a metric with its numerator, denominator, grain, and filters.
-  prompt: Finance asks for daily average pre-tax amount per paid order. A reporting calendar supplies one row for
-    every date, including dates with no paid orders. Cancelled orders are excluded, and a day follows the order
-    event date. Which contract is complete enough to reproduce the number?
+- id: metric_contract
+  objective: "Define a metric's population, grain, measures, time rule, and ratio rule before writing its SQL."
+  prompt: "Two dashboards show the average order value of January 1: one 132.00, the other 133.33. Both queries are correct SQL. What resolves the difference?"
   options:
-  - id: name_and_row_count
-    text: Name it average_order_amount and divide each day’s gross amount by its row count, regardless of status.
-  - id: complete_metric_contract
-    text: Record pre-tax amount of paid orders divided by paid-order count, grouped by event date, with a NULL
-      result for a zero denominator.
-  - id: mixed_populations
-    text: Divide all order amounts by paid-order count; the cancelled rows affect only the numerator, not the
-      contract.
-  - id: refresh_interval_only
-    text: Record only a target refresh interval; the dashboard can choose its own population and time rule.
-  answer: complete_metric_contract
-  explanation: 'This contract states the population, numerator, denominator, grain, time rule, and the NULL value
-    for a calendar date with no paid orders. A name and a division are not enough when cancelled orders and date
-    semantics matter. Dividing all order amounts by the paid-order count makes the numerator and denominator describe
-    different populations. Freshness does not define the business calculation.'
-- id: q2
-  objective: Distinguish detailed facts from an aggregate serving table.
-  prompt: Hundreds of dashboards repeat a daily-by-channel total over millions of orders, while investigators occasionally
-    need to inspect a single order and its customer. Which serving design preserves both needs?
+  - id: write_contract
+    text: "A contract that says the average is the day's amount over its orders, not of region averages"
+  - id: same_table
+    text: "Running both queries on one service table, so that they read the same stored rows"
+  - id: round_both
+    text: "Rounding both to whole numbers, since the difference comes from decimal arithmetic"
+  - id: take_higher
+    text: "Taking the higher of the two, because an average of averages undercounts the larger regions"
+  answer: write_contract
+  explanation: "The difference is a definition, not an error: averaging EAST's 144.00 and WEST's 120.00 gives 132.00, while 1200.00 over 9 orders gives 133.33. A contract that states the population, grain, measures, and ratio rule decides what the dashboards show. The same stored rows can still be averaged both ways. Rounding hides the difference without deciding it. Neither value is always the higher one: the average of averages is lower here because the larger group, EAST, has the higher average."
+- id: rebuild_service
+  objective: "Build a service table at a declared grain, and rebuild it instead of loading a batch twice."
+  prompt: "A job inserts each day's totals into an Aggregate Key service table with SUM columns. After a retry, January 1 EAST shows 10 orders and 1440.00 instead of 5 and 720.00. What should the job do?"
   options:
-  - id: detail_and_aggregate
-    text: Retain order detail and maintain a daily-by-channel aggregate for repeated dashboard queries.
-  - id: daily_totals_only
-    text: Replace order detail with daily totals; customer-level questions can always be reversed from SUM.
-  - id: copy_per_dashboard
-    text: Give each dashboard its own copied fact table so its filters and totals cannot affect another team.
-  - id: relabel_daily_total
-    text: Store one total per day but label it as one row per customer for future drill-down.
-  answer: detail_and_aggregate
-  explanation: 'The service table avoids repeated aggregation at a declared grain, while the detail remains available
-    for drill-down and verification. Aggregation discards order and customer identity, so customer-level questions
-    cannot be reversed from SUM. Copied fact tables increase synchronization work and definition drift. Relabeling
-    a day-grain value does not restore customer grain.'
-- id: q3
-  objective: Validate metrics using an independent query against detailed data.
-  prompt: A service table reports 120 orders for Tuesday, while a detail-table aggregation with the same date and
-    status filter reports 117. The service build returned success. What should block publication?
+  - id: rebuild
+    text: "Rebuild the affected rows from the detail, or load each batch once: SUM adds every row"
+  - id: keep_inserting
+    text: "Keep inserting, because an Aggregate Key table removes the rows that repeat a key"
+  - id: store_average
+    text: "Store the average order amount instead, since a second load of the same batch does not change it"
+  - id: divide_by_retries
+    text: "Divide the stored values by the number of retries, which restores the right totals"
+  answer: rebuild
+  explanation: "An Aggregate Key table adds up the rows with the same key, so a repeated batch doubles its sums; the table cannot tell a retry from new orders, so the job must, by rebuilding from the detail or recording which batches it loaded. Aggregate Key does not drop repeats; a Unique Key table would replace them. A stored average cannot be added up to other grains. Dividing assumes that every row was retried the same number of times."
+- id: full_outer_reconcile
+  objective: "Reconcile a service table with the detail through a full outer join."
+  prompt: "A reconciliation joins the detail's totals with the service table's on date and region with an INNER JOIN, and every row matches. The service table's load of January 2 had failed. What does the reconciliation show?"
   options:
-  - id: nothing_blocks
-    text: Nothing; a successful build is stronger evidence than an independently computed total.
-  - id: slow_profile_only
-    text: Only a slow Query Profile; a fast service query can tolerate a three-order discrepancy.
-  - id: count_mismatch
-    text: The mismatch; compare input coverage, filters, and load batches before declaring the serving value
-      correct.
-  - id: missing_screenshot
-    text: A missing dashboard screenshot; the chart is the independent source of truth.
-  answer: count_mismatch
-  explanation: 'An independent detail query at the same cut and filter exposes a result that needs investigation
-    before publication. Build success says the statement ran, not that it used the intended population. Performance
-    evidence cannot resolve a business mismatch. A chart typically reads the same service value, so it is not independent
-    evidence.'
-- id: q4
-  objective: Use window functions without accidentally changing row grain.
-  prompt: A service input has Jan 1 APP (2 orders, 40), Jan 1 STORE (1 order, 30), and Jan 2 APP (1 order, 20).
-    The dashboard needs one row per day with APP orders and cumulative gross amount across all channels. What should
-    the two rows show?
+  - id: misses_day
+    text: "Nothing about January 2: an inner join keeps only the dates on both sides"
+  - id: shows_zero
+    text: "January 2 with 0 orders in the service table, which shows the failed load"
+  - id: raises_error
+    text: "An error, because an inner join fails when one side lacks a row for a key"
+  - id: shows_null
+    text: "January 2 with NULL on the service side of the join, which shows that its load failed"
+  answer: misses_day
+  explanation: "An inner join returns only the rows that both sides have, so a lost day leaves the comparison and the comparison passes; a full outer join keeps it, with NULL on the service side. Neither join invents a zero. A missing match is not an error. The NULL row is what a full outer join shows, not an inner one."
+- id: window_grain
+  objective: "Use window functions and conditional aggregation without changing the grain of a result."
+  prompt: "A report needs one row per day with the day's amount and the amount so far. Which query gives it?"
   options:
-  - id: store_excluded_everywhere
-    text: Jan 1 APP=2, cumulative=40; Jan 2 APP=1, cumulative=60, because STORE is excluded from every measure.
-  - id: one_row_per_channel
-    text: Three rows, one per input channel; the window function itself determines the requested day grain.
-  - id: daily_reset
-    text: Jan 1 APP=2, cumulative=70; Jan 2 APP=1, cumulative=20, because each day starts a new running total.
-  - id: aggregate_then_running_total
-    text: Jan 1 APP=2, cumulative=70; Jan 2 APP=1, cumulative=90, after first aggregating to day grain.
-  answer: aggregate_then_running_total
-  explanation: 'After aggregating to day grain, daily gross is 70 and then 20, so the running totals are 70 and
-    90, while the APP order counts are 2 and 1. APP is only the condition of the order count; gross amount includes
-    both channels. A window annotates its input rows, so daily aggregation must establish the day grain first. The
-    second cumulative value must include the previous day.'
-- id: q5
-  objective: Verify a result-preserving optimization using actual Profile counters and explicitly bounded latency
-    samples.
-  prompt: Two queries return identical complete daily results on the same single Backend (BE). With SQL result caches
-    disabled, their executed Query Profiles show 240,000 scanned rows for detail and 60 for a service table. Twenty
-    warmed, sequential timing samples have similar empirical 95th percentiles (P95). Which conclusion is supported?
+  - id: cte_then_window
+    text: "A CTE that groups the service rows by date, then a running SUM(amount) OVER (ORDER BY order_date) on it"
+  - id: window_on_regions
+    text: "The same window over the service rows per region, with those rows reported as days"
+  - id: sum_of_window
+    text: "Each day's total repeated on every order with a window, then that window column summed for each day"
+  - id: lag_only
+    text: "LAG(amount) OVER (ORDER BY order_date), which returns the total of all earlier days"
+  answer: cte_then_window
+  explanation: "The CTE makes the grain one row per day, and the window adds up from the first day to the current one without changing it. A window over the region rows keeps one row per region and day, not per day. Summing a daily total repeated on each order counts the day once per order. LAG returns the previous row's value only, not a running total."
+- id: paid_gmv
+  objective: "Tell paid GMV, order amount, and net collections apart, and keep each ratio's numerator and denominator."
+  prompt: "The case's orders without the cancelled one are worth 800.00. Its payments in the window total 660.00, and one of the paid orders was refunded 50.00 within the window. What are the window's paid GMV and net collections?"
   options:
-  - id: fewer_rows_scanned_only
-    text: The service query scanned fewer rows in these executions; this sample does not establish lower production
-      latency.
-  - id: proportional_latency
-    text: The scan-row ratio proves the service query will always have proportionally lower wall-clock latency.
-  - id: same_scanned_data
-    text: Similar P95 values prove both queries must have scanned the same amount of data.
-  - id: production_sla
-    text: Twenty concurrency-one samples establish the production dashboard service-level agreement (SLA) under
-      hundreds of simultaneous readers.
-  answer: fewer_rows_scanned_only
-  explanation: 'The executed counters support the scan-work conclusion, while bounded same-host samples do not
-    establish production latency or concurrency capacity. Planning, scheduling and fixed overhead also affect latency,
-    so fewer rows do not imply a proportional wall-clock speedup. Similar latency can coexist with different scanned
-    rows. A small sequential experiment does not reproduce production concurrency, data distribution or failure
-    conditions.'
-- id: q6
-  objective: Choose exact or approximate distinct counts according to the business tolerance.
-  prompt: A loyalty payout requires an exact monthly count of unique buyers. A high-traffic trend chart can tolerate
-    a stated 2% estimation error. Which choice matches the two contracts?
+  - id: paid_then_net
+    text: "Paid GMV 660.00 from the payments themselves; net collections 610.00 after the refund"
+  - id: order_amount
+    text: "Paid GMV 800.00, since every order that was not cancelled counts as paid"
+  - id: refund_first
+    text: "Paid GMV 610.00, because a refund takes its payment out of GMV"
+  - id: status_based
+    text: "Paid GMV of the orders whose latest status is PAID, without the refunded one"
+  answer: paid_then_net
+  explanation: "Paid GMV comes from the deduplicated payments in the window, 660.00; the refund is a separate fact, so net collections are 660.00 minus 50.00, 610.00. Order amount also counts orders that were never paid. Taking refunds out of GMV turns it into net collections. A status of PARTIALLY_REFUNDED does not undo the payment: the order was paid once."
+- id: distinct_and_proof
+  objective: "Choose exact or approximate distinct counts, and verify an optimization with equal results and measured work."
+  prompt: "Finance reconciles distinct paying customers to the unit, and a team proposes HLL because it matched exactly on a sample. Separately, a smaller service table answered in 3.7 ms instead of 7.2 ms. What should be done?"
   options:
-  - id: approximate_for_both
-    text: Use an approximate distinct estimate for both; a small expected error has no payout impact.
-  - id: exact_payout_approximate_trend
-    text: Use exact distinct counting for the payout and an approximate method only for the trend chart, with
-      its tolerance documented.
-  - id: sum_daily_distinct
-    text: Sum each day’s distinct-buyer count for both; buyers returning on another day cannot be counted twice.
-  - id: count_orders
-    text: Count all orders for both; multiple orders from one buyer still represent one unique buyer.
-  answer: exact_payout_approximate_trend
-  explanation: 'The business tolerance of each contract determines whether approximation is acceptable. Even a
-    small estimation error can change a financial payout, which requires exactness. Adding daily distinct counts
-    double-counts buyers who are active on several days. Order count and unique-buyer count answer different questions.'
+  - id: exact_and_prove
+    text: "An exact count for Finance; the table after equal results and Profiles that show less work"
+  - id: hll_matched
+    text: "HLL for Finance, since an exact match on a sample shows that its error is zero"
+  - id: timing_enough
+    text: "Accept the smaller table now, since its faster query shows that it read fewer rows"
+  - id: bitmap_strings
+    text: "A Bitmap of the customers' names, which counts any kind of column exactly"
+  answer: exact_and_prove
+  explanation: "A reconciliation to the unit needs COUNT(DISTINCT) or a Bitmap of integer IDs; HLL estimates, and one match is not an error bound. An optimization is accepted when it returns the same rows and the Profile shows the work it saved; timings come last and belong to their conditions. A timing alone shows neither, and reading less is not always faster. A Bitmap takes non-negative integer IDs, not arbitrary strings."

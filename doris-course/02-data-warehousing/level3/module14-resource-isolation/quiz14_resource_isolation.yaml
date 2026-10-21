@@ -1,124 +1,87 @@
 title: "Module 14 Quiz: Resource Isolation and Query Protection"
-description: Six scenario-based single-choice questions. No database connection is required. Submit each
-  answer to read feedback on every option.
+description: "Six single-choice questions; no database connection required. View explanations after submitting."
 questions:
-- id: q1
-  objective: Explain the precedence used to select a query's Workload Group
-  prompt: A business intelligence (BI) account defaults to course_dashboard_l3 and has USAGE_PRIV on both
-    that group and course_adhoc_l3. The session runs SET workload_group = 'course_adhoc_l3', then submits
-    a dashboard query without a query-level routing hint. Which group is selected?
+- id: routing_order
+  objective: "Explain the order in which Doris selects a query's Workload Group."
+  prompt: "An account's default group is course_dashboard_l3, and it may use both course groups. Its session runs SET workload_group = 'course_adhoc_l3', then a query without a hint. Which group runs the query?"
   options:
-  - id: account_default
-    text: course_dashboard_l3, because the account property takes precedence over the session variable
   - id: session_group
-    text: course_adhoc_l3, because the nonempty session group takes precedence over the account default
-  - id: fallback_to_normal
-    text: normal, because conflicting settings cause a fallback
+    text: "course_adhoc_l3: a session's group comes before the account's default group"
+  - id: account_default
+    text: "course_dashboard_l3: an account's default comes before the session's group"
+  - id: normal_fallback
+    text: "normal: when the session and the account disagree, Doris falls back to it"
   - id: free_slot
-    text: Whichever group currently has a free running slot
+    text: "Whichever of the two groups has a free slot when the query arrives at the FE"
   answer: session_group
-  explanation: 'The session group is authorized and nonempty; the full precedence is query hint, session setting,
-    account default, then normal. Without a higher-priority query hint, the session variable overrides the account
-    default. normal is the fallback only when the earlier settings do not select a group. Selection occurs before
-    admission; capacity determines what happens within the selected group.'
-- id: q2
-  objective: Predict execution, queuing, or rejection from max_concurrency, max_queue_size, and queue_timeout
-  prompt: Three uncached scan queries, each needing one minute, enter an ad hoc group on the same Frontend
-    (FE), with queue bypass disabled. max_concurrency=2 and max_queue_size=0. The first two occupy both
-    running slots. What happens to the third?
+  explanation: "Doris takes a hint in the query first, then the session's group when it is not empty, then the account's default, then normal; the account may use the session's group, so it runs the query. The account's default comes after the session. Disagreement causes no fallback. Capacity decides what happens inside the chosen group, not which group is chosen."
+- id: no_queue
+  objective: "Predict from max_concurrency, max_queue_size, and queue_timeout whether a query runs, waits, or is rejected."
+  prompt: "A group has max_concurrency 2 and max_queue_size 0. Two queries of a minute run on one FE, and a third arrives at the same FE. What happens to the third?"
   options:
-  - id: waits_in_queue
-    text: It queues until one of the running queries finishes
-  - id: rejected_queue_full
-    text: It is rejected immediately with query waiting queue is full
-  - id: moves_to_normal
-    text: It automatically moves to normal
-  - id: queue_timeout
-    text: It queues for 30 seconds, then fails with query queue timeout
-  answer: rejected_queue_full
-  explanation: 'Both running slots on this FE are occupied and the group has no queue, so the query is rejected
-    immediately. There is no waiting position because the queue capacity is zero. Admission failure does not change
-    the selected group. No 30-second wait was configured, and no queue position exists.'
-- id: q3
-  objective: Explain where memory and CPU limits apply and what CPU enforcement requires
-  prompt: A cluster's Backend (BE) has no doris_cgroup_cpu_path configured. An administrator sets the
-    ad hoc group's max_cpu_percent to 10 and max_memory_percent to 30. With no other group's queries running
-    on that BE, ad hoc work still uses all available central processing unit (CPU) capacity. Why?
+  - id: rejected
+    text: "It is rejected at once with query waiting queue is full"
+  - id: waits
+    text: "It waits until one of the two running queries has finished"
+  - id: moves_normal
+    text: "It moves to normal, which still has free slots for it"
+  - id: times_out
+    text: "It waits for the group's queue_timeout, then fails"
+  answer: rejected
+  explanation: "Both slots of this FE are taken and the group has no queue, so the query is rejected at once. A queue size of 0 means that nothing waits. A query does not change groups when its group is full. With no place in the queue there is nothing to time out."
+- id: cpu_cgroup
+  objective: "Explain where memory and CPU limits apply and what CPU enforcement requires."
+  prompt: "A BE has no doris_cgroup_cpu_path. The ad hoc group has max_cpu_percent 10 and max_memory_percent 30, and its queries alone use all of the CPU. Why?"
   options:
-  - id: fe_restart_needed
-    text: The FE must restart before changed CPU settings take effect
-  - id: limits_waiting_queries
-    text: max_cpu_percent limits waiting queries rather than running queries
-  - id: cpu_cgroup_required
-    text: CPU enforcement requires a BE CPU cgroup; without it the CPU setting is unenforced, while
-      Doris memory limits still apply
-  - id: shared_cluster_allowance
-    text: max_cpu_percent is a shared cluster allowance, so a lone group may use every BE fully
-  answer: cpu_cgroup_required
-  explanation: 'Without doris_cgroup_cpu_path, BE does not create the group''s CPU cgroup, so the CPU setting
-    is not enforced; memory accounting and limits use each BE''s mem_limit and do not require cgroups. Restarting
-    FE does not supply the missing BE cgroup enforcement. Queue properties control waiting, while the CPU cap concerns
-    execution. These limits apply per BE, not as a shared cluster allowance, and an enforced maximum remains a cap
-    even when the BE is otherwise idle.'
-- id: q4
-  objective: Route queries with USAGE_PRIV and default_workload_group, and explain why bypass_workload_group
-    is not an isolation boundary
-  prompt: An analyst has USAGE_PRIV only on the ad hoc group, which is also the account default. Three
-    queries occupy max_concurrency=3 and two occupy max_queue_size=2. The analyst sets bypass_workload_group=true
-    and resubmits an uncached scan without another routing hint. Which description is correct?
+  - id: no_cgroup
+    text: "Without a CPU cgroup nothing enforces the CPU limit; memory limits still apply"
+  - id: needs_restart
+    text: "The FE must restart before a changed CPU limit of a group takes effect"
+  - id: waiting_only
+    text: "max_cpu_percent limits only the queries that wait, not the running ones"
+  - id: cluster_share
+    text: "The CPU limit is a share of the whole cluster, so one group alone may fill a single BE"
+  answer: no_cgroup
+  explanation: "CPU limits need the BE's CPU cgroup; without doris_cgroup_cpu_path, max_cpu_percent is a setting that nothing enforces, while memory limits use Doris's own accounting on each BE. A restart of the FE adds no cgroup to a BE. Queue properties control waiting; CPU limits apply to running queries. The limits apply on each BE, and an enforced maximum holds even when the CPU is idle."
+- id: route_and_bypass
+  objective: "Route an account to a group with USAGE_PRIV and default_workload_group, and explain why bypass_workload_group is not an isolation boundary."
+  prompt: "An analyst's account may use only the ad hoc group, which is also its default. The group's slots and queue are full, and the analyst sets bypass_workload_group = true. What happens to the next query?"
   options:
-  - id: admin_only_setting
-    text: The setting fails because only an administrator can change bypass_workload_group
-  - id: skips_queue_only
-    text: The query skips FE queuing but stays in the ad hoc group; usage checks and BE memory limits
-      still apply
-  - id: moves_to_normal
-    text: The query moves to normal and loses every ad hoc-group limit
-  - id: skips_usage_checks
-    text: The query skips both queuing and usage checks, allowing it to use the dashboard group
-  answer: skips_queue_only
-  explanation: 'Only the queuing controls are bypassed; group selection, USAGE_PRIV checks, and BE memory enforcement
-    remain, so queuing alone is not an enforceable isolation boundary. bypass_workload_group is an ordinary session
-    setting and does not require administrative permission. Bypassing the queue does not change routing. It also
-    does not grant usage of an unauthorized group; selecting the dashboard group would still fail.'
-- id: q5
-  objective: Distinguish the timing and scope of query_timeout, Workload Policy, and SQL Block Rule
-  prompt: An analyst's uncached scan must be rejected before execution when it exceeds two partitions,
-    and the analyst must not be able to remove the restriction. Which mechanism meets the requirement?
+  - id: skips_queue
+    text: "It skips the FE's queue and runs in the ad hoc group, under the BE's memory limits"
+  - id: admin_only
+    text: "The SET fails, because only an administrator may change bypass_workload_group for a session"
+  - id: moves_normal
+    text: "It runs in normal, without any of the limits of the ad hoc group"
+  - id: any_group
+    text: "It skips the usage check too, so the analyst may now use the dashboard group"
+  answer: skips_queue
+  explanation: "The setting skips the FE's queue only: the group stays the same, its usage check applies, and so do the BE's memory limits, which is why the queue is not a boundary that an ordinary user cannot cross. Any user may set it for its session. It does not change the group. Selecting a group without USAGE_PRIV still fails when the query runs."
+- id: block_before_run
+  objective: "Tell query_timeout, Workload Policy, and SQL Block Rule apart by when and where they act."
+  prompt: "An analyst's scans of more than two partitions must be rejected before they run, and the analyst must not be able to lift the restriction. Which mechanism fits?"
   options:
+  - id: block_rule
+    text: "A partition_num SQL Block Rule that an administrator ties to the account with sql_block_rules"
   - id: session_timeout
-    text: SET query_timeout = 60 in the analyst's session
-  - id: elapsed_time_policy
-    text: A Workload Policy with query_time > 60000 and cancel_query
-  - id: partition_num_block_rule
-    text: A partition_num SQL Block Rule associated with the account by an administrator through sql_block_rules
-  - id: concurrency_limit
-    text: Set the ad hoc group's max_concurrency to 1
-  answer: partition_num_block_rule
-  explanation: 'The partition_num rule checks the plan before execution, and the analyst cannot remove the binding
-    that the administrator controls. A timeout cancels execution after resources have already been used, and the
-    analyst can change the session value. The Workload Policy checks elapsed time during execution rather than the
-    partition scope before scanning. Concurrency controls the number of running requests, not a request''s scan
-    scope.'
-- id: q6
-  objective: Write a resource runbook covering groups, routing, protection rules, observations, and rollback
-    order
-  prompt: An ad hoc group is retiring. Two accounts still use it as their default, a Workload Policy references
-    it, a global SQL Block Rule remains active, and a dedicated role holds its USAGE_PRIV. The role has
-    no other purpose. Which rollback handles all dependencies?
+    text: "SET query_timeout = 60 in the analyst's session, before each of the scans"
+  - id: workload_policy
+    text: "A Workload Policy that cancels the analyst's queries after 60000 ms"
+  - id: concurrency_one
+    text: "max_concurrency 1 on the analyst's group, so that only one of the scans runs at any one time"
+  answer: block_rule
+  explanation: "A scan rule reads the plan before the query runs and rejects it, and the account property that ties it to the analyst can be set only by an administrator. A timeout cancels a query that is already running, and the analyst can change the session's value. A Workload Policy acts during execution, on elapsed time rather than scan scope. Concurrency limits how many queries run, not what each one scans."
+- id: rollback_order
+  objective: "Write a resource runbook with groups, routing, protection, observations, and a rollback in dependency order."
+  prompt: "An ad hoc group is retired. Two accounts have it as their default, a Workload Policy references it, and a role that has no other purpose holds its USAGE_PRIV. In which order do you remove them?"
   options:
-  - id: drop_group_directly
-    text: Drop the group directly; accounts, policies, role grants, and the rule are removed automatically
-  - id: change_defaults_only
-    text: Change only the two defaults to normal; all remaining objects become harmless
-  - id: keep_policy
-    text: Remove the global rule and role but retain the policy for a future group with the same name
-  - id: remove_every_dependency
-    text: Record running and waiting state, remove the policy dependency, change account defaults,
-      revoke usage, remove the unused role and group, remove the global rule, then verify
-  answer: remove_every_dependency
-  explanation: 'Record the impact, remove references and routing, revoke access, clean up the objects, and verify
-    the resulting groups, roles, and rules. A referenced group cannot simply be dropped, and deleting a group does
-    not clean up role grants or rules. Account defaults are only one dependency; the global rule still affects other
-    sessions, and the policy and grants remain. Keeping the old policy leaves an invalid dependency that a future
-    group with the same name could reactivate.'
+  - id: dependency_order
+    text: "The policy, the defaults, the usage grant and role, then the group, each checked"
+  - id: group_first
+    text: "The group first; Doris then removes the defaults, the policy, and the grants with it"
+  - id: defaults_only
+    text: "The two defaults only; the policy and the grant do no harm once nobody uses the group"
+  - id: keep_grant
+    text: "The policy and the group, keeping the role's grant for a later group of the same name"
+  answer: dependency_order
+  explanation: "Doris refuses to drop a group that a policy references or that is an account's default, and dropping a group leaves the grants of its usage, so the references go first, then the grant and the role, then the group, each checked with its SHOW statement. Dropping the group first fails while the references exist. The policy stays a dependency, and the old grant would come back with a group of the same name, which is also why keeping it is a mistake."

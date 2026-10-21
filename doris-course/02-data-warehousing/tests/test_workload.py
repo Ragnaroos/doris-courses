@@ -52,6 +52,14 @@ class OpenSessionTest(unittest.TestCase):
                 workload.open_session(fake_lab(), **{"query_timeout = 1; DROP TABLE x": 1})
         connect.assert_not_called()
 
+    def test_an_ordinary_user_opens_its_own_session(self):
+        user = MagicMock()
+        with patch.object(workload.pymysql, "connect") as connect:
+            session = workload.open_session(fake_lab(), user=user, workload_group="course_adhoc_l3")
+        self.assertIs(session, user.connect.return_value)
+        user.connect.assert_called_once_with(enable_sql_cache=False, workload_group="course_adhoc_l3")
+        connect.assert_not_called()
+
     def test_connection_is_closed_when_a_session_variable_fails(self):
         connection, cursor = fake_connection()
         cursor.execute.side_effect = pymysql.err.OperationalError(1105, "unknown variable")
@@ -76,7 +84,7 @@ class RunQueryTest(unittest.TestCase):
         outcome, opened = self.run_with(connection)
         self.assertEqual(outcome, workload.QueryOutcome("A", 2.3, None))
         self.assertEqual(outcome.result, "OK")
-        self.assertEqual(opened.call_args.kwargs, {"workload_group": "g"})
+        self.assertEqual(opened.call_args.kwargs, {"user": None, "workload_group": "g"})
         cursor.execute.assert_called_once_with("SELECT 1")
         cursor.fetchall.assert_called_once_with()
         connection.close.assert_called_once_with()
@@ -109,7 +117,7 @@ class BackgroundQueryTest(unittest.TestCase):
             query = workload.BackgroundQuery(fake_lab(), "A", "SELECT 1", workload_group="g")
             self.assertIs(query.result(timeout=5), expected)
         self.assertEqual(run.call_args.args[1:], ("A", "SELECT 1"))
-        self.assertEqual(run.call_args.kwargs, {"workload_group": "g"})
+        self.assertEqual(run.call_args.kwargs, {"user": None, "workload_group": "g"})
 
 
 class GroupLoadTest(unittest.TestCase):

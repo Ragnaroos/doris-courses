@@ -216,7 +216,7 @@ Open [Lab 1: Connect to Doris and Query Your First Orders](lab01_connect_and_que
 4. Summarize the orders by day.
 5. Practice: filter the orders of at least 1000.00, then the second day's orders of at least 300.
 
-You need Docker with about 8 GB of memory for the sandbox. The sample comes from the [official Microsoft release](https://github.com/microsoft/sql-server-samples/releases/tag/wide-world-importers-v1.0), under its MIT license; the [data notes](../../datasets/README.md) describe it.
+You need Docker with about 8 GB of memory for the sandbox. The sample comes from the [official Microsoft release](https://github.com/microsoft/sql-server-samples/releases/tag/wide-world-importers-v1.0), under its MIT license; the course README's [Dataset](../../README.md#dataset) section describes it.
 
 ## Summary
 

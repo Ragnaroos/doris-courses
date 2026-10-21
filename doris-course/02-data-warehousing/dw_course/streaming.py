@@ -136,14 +136,14 @@ def check_resources(profile="cdc"):
             f"The {profile} streaming lab requires Docker capacity of at least "
             f"{required_memory} GiB RAM and {required_cpus} CPUs ({budget}). "
             "Raise the memory in Docker Desktop (Settings > Resources), or use a machine with more. "
-            "See environments/streaming/README.md. No containers were started."
+            "No containers were started."
         )
     print("Capacity is not free memory: check host/VM load and disk space before continuing.", flush=True)
 
 
 def prepare_streaming(profile, *, start=False):
     if not start:
-        raise ValueError("Read environments/streaming/README.md, then pass start=True")
+        raise ValueError("Read what Lab 5A or 5B needs in its first cell, then pass start=True")
     if profile not in ("kafka", "cdc"):
         raise ValueError("Choose kafka or cdc")
     print(compose("--profile", profile, "up", "-d", timeout=1800))

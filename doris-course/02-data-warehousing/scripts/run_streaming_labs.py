@@ -9,7 +9,7 @@ def main():
     parser.add_argument("lab", choices=["kafka", "cdc", "all"])
     args = parser.parse_args()
     if os.environ.get("DW_ALLOW_WRITES") != "yes":
-        parser.error("Read environments/streaming/README.md and set DW_ALLOW_WRITES=yes")
+        parser.error("Read what Labs 5A and 5B need in their first cells, then set DW_ALLOW_WRITES=yes")
     names = {"kafka": "optional05_kafka_routine_load.ipynb", "cdc": "optional05_flink_mysql_cdc.ipynb"}
     for key, name in names.items():
         if args.lab in (key, "all"):

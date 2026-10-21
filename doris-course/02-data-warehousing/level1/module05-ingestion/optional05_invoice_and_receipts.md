@@ -40,4 +40,4 @@ In the course's fixed WWI package, both columns of the first query are 267011.44
 These are verification values for this sample, not accounting identities true for all companies; account balances and delivered-invoice counts are not order payment amounts.
 Payments and refunds for simulated new orders use separate business transactions in Module 7, distinct from this WWI history.
 
-See the [Course data guide](../../datasets/README.md) for data sources, the MIT license, and field descriptions.
+The course README's [Dataset](../../README.md#dataset) section gives the data's source and its MIT license; `datasets/wwi/manifest.json` lists the tables and their columns.

@@ -1,121 +1,87 @@
 title: "Module 13 Quiz: Storage and Lifecycle Management"
-description: Six scenario-based single-choice questions. No database connection is required. Submit each answer
-  to read feedback on every option.
+description: "Six single-choice questions; no database connection required. View explanations after submitting."
 questions:
-- id: q1
-  objective: Choose partition boundaries that match retention rules and query time semantics
-  prompt: A Duplicate Key order-detail table retains the current calendar month and the preceding 12 months. Expiry
-    is based on order date, reports filter order_date, and ingestion batches include late-arriving orders from earlier
-    days. Which partition design aligns cleanup and reporting?
+- id: partition_key
+  objective: "Choose partition boundaries that match a retention rule and the time that queries filter on."
+  prompt: "Orders are kept for the current calendar month and the 12 before it, and January's orders sometimes arrive in February. How should the table be partitioned?"
   options:
-  - id: monthly_by_ingestion_date
-    text: Monthly partitions by ingestion date, keeping every ingestion batch in one partition
-  - id: yearly_by_order_date
-    text: Yearly partitions by order_date to reduce the number of definitions
-  - id: no_partitions
-    text: No partitions; distribute by order_id and remove expired rows with conditional DELETE
-  - id: monthly_by_order_date
-    text: Monthly partitions by order_date, using the same time for expiry and query filters
-  answer: monthly_by_order_date
-  explanation: 'With monthly partitions by order_date, cleanup addresses one month without changing adjacent months,
-    and order_date filters can prune the same boundaries. With partitions by ingestion date, a January order arriving
-    in February would be missed by January''s cleanup, and its order-date filter would not align with partition
-    pruning. An annual boundary cannot remove just one expired month while retaining the others; row-level deletion
-    would be needed instead. Hash distribution does not provide monthly retention boundaries, and conditional deletion
-    need not reclaim physical space immediately.'
-- id: q2
-  objective: Distinguish partitions, buckets, tablets, replicas, rowsets, and segments
-  prompt: One monthly partition in a production order table has six buckets and three replicas per tablet. SHOW
-    TABLETS FROM orders PARTITION (p202505) returns 18 rows but only six distinct TabletId values. How should the
-    output be read?
+  - id: monthly_order_date
+    text: "By calendar month of order_date, so a late January order lands in January"
+  - id: monthly_load_time
+    text: "By calendar month of the load time, so that each month's loads are removed together"
+  - id: yearly_delete
+    text: "By year, with a conditional DELETE that removes the expired months inside each year"
+  - id: rolling_days
+    text: "By day, with a job that drops days older than 365 days before the maintenance date"
+  answer: monthly_order_date
+  explanation: "The time that decides expiry and that queries filter on is the order date, in the rule's unit, calendar months: a late order goes to its own month, and each expired month is one partition. The load time puts late orders into the wrong month. A DELETE in a yearly partition leaves a predicate that every query of the year applies until compaction. 365 days is a different rule from 13 calendar months."
+- id: tablet_count
+  objective: "Explain how a row belongs to a partition, a tablet, a replica, a rowset, and a segment."
+  prompt: "A table keeps 13 monthly partitions with 8 buckets each and 3 replicas. How many rows does SHOW TABLETS list for the table?"
   options:
-  - id: eighteen_partitions
-    text: The month has 18 partitions, one per output row
-  - id: eighteen_tablets
-    text: The month has 18 distinct tablets with one replica each
-  - id: six_tablets_three_replicas
-    text: The month has six tablets; each tablet's three replicas contribute three output rows
-  - id: six_rowsets
-    text: The month has six rowsets, each represented by three segments
-  answer: six_tablets_three_replicas
-  explanation: 'Six buckets give six tablets, and three replicas of each yield 18 rows. The inspection is scoped
-    to one partition, so the rows are not partitions. Six distinct tablet identities do not become 18 tablets because
-    they have replicas. SHOW TABLETS lists tablet replicas rather than rowsets or segments.'
-- id: q3
-  objective: Perform partition-level lifecycle operations without clearing the whole table
-  prompt: A test table has monthly partitions for April and May. April must be emptied and reloaded using its existing
-    boundary. May must remain unchanged. Which operation meets the scope?
+  - id: replicas_312
+    text: "312: 104 tablets, one per partition and bucket, each listed per replica"
+  - id: tablets_104
+    text: "104: one row per tablet, since SHOW TABLETS does not list the replicas"
+  - id: partitions_13
+    text: "13: one row per partition, since each partition is stored as one tablet"
+  - id: buckets_24
+    text: "24: one row per bucket and replica, since all the partitions share the same buckets"
+  answer: replicas_312
+  explanation: "Each partition has one tablet per bucket, 13 times 8 is 104 tablets, and each tablet has 3 replicas, each one row: 312. Replicas are listed, which is why a partition clause helps on a real table. A partition holds as many tablets as it has buckets. Buckets belong to each partition, not to the table as a whole."
+- id: lagging_count
+  objective: "Record before-and-after evidence of a maintenance change with SHOW PARTITIONS, SHOW TABLETS, and SHOW CREATE TABLE."
+  prompt: "Right after a load, SHOW PARTITIONS shows RowCount -1 for January although its VisibleVersion went up. How do you count January's rows now?"
   options:
-  - id: truncate_whole_table
-    text: Truncate the whole table, then reload May
-  - id: truncate_april_partition
-    text: Truncate only April's partition, retaining a same-name empty partition for reload
-  - id: drop_april
-    text: Drop April and assume its original boundary remains defined automatically
-  - id: delete_all_rows
-    text: Delete every row from the whole table, then restore the months
-  answer: truncate_april_partition
-  explanation: 'Truncating only April''s partition retains its boundary for the reload and leaves May outside
-    the scope. Whole-table truncation changes May too. Dropping April removes its definition, which must be recreated
-    before the reload. An unconditional whole-table delete also affects May and ignores the known boundary.'
-- id: q4
-  objective: Distinguish query visibility, metadata changes, physical space reclamation, and the role of Compaction
-  prompt: In a storage-compute coupled deployment, an operator drops an archived April partition without FORCE.
-    Queries no longer show April and SHOW PARTITIONS omits it, but disk usage has not decreased. Which explanation
-    fits all three observations?
+  - id: count_partition
+    text: "SELECT COUNT(*) FROM the table PARTITION (p202501); RowCount waits for a report"
+  - id: trust_minus_one
+    text: "Read -1 as an empty partition, since a RowCount of -1 means that it holds no rows yet"
+  - id: tablet_rowcount
+    text: "Read RowCount in SHOW TABLETS, which counts each tablet's rows as they load"
+  - id: show_create
+    text: "Read SHOW CREATE TABLE, which lists the number of rows in each partition"
+  answer: count_partition
+  explanation: "VisibleVersion changes when the load commits; RowCount and DataSize come from the BE's periodic report, about a minute later, so a query of the partition counts its rows now. -1 means not reported yet, not empty. RowCount in SHOW TABLETS waits for the same report. SHOW CREATE TABLE shows the definition, not rows."
+- id: truncate_stages
+  objective: "Tell query visibility, metadata changes, and reclaimed space apart, and say where compaction fits."
+  prompt: "TRUNCATE TABLE ... PARTITION (p202501) has just returned. What has changed at that moment?"
   options:
-  - id: logical_removal_before_reclamation
-    text: Query visibility and metadata changed; recycle-bin retention and asynchronous cleanup can release space
-      later
-  - id: drop_failed
-    text: The drop necessarily failed; a partition cannot disappear from metadata until disk usage falls
-  - id: conditional_delete
-    text: April was hidden by conditional DELETE and its definition remains until Compaction removes the partition
-  - id: archive_failed
-    text: The archive necessarily failed; neither query visibility nor the missing partition says anything about
-      the drop
-  answer: logical_removal_before_reclamation
-  explanation: 'Logical removal, metadata changes, and physical reclamation are separate stages, and omitting
-    FORCE preserves recycle-bin retention. The query and metadata evidence already establish the logical changes,
-    even while files remain. This is DROP PARTITION, not a delete predicate, and its effect does not wait for Compaction.
-    Archive success needs independent checks and cannot be inferred from current disk usage.'
-- id: q5
-  objective: Write a maintenance runbook with a tested recovery source and an explicit snapshot cutoff
-  prompt: A coupled-mode ordinary table was force-dropped after a full repository backup. The upstream system can
-    no longer replay it, and recycle-bin recovery is unavailable. The repository contains a usable snapshot from
-    09:00; four additional orders arrived at 09:10 before deletion. What recovery claim is justified?
+  - id: visible_and_id
+    text: "Queries no longer see January, which has a new ID; its old files wait in the recycle bin"
+  - id: space_freed
+    text: "January's disk space is free, because a truncation deletes all of the partition's files at once"
+  - id: after_compaction
+    text: "Nothing yet: queries see January's rows until compaction removes them"
+  - id: same_id
+    text: "January's rows are gone and its PartitionId is the same, since it was emptied in place"
+  answer: visible_and_id
+  explanation: "Truncation replaces the partition with a new, empty one of the same name, so queries change at once and the ID is new; the old partition waits in the recycle bin, and its files go after the retention. Space is not freed at once. Compaction concerns rowsets and delete predicates, not truncation. The partition is replaced, not emptied in place."
+- id: recover_by_id
+  objective: "Recover a dropped or truncated partition from the recycle bin, and say when only a backup or an archive can help."
+  prompt: "January was truncated by mistake an hour ago, and its empty replacement has received no rows. How do you bring January back?"
   options:
-  - id: recover_after_force
-    text: RECOVER can restore all orders because every DROP, including FORCE, retains the original table.
-  - id: finished_backup_is_proof
-    text: A FINISHED backup status proves all post-snapshot orders were included without another restore test.
-  - id: snapshot_is_current
-    text: Restore the snapshot and call the recovered state current; later orders are automatically inferred
-      from row counts.
-  - id: restore_and_report_gap
-    text: Restore into an isolated target and reconcile the 09:00 cutoff; the four later orders remain unrecovered
-      without another source.
-  answer: restore_and_report_gap
-  explanation: 'Test the restore and its recorded cutoff, and report the missing post-snapshot writes rather than
-    claiming zero data loss. A FORCE drop bypasses the recycle bin that RECOVER relies on. Backup completion does
-    not validate a restore or include later writes. Snapshot data cannot reconstruct unknown later orders.'
-- id: q6
-  objective: Record before-and-after maintenance evidence with SHOW PARTITIONS, SHOW TABLETS, and SHOW CREATE TABLE
-  prompt: An archived monthly partition will be dropped. Afterward, the team must show that the target month is
-    gone and adjacent months remain complete, while retaining physical-layout evidence for investigation. Which
-    evidence set is sufficient?
+  - id: drop_then_recover_id
+    text: "Drop the empty replacement, then RECOVER PARTITION p202501 by the ID recorded before the truncation"
+  - id: recover_by_name
+    text: "RECOVER PARTITION p202501 FROM the table, which brings back the one with data"
+  - id: restore_needed
+    text: "Only a backup can, since a truncated partition does not go to the recycle bin"
+  - id: truncate_again
+    text: "TRUNCATE the partition a second time, which swaps the old one back from the recycle bin"
+  answer: drop_then_recover_id
+  explanation: "The truncated partition is in the recycle bin for a day. The replacement of the same name blocks a RECOVER, and once the replacement is dropped too, two partitions of that name are in the bin, so the recorded ID picks the right one. By name, Doris refuses while the replacement exists and afterwards recovers the newest one, the empty replacement. A backup is needed after FORCE or the retention, not within the hour. A second truncation only puts another empty partition in the bin."
+- id: runbook
+  objective: "Write a maintenance runbook with its scope, checks, evidence, and a recovery path tested beforehand."
+  prompt: "Which runbook for removing January 2025 under the 13-month rule is complete?"
   options:
-  - id: total_row_count
-    text: Only the final whole-table row count; a lower total identifies which month was removed
-  - id: pre_change_definition
-    text: Only the pre-change SHOW CREATE TABLE; it proves every month's final row count
-  - id: full_evidence_set
-    text: The table definition, before-and-after partition metadata, independent target and adjacent-month counts,
-      archive reconciliation, and relevant tablet layout
-  - id: final_tablet_listing
-    text: Only the final SHOW TABLETS; replica rows replace partition boundaries and business counts
-  answer: full_evidence_set
-  explanation: 'Together these checks cover boundaries, changes, logical values, archive readiness, and physical
-    layout. A total cannot identify the removed month or prove adjacent-month completeness. The table definition
-    describes structure, not post-change business values. Replica listings are not business row counts, and a final
-    snapshot alone cannot locate the change.'
+  - id: complete
+    text: "Scope p202501; record its ID, version, and rows; read its archive back; drop it; check"
+  - id: force_drop
+    text: "Drop p202501 with FORCE to free its space at once, and rely on the recycle bin afterwards"
+  - id: truncate_table
+    text: "Truncate the whole table and reload the 13 months that stay, which needs no evidence"
+  - id: delete_rows
+    text: "DELETE the orders before February 2025, check that the disk usage fell, and keep no archive"
+  answer: complete
+  explanation: "A runbook names the scope, records the evidence before and checks it after, and tests the way back before the change by reading the archive. FORCE skips the recycle bin, so it cannot be relied on afterwards. Truncating the whole table touches 13 months that must stay. A DELETE does not free space at once, and without an archive a wrong condition cannot be undone."

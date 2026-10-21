@@ -20,7 +20,7 @@ If Jupyter runs on a remote server, “local machine” below refers to the serv
 Start Docker Desktop (macOS) or Docker Engine (Linux) first, and install the Compose plugin.
 We recommend reserving 4 CPUs, 8 GB of memory, and 20 GB of free disk space.
 
-Open [Lab 1](../../level1/module01-introduction/lab01_connect_and_query.ipynb) directly:
+Open [Lab 1](../../../../../doris-course/02-data-warehousing/level1/module01-introduction/lab01_connect_and_query.ipynb) directly:
 
 ```bash
 .venv/bin/jupyter lab level1/module01-introduction/lab01_connect_and_query.ipynb
@@ -29,7 +29,7 @@ Open [Lab 1](../../level1/module01-introduction/lab01_connect_and_query.ipynb) d
 Run “Initialize Lab Tools” first, then run the startup code under “Start the Single-Container Lab Environment.”
 The startup interface displays a progress bar and six step-status cards in two columns: completed steps are green, the current step is yellow,
 failed steps are red, and subsequent steps remain gray. Full logs expand on failure; success logs are collapsed by default.
-The course tools validate [compose.yml](compose.yml), start or reuse the sandbox, wait for health checks,
+The course tools validate [compose.yml](../../../../../doris-course/02-data-warehousing/environments/single-node/compose.yml), start or reuse the sandbox, wait for health checks,
 verify the FE connection and BE computation, and then connect to the lab database. The first download and startup may take several minutes.
 
 Subsequent Labs automatically connect to the same sandbox without creating more containers or requiring manual connection environment variables.

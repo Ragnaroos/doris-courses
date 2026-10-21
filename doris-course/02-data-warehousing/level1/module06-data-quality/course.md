@@ -209,7 +209,7 @@ Open [Lab 6: Preserve Input, Route Rejections, and Automate Validation](lab06_va
 3. Check the accepted orders, break them twice on purpose to see the uniqueness check fail, and restore them.
 4. Practice: try a new amount-review rule with `CASE` before using it.
 
-You need the course sandbox from Module 1 and `wwi_customers` from Lab 5; if it is missing, the Lab loads that one table from the bundled package. Module 7 reads the accepted orders. The [data notes](../../datasets/README.md) describe the inputs.
+You need the course sandbox from Module 1 and `wwi_customers` from Lab 5; if it is missing, the Lab loads that one table from the bundled package. Module 7 reads the accepted orders. The course README's [Dataset](../../README.md#dataset) section lists the inputs.
 
 ## Summary
 

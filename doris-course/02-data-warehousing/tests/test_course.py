@@ -229,7 +229,7 @@ class MaterialsTest(unittest.TestCase):
             else:
                 content = path.read_text()
             self.assertNotRegex(content, r"(?<![A-Za-z0-9_])D0?[1-7](?![A-Za-z0-9_])", path)
-        for module in (COURSE_ROOT / "level1").glob("module*"):
+        for module in COURSE_ROOT.glob("level*/module*"):
             number = int(re.match(r"module(\d+)", module.name)[1])
             reading = next(module.glob("course*.md")).read_text()
             self.assertTrue(reading.startswith(f"# Module {number}:"), module)
@@ -238,15 +238,15 @@ class MaterialsTest(unittest.TestCase):
                 self.assertTrue(quiz["title"].startswith(f"Module {number} Quiz:"), quiz_path)
 
     def test_learner_prose_excludes_author_status_notes(self):
-        paths = list((COURSE_ROOT / "level1").glob("*/course*.md"))
-        paths += list((COURSE_ROOT / "level1").glob("*/*.ipynb"))
+        paths = list(COURSE_ROOT.glob("level*/*/course*.md"))
+        paths += list(COURSE_ROOT.glob("level*/*/*.ipynb"))
         for path in paths:
             content = path.read_text()
             if path.suffix == ".ipynb":
                 notebook = nbformat.read(path, as_version=4)
                 content = "\n".join(c.source for c in notebook.cells if c.cell_type == "markdown")
             self.assertNotRegex(content, r"(?i)candidate experiment|candidate lab|not yet tested|initial lab draft|acceptance evidence|do not mark unexecuted steps as complete|maintenance/.*/VALIDATION\.md", path)
-        for path in (COURSE_ROOT / "level1").glob("*/quiz*.ipynb"):
+        for path in COURSE_ROOT.glob("level*/*/quiz*.ipynb"):
             notebook = nbformat.read(path, as_version=4)
             content = "\n".join(c.source for c in notebook.cells if c.cell_type == "markdown")
             self.assertIn("### Load the Quiz", content, path)
@@ -384,8 +384,8 @@ class MaterialsTest(unittest.TestCase):
 
     def test_quiz_contract_and_shared_renderer(self):
         from dw_course.quiz import CourseQuiz
-        paths = list((COURSE_ROOT / "level1").glob("*/quiz*.yaml"))
-        self.assertEqual(len(paths), 8)
+        paths = list(COURSE_ROOT.glob("level*/*/quiz*.yaml"))
+        self.assertEqual(len(paths), 15)  # One per module, and one for Module 5's optional reading.
         for path in paths:
             data = yaml.safe_load(path.read_text())
             self.assertEqual(len(data["questions"]), 6, path)
@@ -412,7 +412,7 @@ class MaterialsTest(unittest.TestCase):
     def test_quiz_four_choices_and_feedback_render(self):
         from dw_course.quiz import CourseQuiz
 
-        for path in (COURSE_ROOT / "level1").glob("*/quiz*.yaml"):
+        for path in COURSE_ROOT.glob("level*/*/quiz*.yaml"):
             quiz = CourseQuiz.from_yaml(path)
             for index, question in enumerate(quiz.questions):
                 for option in question.options:
@@ -477,7 +477,7 @@ class MaterialsTest(unittest.TestCase):
 
 
     def test_notebook_markdown_links_and_covers(self):
-        for path in (COURSE_ROOT / "level1").glob("*/*.ipynb"):
+        for path in COURSE_ROOT.glob("level*/*/*.ipynb"):
             notebook = nbformat.read(path, as_version=4)
             self.assertIn("DATA WAREHOUSING WITH APACHE DORIS", notebook.cells[0].source)
             self.assertIn("border-top:4px solid #0f766e", notebook.cells[0].source)
@@ -613,6 +613,42 @@ class AlignmentTest(unittest.TestCase):
         report.assert_called_once()
         self.assertEqual(report.call_args.args[0], "Missing table")
 
+    def test_plans_name_their_scans_joins_and_materialized_views(self):
+        from dw_course.runtime import plan_joins, plan_scans
+        # Lines of 4.1.3 EXPLAIN plans of Labs 8 and 9, trimmed.
+        rewritten = """  0:VOlapScanNode(476)
+     TABLE: dw_course_l1_demo.orders_daily_mv_l2(orders_daily_mv_l2), PREAGGREGATION: ON
+     partitions=1/1 (orders_daily_mv_l2)
+     tablets=10/10, tabletList=1792571396305,1792571396307
+========== MATERIALIZATIONS ==========
+MaterializedViewRewriteSuccessAndChose:
+ CBO.internal.dw_course_l1_demo.orders_daily_mv_l2 chose
+MaterializedViewRewriteSuccessButNotChose:
+MaterializedViewRewriteFail:
+ CBO.internal.dw_course_l1_demo.orders_region_mv_l2 fail
+  FailInfo: View struct info is invalid, Rewrite compensate predicate by view fail
+========== STATISTICS ==========
+ CBO.internal.ignored after the statistics""".splitlines()
+        scans, views = plan_scans(rewritten)
+        self.assertEqual(scans, [{"table": "dw_course_l1_demo.orders_daily_mv_l2", "reads": "orders_daily_mv_l2",
+                                  "partitions": "1/1 (orders_daily_mv_l2)", "tablets": "10/10"}])
+        self.assertEqual(views, [
+            {"materialized_view": "orders_daily_mv_l2", "result": "chosen", "reason": ""},
+            {"materialized_view": "orders_region_mv_l2", "result": "not usable",
+             "reason": "View struct info is invalid, Rewrite compensate predicate by view fail"},
+        ])
+        joined = """  3:VHASH JOIN(238)
+  |  join op: INNER JOIN(BROADCAST)[]
+  |  equal join conjunct: (customer_id[#13] = customer_id[#5])
+  |----1:VEXCHANGE
+  2:VOlapScanNode(217)
+     TABLE: dw_course_l1_demo.orders_fact_l2(orders_fact_l2), PREAGGREGATION: ON
+  0:VOlapScanNode(222)
+     TABLE: dw_course_l1_demo.customers_dim_l2(customers_dim_l2), PREAGGREGATION: ON""".splitlines()
+        self.assertEqual(plan_joins(joined), [{"join": "INNER JOIN", "distribution": "BROADCAST",
+                                               "condition": "(customer_id[#13] = customer_id[#5])"}])
+        self.assertEqual([scan["reads"] for scan in plan_scans(joined)[0]], ["orders_fact_l2", "customers_dim_l2"])
+
     def test_compose_scope_and_persistence(self):
         from dw_course.docker_runtime import COMPOSE_FILE, PROJECT
         config = yaml.safe_load(COMPOSE_FILE.read_text())
@@ -626,14 +662,61 @@ class AlignmentTest(unittest.TestCase):
         self.assertEqual(set(config["volumes"]), {"fe-meta", "be-storage"})
 
     def test_compose_files_and_runtime_use_the_same_port_variables(self):
-        from dw_course.environment import LAKE_PORTS, SANDBOX_PORTS
-        for name, ports in (("single-node", SANDBOX_PORTS), ("lakehouse", LAKE_PORTS)):
+        from dw_course.environment import BACKUP_PORTS, BI_PORTS, LAKE_PORTS, SANDBOX_PORTS
+        for name, ports in (("single-node", SANDBOX_PORTS), ("lakehouse", LAKE_PORTS),
+                            ("bi", BI_PORTS), ("backup", BACKUP_PORTS)):
             text = (COURSE_ROOT / "environments" / name / "compose.yml").read_text()
-            published = dict(re.findall(r'"127\.0\.0\.1:\$\{(DW_\w+):-(\d+)\}:\d+"', text))
+            published = dict(re.findall(r'["\']127\.0\.0\.1:\$\{(DW_\w+):-(\d+)\}:\d+["\']', text))
             with self.subTest(environment=name):
                 # Every host port is a variable, with the default of dw_course/environment.py.
                 self.assertEqual(published, {variable: str(default) for variable, (default, _) in ports.items()})
-                self.assertNotRegex(text, r'"127\.0\.0\.1:\d+:\d+"')
+                self.assertNotRegex(text, r'["\']127\.0\.0\.1:\d+:\d+["\']')
+
+    def test_optional_services_use_their_port_variables(self):
+        from dw_course import backup, bi
+        with patch.dict("os.environ", {"DW_BI_PORT": "61888", "DW_BACKUP_S3_PORT": "61910"}, clear=True):
+            self.assertEqual(bi.superset_url(), "http://127.0.0.1:61888")
+            self.assertEqual(backup.endpoint(), "http://127.0.0.1:61910")
+        with patch.dict("os.environ", {}, clear=True):
+            self.assertEqual(bi.superset_url(), "http://127.0.0.1:51888")
+            self.assertEqual(backup.endpoint(), "http://127.0.0.1:51910")
+
+    def test_busy_service_port_stops_before_the_service_starts(self):
+        from dw_course import sidecars
+        from dw_course.onboarding import SetupRequired
+        with patch.dict("os.environ", {}, clear=True), patch("subprocess.run", return_value=Mock(stdout="")) as run, \
+                patch("dw_course.docker_runtime.port_in_use", side_effect=lambda number: number == 51888):
+            with self.assertRaises(SetupRequired) as raised:
+                sidecars.start_service(Mock(), "bi", start=True)
+        self.assertIn("51888 (DW_BI_PORT", str(raised.exception))
+        self.assertIn("`DW_BI_PORT=61888 .venv/bin/jupyter lab`", str(raised.exception))
+        self.assertFalse(any("up" in call.args[0] for call in run.call_args_list))
+
+    def test_service_start_failure_names_its_likely_cause(self):
+        import subprocess
+        from dw_course import sidecars
+        from dw_course.onboarding import SetupRequired
+
+        def failing(output, state):
+            def run(command, **_):
+                if "up" in command:
+                    raise subprocess.CalledProcessError(1, command, output=output)
+                if command[:2] == ["docker", "inspect"]:
+                    return Mock(stdout=json.dumps(state))
+                return Mock(stdout="container-id\n")
+            return run
+
+        cases = [
+            ("failed to solve: apache/superset:4.1.2: failed to resolve source metadata", {}, "internet access"),
+            ("container doris-warehousing-bi-superset-1 is unhealthy", {"OOMKilled": True}, "ran out of memory"),
+            ("container doris-warehousing-bi-superset-1 is unhealthy", {"OOMKilled": False}, "did not become healthy"),
+        ]
+        for output, state, cause in cases:
+            with self.subTest(cause=cause), patch.object(sidecars, "check_host_ports"), \
+                    patch("subprocess.run", side_effect=failing(output, state)):
+                with self.assertRaises(SetupRequired) as raised:
+                    sidecars.start_service(Mock(), "bi", start=True)
+                self.assertIn(cause, str(raised.exception))
 
     def test_port_variables_move_the_connection(self):
         from dw_course.environment import connection_settings
@@ -801,6 +884,30 @@ class AlignmentTest(unittest.TestCase):
                     _check_prerequisites(lab_with(tables), module)
                 self.assertIn(blocked, str(raised.exception))
                 self.assertIn(steps, str(raised.exception))
+
+    def test_level2_and_3_labs_name_the_lab_that_writes_their_input(self):
+        from dw_course.docker_runtime import PREREQUISITES, _check_prerequisites
+        from dw_course.onboarding import LABS, SetupRequired
+
+        lab = Mock(database="dw_course_l1_test")
+        lab.query.side_effect = lambda statement: [] if statement == "SHOW TABLES" else [(0,)]
+        for module, steps in ((8, "Complete Lab 7 (current state and replay) in"),
+                              (9, "Complete Lab 6 (quality checks), then Lab 7 (current state and replay) in"),
+                              (10, "Complete Lab 9 (modeling and joins) in"),
+                              (11, "Complete Lab 10 (metric processing) in"),
+                              (12, "Complete Lab 9 (modeling and joins), then Lab 11 (BI and AI consumers) in")):
+            with self.subTest(module=module):
+                with self.assertRaises(SetupRequired) as raised:
+                    _check_prerequisites(lab, module)
+                self.assertIn(steps, str(raised.exception))
+                # Every Lab named in a message has a link, and every link opens a file of the course.
+                self.assertTrue(set(raised.exception.links[1:]) <= {(f"Open Lab {n}", LABS[n]) for n in LABS})
+                for _, path in raised.exception.links:
+                    self.assertTrue((COURSE_ROOT / path).is_file(), path)
+        for number, path in LABS.items():
+            self.assertTrue((COURSE_ROOT / path).is_file(), path)
+        self.assertEqual(PREREQUISITES.get(13), None)
+        self.assertEqual(PREREQUISITES.get(14), None)
 
     def test_explicit_sandbox_start_and_be_readiness(self):
         from dw_course.docker_runtime import prepare_environment

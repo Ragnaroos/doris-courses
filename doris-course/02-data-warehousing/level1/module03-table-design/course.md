@@ -187,7 +187,7 @@ Open [Lab 3: Model Semantics, Partitioning, and Bucketing](lab03_models_and_prun
 2. Create the partitioned table and compare the plans of a query without a filter, with a date filter, and with a date and an order ID.
 3. Practice: decide which model answers "what is order 1's amount now", then choose a model for two orders' current amounts.
 
-You need the course sandbox from Module 1. The [Level 1 extension labs](../extensions/README.md) compare the same designs on 100,000 rows.
+You need the course sandbox from Module 1. The optional [extension Lab on batches, partitions, and Profile](../extensions/extension23_physical_design.ipynb) compares the same designs on 100,000 rows.
 
 ## Summary
 

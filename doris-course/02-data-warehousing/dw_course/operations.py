@@ -1,37 +1,25 @@
-"""Observe tagged queries in the course's own FE audit file."""
+"""Find the tagged queries of ordinary users in Doris's audit table."""
 
-import subprocess
-
-from .docker_runtime import compose_command
+from .runtime import identifier
 from .streaming import wait_for
 
-
-def parse_audit_records(text, database, requests):
-    """Select exact identities/tags without exposing unrelated SQL or credentials."""
-    matches = {}
-    for line in text.splitlines():
-        fields = dict(piece.split('=', 1) for piece in line.split('|')[1:] if '=' in piece)
-        for user, tag in requests:
-            if (fields.get('User') == user and fields.get('Db') == database
-                    and tag in fields.get('Stmt', '')):
-                matches[(user, tag)] = {
-                    'user': user, 'database': database, 'request_tag': tag,
-                    'query_id': fields['QueryId'], 'state': fields['State'],
-                    'error_code': fields['ErrorCode'], 'returned_rows': fields['ReturnRows'],
-                    'execution_ms': fields['Time(ms)'],
-                }
-    return [matches[key] for key in requests if key in matches]
+AUDIT_QUERY = """SELECT `user`, db, state, error_code, return_rows, query_id, stmt
+FROM __internal_schema.audit_log
+WHERE `user` IN ({users}) AND stmt LIKE %s
+ORDER BY `time`, query_id"""
 
 
-def query_audit_records(database, requests):
-    """Read this single course FE; do not imply multi-node collection or retention."""
-    def read():
-        result = subprocess.run(
-            compose_command('exec', '-T', 'doris', 'tail', '-n', '5000',
-                            '/opt/apache-doris/fe/log/fe.audit.log'),
-            check=True, capture_output=True, text=True, timeout=15,
-        )
-        return parse_audit_records(result.stdout, database, requests)
+def audit_records(lab, users, tag, *, expected, timeout=150, title="The users' queries in the audit table"):
+    """Wait until the audit table holds `expected` queries of these users that contain `tag`; show and return them.
 
-    return wait_for(read, lambda rows: len(rows) == len(requests),
-                    description='Find tagged ordinary-user queries in the FE audit file', timeout=60)
+    Doris's audit plugin writes __internal_schema.audit_log in batches, at least
+    once a minute (FE configuration audit_plugin_max_batch_interval_sec = 60), so a
+    query appears up to about a minute after it ran. The filter on the users keeps
+    root's own queries, and every statement of other accounts, out of the result.
+    """
+    users = [identifier(user) for user in users]
+    statement = AUDIT_QUERY.format(users=", ".join(["%s"] * len(users)))
+    params = (*users, f"%{tag}%")
+    wait_for(lambda: lab.query(statement, params), lambda rows: len(rows) >= expected,
+             description="Wait for the audit plugin to write the queries", timeout=timeout)
+    return lab.sql(statement, params, title=title)

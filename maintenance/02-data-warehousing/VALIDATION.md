@@ -333,7 +333,7 @@ Kafka、Flink CDC、CDC_STREAM、持续文件、真实位点恢复及持续并�
 ## 2026-09-18：按业务含义与实验用途命名表
 
 - 七份讲义、七个 Lab、相关测验与环境说明统一使用业务表名；目录和标题仍保留单元编号。
-  表名含义见 [Level 1](../../doris-course/02-data-warehousing/level1/README.md#how-are-lab-tables-named)。
+  表名含义见 [Level 1](former-readmes/level1/README.md#how-are-lab-tables-named)。
 - WWI 历史表保留 wwi_ 来源前缀；orders_sample、orders_current、order_events 等名称
   表达数据用途。orders_batch / orders_rowwise 等对照表及更新、删除练习表仍独立，
   不因去掉编号而合并实验数据。
@@ -425,7 +425,7 @@ Kafka、Flink CDC、CDC_STREAM、持续文件、真实位点恢复及持续并�
   D05 本地 Stream Load 不冒充最终课程 S3 路径。
 - 用户已有的 Quiz 1 执行记录和课程 01 修改保留；不会为清洁性检查清空它们。
 
-复用数据的来源、许可和准备方法见[学员数据说明](../../doris-course/02-data-warehousing/datasets/README.md)，
+复用数据的来源、许可和准备方法见[学员数据说明](former-readmes/datasets/README.md)，
 原始备份实测结果见 [WWI-VALIDATION.md](WWI-VALIDATION.md)。
 
 ## Earlier validation history

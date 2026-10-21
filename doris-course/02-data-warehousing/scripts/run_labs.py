@@ -52,7 +52,7 @@ def main():
     parser.add_argument("--extensions-only", action="store_true", help="Run only extensions; main Labs 1, 4, 5, 6 and 7 must already be complete")
     args = parser.parse_args()
     if os.environ.get("DW_ALLOW_WRITES") != "yes":
-        parser.error("Set DW_ALLOW_WRITES=yes after reading environments/single-node/README.md")
+        parser.error("Set DW_ALLOW_WRITES=yes to let the Labs rebuild their tables in DW_DATABASE; the course README describes the sandbox")
     modules = list(CORE)
     if args.iceberg:
         modules.insert(3, "module04-external-access")
