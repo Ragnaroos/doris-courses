@@ -101,14 +101,19 @@ fi
 """
 
 
-# Row counters of a table scan in a Query Profile. For a filter that Doris checks
-# against zone maps and an inverted index, such as service_name = 'cart' in
-# Module 6, each row of the scanned partitions is counted in exactly one of them.
-# Filters on leading key columns and bloom filters have counters of their own.
+# Row counters of a table scan in a Query Profile. For filters that Doris checks
+# against zone maps, inverted indexes, and the values it reads, such as the
+# access-log search of Module 6, each row of the scanned partitions is counted in
+# exactly one of them. A filter on a column's value, such as service_name = 'cart',
+# drops rows in RowsVectorPredFiltered; a filter expression, such as LIKE or a
+# MATCH_PHRASE that Doris evaluates without the index, in RowsExprPredFiltered
+# (SegmentIterator::_execute_common_expr in 4.1.3). Filters on leading key columns
+# and bloom filters have counters of their own.
 SCAN_FILTER_COUNTERS = (
     ("RowsStatsFiltered", "Skipped unread: the zone map (minimum and maximum) of their segment or page rules out a match"),
     ("RowsInvertedIndexFiltered", "Skipped unread: the inverted index shows that they do not match"),
-    ("RowsVectorPredFiltered", "Read, then dropped: their values did not match the filter"),
+    ("RowsVectorPredFiltered", "Read, then dropped: their values did not match a filter on a column"),
+    ("RowsExprPredFiltered", "Read, then dropped: a filter expression, such as LIKE or a MATCH without its index, did not match"),
     ("RowsRead", "Read, and passed every filter"),
 )
 
@@ -116,6 +121,48 @@ SCAN_FILTER_COUNTERS = (
 def _scan_reported(profile: str) -> bool:
     """True once the BEs have reported the table scan of a profile."""
     return "DetailProfile" in profile and "OLAP_SCAN_OPERATOR" in profile.split("DetailProfile", 1)[1]
+
+
+# The sections in which an EXPLAIN plan lists the materialized views that Doris tried.
+VIEW_REWRITE_RESULTS = {
+    "MaterializedViewRewriteSuccessAndChose:": "chosen",
+    "MaterializedViewRewriteSuccessButNotChose:": "usable, not chosen",
+    "MaterializedViewRewriteFail:": "not usable",
+}
+
+
+def _plan_scans(lines: Sequence[str]) -> tuple[list[dict], list[dict]]:
+    """The table scans and the materialized views that a Doris EXPLAIN plan lists.
+
+    A scan reads a table, or one of its materialized views, which TABLE: names in
+    parentheses; its partitions= and tablets= lines say how many it reads of how
+    many there are. Doris lists each materialized view that it considered under
+    one of VIEW_REWRITE_RESULTS, with the reason when it could not use it.
+    """
+    scans, views, result = [], [], None
+    for line in lines:
+        text = line.strip()
+        if "VOlapScanNode" in text:
+            scans.append({"table": "", "reads": "", "partitions": "", "tablets": "", "predicates": ""})
+        elif scans and result is None and text.startswith("TABLE:"):
+            name = text[len("TABLE:"):].split(",")[0].strip()
+            scans[-1]["table"], _, index = name.partition("(")
+            scans[-1]["reads"] = index.rstrip(")")
+        elif scans and result is None and text.startswith("PREDICATES:"):
+            scans[-1]["predicates"] = text[len("PREDICATES:"):].strip()
+        elif scans and result is None and text.startswith("partitions="):
+            scans[-1]["partitions"] = text[len("partitions="):]
+        elif scans and result is None and text.startswith("tablets="):
+            scans[-1]["tablets"] = text[len("tablets="):].split(",")[0]
+        elif text in VIEW_REWRITE_RESULTS:
+            result = VIEW_REWRITE_RESULTS[text]
+        elif text.startswith("FailInfo:") and views:
+            views[-1]["reason"] = text[len("FailInfo:"):].strip()
+        elif result and text.startswith(("CBO.", "RBO.")):
+            views.append({"materialized_view": text.split()[0].rsplit(".", 1)[-1], "result": result, "reason": ""})
+        elif text.startswith("========== STATISTICS"):  # the plan and its materializations end here
+            break
+    return scans, views
 
 
 # Grafana's rules API lists every Grafana-managed alert rule with the instances of
@@ -420,6 +467,63 @@ class ObservabilityLab:
         ))
         return pd.Series(totals, name="rows")
 
+    def show_create_table(self, table: str) -> str:
+        """Show the statement that SHOW CREATE TABLE returns for ``table``, as text, and return it."""
+        statement = str(self.query(f"SHOW CREATE TABLE {table}").iloc[0, 1])
+        show_sql(f"SHOW CREATE TABLE {table} returns", statement)
+        return statement
+
+    def explain_scan(self, statement: str, *, title: str = "Which partitions and tablets the query reads") -> pd.DataFrame:
+        """Show which partitions and tablets each table scan of a query reads, and return the scans.
+
+        Runs EXPLAIN, which plans the query without running it, and shows one row
+        per scan, then the whole plan in a collapsed box. When Doris considered
+        materialized views for the query, a second table lists them with the
+        result and the reason.
+        """
+        clean = statement.strip().rstrip(";")
+        show_sql(title, f"EXPLAIN {clean}")
+        lines = [str(line) for line in self.query(f"EXPLAIN {clean}").iloc[:, 0]]
+        scans, views = _plan_scans(lines)
+        frame = pd.DataFrame(scans, columns=["table", "reads", "partitions", "tablets", "predicates"])
+        if frame.empty:
+            card("The plan reads no table: the partitions that the query's filters select hold no rows, "
+                 "so Doris answers without reading any data.", "info", "No table scan")
+        else:
+            show_frame(f"{title} · {len(frame)} scan(s)", frame)
+        if views:
+            show_frame("The materialized views that Doris considered",
+                       pd.DataFrame(views, columns=["materialized_view", "result", "reason"]))
+        show_log("The whole plan", "\n".join(lines))
+        return frame
+
+    def tablet_rows(self, table: str, *, title: str | None = None) -> pd.DataFrame:
+        """Count the rows of each tablet in the partitions of ``table`` that have data, and return them.
+
+        SHOW TABLETS shows a tablet's row count only after its BE reports it, so
+        each tablet is counted with SELECT COUNT(*) ... TABLET(<id>), which reads
+        that tablet now. The statements are shown first.
+        """
+        show_sql(title or f"Count the rows in each tablet of {table}", "\n".join((
+            f"SHOW PARTITIONS FROM {table}",
+            f"SHOW TABLETS FROM {table} PARTITION (<partition>)",
+            f"SELECT COUNT(*) FROM {table} TABLET(<tablet id>)",
+        )))
+        partitions = self.query(f"SHOW PARTITIONS FROM {table}")
+        rows = []
+        for partition, version in zip(partitions["PartitionName"], partitions["VisibleVersion"]):
+            if int(version) <= 1:  # every load adds a version: version 1 has no data
+                continue
+            for tablet in self.query(f"SHOW TABLETS FROM {table} PARTITION ({partition})")["TabletId"]:
+                count = self.query(f"SELECT COUNT(*) AS row_count FROM {table} TABLET({tablet})")["row_count"].iloc[0]
+                rows.append({"partition": partition, "tablet": str(tablet), "rows": int(count)})
+        frame = pd.DataFrame(rows, columns=["partition", "tablet", "rows"])
+        totals = frame.groupby("partition")["rows"].transform("sum")
+        frame["percent_of_partition"] = (100 * frame["rows"] / totals.where(totals > 0)).round(1)
+        show_frame(f"Rows in each tablet of {table} · {len(frame)} tablet(s) in "
+                   f"{frame['partition'].nunique()} partition(s) with data", frame)
+        return frame
+
     def _read(self, url: str, service: str, hint: str, *, auth: tuple[str, str] | None = None) -> str:
         """GET a page from Grafana, Mailpit, or Litefuse; stop with a card when the service does not answer.
 
@@ -434,6 +538,36 @@ class ObservabilityLab:
         except (OSError, http.client.HTTPException) as error:
             self._failure(f"{service} does not answer", f"Could not read {url} ({error}). {hint}")
             raise EnvironmentNotReady(f"{service} does not answer.")
+
+    def _send(self, method: str, url: str, body: Mapping | None = None, *, auth: tuple[str, str],
+              headers: Mapping[str, str] | None = None, missing_ok: bool = False) -> str | None:
+        """Send a request with a JSON body to Grafana as a signed-in user; stop with a card when Grafana refuses it.
+
+        With ``missing_ok``, a 404 answer returns None instead.
+        """
+        request_headers = {"Content-Type": "application/json", **(headers or {}),
+                           "Authorization": "Basic " + base64.b64encode(":".join(auth).encode()).decode()}
+        data = None if body is None else json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(url, data=data, headers=request_headers, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.read().decode("utf-8")
+        except urllib.error.HTTPError as error:
+            if missing_ok and error.code == 404:
+                return None
+            if error.code in (401, 403):
+                self._failure(
+                    "Grafana refused the admin password",
+                    f"Grafana answered {error.code}. Set GRAFANA_ADMIN_PASSWORD to the password of the user admin: "
+                    "admin, unless you set a new one when you first signed in. Then rerun this cell.",
+                )
+                raise EnvironmentNotReady("Grafana refused the admin password.")
+            detail = error.read().decode("utf-8", "replace")
+            self._failure(f"Grafana refused the request ({error.code})", f"{method} {url}: {detail}")
+            raise EnvironmentNotReady(f"Grafana refused the request ({error.code}).")
+        except (OSError, http.client.HTTPException) as error:
+            self._failure("Grafana does not answer", f"Could not reach {url} ({error}). {GRAFANA_HINT}")
+            raise EnvironmentNotReady("Grafana does not answer.")
 
     def _no_rule(self, rule: str) -> None:
         self._failure(
@@ -558,6 +692,47 @@ class ObservabilityLab:
         text = self._read(export, "Grafana", GRAFANA_HINT)
         show_log(f"The rule {rule!r} as provisioning YAML", text, opened=True)
         return text
+
+    def provision_alert_rule_group(self, folder: str, group: str, rules: Sequence[Mapping], *,
+                                   interval_seconds: int, admin_password: str) -> dict:
+        """Create or replace a Grafana alert rule group from code, with Grafana's provisioning API.
+
+        Finds the folder by its title, creating it when it is missing. A rule with
+        a fixed "uid" that Grafana does not have yet is created with POST, because
+        a group's PUT only updates the rules whose uid exists. Then the group is
+        sent with PUT: afterwards it holds exactly ``rules``, evaluated every
+        ``interval_seconds``, and a rerun updates the same rules. The header
+        X-Disable-Provenance keeps the rules editable in Grafana's web page.
+        Writing needs the admin's password; the requests are shown first, without it.
+        """
+        auth = ("admin", admin_password)
+        headers = {"X-Disable-Provenance": "true"}
+        folders_url = f"{self.grafana_url}/api/folders"
+        rules_url = f"{self.grafana_url}/api/v1/provisioning/alert-rules"
+        group_url = f"{self.grafana_url}/api/v1/provisioning/folder/<folder uid>/rule-groups/{group}"
+        show_sql(
+            f"Create or replace the rule group {group!r} in the folder {folder!r}",
+            f'curl -s -u admin:<password> "{folders_url}"\n'
+            f'curl -s -u admin:<password> -X POST -H "Content-Type: application/json" '
+            f'-H "X-Disable-Provenance: true" --data @rule.json "{rules_url}"   # once for each new rule\n'
+            f'curl -s -u admin:<password> -X PUT -H "Content-Type: application/json" '
+            f'-H "X-Disable-Provenance: true" --data @rule-group.json "{group_url}"',
+        )
+        folders = json.loads(self._send("GET", folders_url, auth=auth))
+        uid = next((item.get("uid") for item in folders if item.get("title") == folder), None)
+        if uid is None:
+            uid = json.loads(self._send("POST", folders_url, {"title": folder}, auth=auth))["uid"]
+        for rule in rules:
+            if rule.get("uid") and self._send("GET", f"{rules_url}/{rule['uid']}", auth=auth, missing_ok=True) is None:
+                self._send("POST", rules_url, {**rule, "folderUID": uid, "ruleGroup": group}, auth=auth, headers=headers)
+        body = {"title": group, "interval": interval_seconds, "rules": list(rules)}
+        answer = json.loads(self._send("PUT", group_url.replace("<folder uid>", uid), body, auth=auth, headers=headers))
+        show_frame(f"The rule group {group!r} in {folder!r}, evaluated every {interval_seconds} seconds", pd.DataFrame([
+            {"rule": rule.get("title"), "uid": rule.get("uid"), "pending_period": rule.get("for"),
+             "labels": ", ".join(f"{key}={value}" for key, value in sorted((rule.get("labels") or {}).items()))}
+            for rule in answer.get("rules") or []
+        ], columns=["rule", "uid", "pending_period", "labels"]))
+        return answer
 
     def grafana_dashboard(self, title: str) -> pd.DataFrame:
         """Show the panels of a saved Grafana dashboard, with the SQL of each, and return them.

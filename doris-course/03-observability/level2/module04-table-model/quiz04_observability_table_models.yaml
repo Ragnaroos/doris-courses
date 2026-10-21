@@ -1,109 +1,125 @@
-title: "Module 4 Quiz: Table Models for Observability Data"
-description: Six questions check whether you can choose DUPLICATE, AGGREGATE, and UNIQUE models for raw
-  telemetry, pre-aggregated metrics, and alert deduplication, and predict how rows combine under each
-  model.
+title: 'Module 4 Quiz: Table Models for Observability Data'
+description: Six questions check whether you can choose a table model from what happens to rows that share
+  a key, keep raw telemetry, choose the grain of a summary, predict its merges, build a stable alert identity,
+  and read a UNIQUE table.
 questions:
-- id: choose_raw_telemetry_model
-  objective: Choose a model for append-only raw telemetry
-  prompt: A team ingests raw logs and trace spans. Immutable events must remain individually queryable,
-    and write throughput is important. Which Doris table model best fits this requirement?
+- id: choose_model_for_recount
+  objective: Choose DUPLICATE, AGGREGATE, or UNIQUE from what must happen to rows that share a key.
+  prompt: Every 10 minutes, a job counts the calls between each pair of services for each of the last
+    10 minutes. Each run therefore writes the minute in which the previous run started a second time,
+    now with its complete count. Which model keeps one correct count per minute and pair of services?
   options:
-  - id: unique
-    text: UNIQUE, which keeps only the latest row for each key
-  - id: unknown
-    text: The model does not affect whether raw events remain individually queryable
-  - id: duplicate
-    text: DUPLICATE, which appends rows and preserves all detail
-  - id: aggregate
-    text: AGGREGATE, which combines rows as soon as they are loaded
-  answer: duplicate
-  explanation: Raw observability events are append-only and need to remain available as individual rows.
-    DUPLICATE preserves every loaded detail row and is the default choice when no merge semantics are
-    required.
-- id: choose_error_count_model
-  objective: Choose a model for pre-aggregated counters
-  prompt: The main query is the number of ERROR events per service per day. The team does not need raw
-    error messages in this reporting table, and Doris should combine repeated keys during loading. Which
-    model fits?
-  options:
-  - id: unique
-    text: UNIQUE with the original message as the only measure
-  - id: duplicate_count
-    text: DUPLICATE and count rows at query time instead of combining keys during loading
-  - id: aggregate
-    text: AGGREGATE with a SUM measure for the event count
-  - id: duplicate
-    text: DUPLICATE with one row for every original error
-  answer: aggregate
-  explanation: AGGREGATE is intended for pre-aggregated data. When repeated keys are loaded, SUM combines
-    their count values, so the table is optimized for the reporting grain rather than retaining every
-    raw message.
-- id: choose_alert_dedup_model
-  objective: Choose a model for one current alert per key
-  prompt: An alerting service emits repeated records for the same normalized alarm identity each day.
-    The table must retain one current record per day and alarm identity so repeated copies do not create
-    an alert storm. Which model is appropriate?
-  options:
-  - id: unique
-    text: UNIQUE with a daily time component and the alarm identity in the key
-  - id: duplicate
-    text: DUPLICATE, because duplicate rows are automatically removed by the query planner
+  - id: unique_latest
+    text: UNIQUE on the minute and the two services, so that the later, complete count replaces the partial
+      one
   - id: aggregate_sum
-    text: AGGREGATE SUM on the alarm text, because identical alerts should be added together
-  - id: no_model
-    text: Any model, because Doris deduplicates rows only when a dashboard is opened
-  answer: unique
-  explanation: A UNIQUE key represents the entity that should occur once. Including the day and normalized
-    alarm identity in the key makes repeated delivery of the same alarm replace one logical state row
-    rather than create many alert records.
-- id: predict_aggregate_count_merge
-  objective: Predict AGGREGATE merge behavior
-  prompt: An AGGREGATE table has key (stat_date, service_name) and measure error_count BIGINT SUM. Two
-    rows are loaded with the same key and error_count values 4 and 7. What is the result of querying error_count
-    for that key?
+    text: AGGREGATE with a SUM count, so that the two counts of that minute are added up into one row
+  - id: duplicate_both
+    text: DUPLICATE, so that both counts are kept and every query takes the larger of the two
+  - id: aggregate_min
+    text: AGGREGATE with a MIN count, so that the first run's count is kept and later runs change nothing
+  answer: unique_latest
+  explanation: 'This is why the exporter''s otel_traces_graph is a UNIQUE table: rows with the same key
+    replace each other, and the run that saw the whole minute writes last. A SUM would add the partial
+    count to the complete one and overcount the minute. DUPLICATE would keep two rows, and every query
+    would have to choose between them. MIN would keep the partial count, which is too low.'
+- id: keep_spans_with_one_key
+  objective: Explain why raw logs, spans, and metric points belong in DUPLICATE tables.
+  prompt: 'In otel_traces, whose key is service_name and timestamp, twelve frontend spans share one key:
+    they started in the same millisecond and have twelve different span IDs. What would a UNIQUE table
+    with the same key do with them?'
   options:
-  - id: two_rows
-    text: Two rows, because a SUM measure never combines duplicate keys
+  - id: keep_one
+    text: Keep one of the twelve and lose the other eleven, which are separate events
+  - id: keep_all_unique
+    text: Keep all twelve, because UNIQUE compares every column of a row, not only its key
+  - id: reject_load
+    text: Reject the whole load, because a UNIQUE table refuses rows whose key it already has
+  - id: merge_spans
+    text: Combine the twelve into one row that lists all twelve span IDs in its value column
+  answer: keep_one
+  explanation: 'A UNIQUE table keeps one row per key, the one loaded last, so eleven spans would be lost,
+    although each is a separate event with its own span ID. Raw telemetry therefore uses DUPLICATE, which
+    keeps every row and uses the key only to order the rows. UNIQUE compares the key columns, not the
+    whole row; it replaces rows instead of rejecting the load; and no model lists the values of combined
+    rows: AGGREGATE combines them by the functions of its value columns.'
+- id: choose_summary_grain
+  objective: Choose the key of an AGGREGATE table at the grain of the questions that it answers.
+  prompt: A dashboard shows each service's requests and failed requests per minute. Which key gives an
+    AGGREGATE table with SUM columns one row per service and minute?
+  options:
+  - id: minute_and_service
+    text: The minute in which each request ended, and service_name
+  - id: span_timestamp
+    text: Each span's timestamp, to the microsecond, and service_name
+  - id: trace_and_service
+    text: trace_id and service_name, so that each request keeps its own row
+  - id: service_only
+    text: service_name alone, with each request's minute in a SUM column
+  answer: minute_and_service
+  explanation: 'The key is the grain: rows with the same minute and service combine into one, whose SUM
+    columns hold the counts, and counting each request in the minute in which it ended counts it after
+    it reached Doris. With the timestamp in the key, only spans of the same microsecond combine, and the
+    table is almost as large as otel_traces. A trace ID in the key keeps a row per request, which is no
+    summary. With service_name alone, every minute of a service combines into one row, and a sum of minutes
+    means nothing.'
+- id: predict_repeated_load
+  objective: Predict the rows of an AGGREGATE table after overlapping or repeated loads.
+  prompt: requests_per_minute has the key (request_minute, service_name) and requests BIGINT SUM. One
+    INSERT loads 4 requests of cart at 10:05, and a second INSERT loads 7 more. By mistake, the second
+    INSERT runs again. What does the table hold for cart at 10:05?
+  options:
+  - id: eighteen
+    text: One row with requests = 18, that is, 4 + 7 + 7
   - id: eleven
-    text: '11'
-  - id: four
-    text: 4, because the first loaded value wins
+    text: One row with requests = 11, because Doris skips the repeated INSERT
+  - id: three_rows
+    text: Three rows, one for each INSERT, with 4, 7, and 7 requests
   - id: seven
-    text: 7, because AGGREGATE keeps only the latest replacement
-  answer: eleven
-  explanation: SUM is an aggregate measure. Rows that share the key are combined, so the stored count
-    is the sum of the loaded values rather than a replacement or a duplicate pair.
-- id: predict_unique_current_record
-  objective: Predict UNIQUE replacement behavior
-  prompt: A UNIQUE table has key (alarm_date, alarm_hash). A row with status open is loaded first; later,
-    after the alert is resolved, another load writes the same key with status resolved. With no sequence
-    column and sequential loads, what should the table expose for that key?
+    text: One row with requests = 7, the value of the last INSERT
+  answer: eighteen
+  explanation: 'SUM adds the values of every row with the same key, and an AGGREGATE table cannot tell
+    a repeated row from a new one: the repeated INSERT adds 7 again, without any error. Doris does not
+    detect that an INSERT repeats an earlier one, so a load job must load each source row exactly once.
+    Rows with the same key combine into one, so there are not three rows, and keeping the last value is
+    what UNIQUE or a REPLACE column does, not SUM.'
+- id: stable_alert_identity
+  objective: Build an alert identity that stays the same for every occurrence of an error.
+  prompt: recommendation's flag stream fails with DEADLINE_EXCEEDED every 10 minutes, and each status
+    message contains the time of the failure. Which alert identity gives all of these failures one row
+    per day in error_alerts?
   options:
-  - id: both
-    text: Two rows, one for each status
-  - id: sum
-    text: One row whose status is the sum of open and resolved
-  - id: rejected
-    text: No row, because a UNIQUE key rejects later writes
-  - id: latest
-    text: One current row whose status is resolved
-  answer: latest
-  explanation: UNIQUE represents one logical row per key. In sequential loads without out-of-order sequence
-    handling, the later load replaces the earlier state for that key rather than creating another row.
-- id: interpret_dedup_row_count
-  objective: Separate deduplication from occurrence counting
-  prompt: After deduplicating alerts with a UNIQUE table, a query for one day shows exactly one row for
-    an alarm identity. The table has no count measure. Which conclusion is supported?
+  - id: normalized_hash
+    text: MD5 of the service, the span name, and the message with every number replaced by 0
+  - id: message_hash
+    text: MD5 of the service, the span name, and the message exactly as the span recorded it, digits included
+  - id: span_id
+    text: The span ID of each error span, which identifies each failure without any doubt
+  - id: trace_hash
+    text: MD5 of the trace ID and the message, so that each request's errors share a row
+  answer: normalized_hash
+  explanation: An identity must ignore what changes from one occurrence to the next. The time in the message
+    changes every time, so a hash of the message as recorded gives every failure a new identity, and a
+    new alert. Replacing the numbers keeps the words that name the problem. A span ID and a trace ID are
+    different for every failure by design, so either would raise an alert for each one.
+- id: read_one_alert_row
+  objective: Predict which row a UNIQUE table keeps, and what one row says about occurrences.
+  prompt: error_alerts has the key (alert_date, alert_hash) and no sequence column. The payment failure's
+    alert has one row, open. A job writes it again as resolved; a minute later, another job loads all
+    of today's error spans as open. What does the table show?
   options:
-  - id: one_logical_alert
-    text: The row represents one current logical alert; it does not prove the source emitted only one
-      duplicate event
-  - id: one_source_event
-    text: The source emitted exactly one matching event that day
-  - id: zero_suppression
-    text: All later copies were rejected before reaching Doris and never entered any pipeline
-  - id: aggregate_count
-    text: The row contains the original occurrence count even though no count measure exists
-  answer: one_logical_alert
-  explanation: Deduplication preserves one logical state row per key. Without a count measure, row count
-    cannot reveal how many duplicate source events were collapsed into that row.
+  - id: open_one_row
+    text: One row, open again because that load came last; it does not say how often the error occurred
+  - id: resolved_kept
+    text: One row, still resolved, because a resolved alert cannot be opened again by a later load of
+      older errors
+  - id: two_rows
+    text: Two rows, one open and one resolved, which together count the error's occurrences
+  - id: row_per_span
+    text: One open row for each error span of the day, because each span is loaded as a new row
+  answer: open_one_row
+  explanation: 'Without a sequence column, UNIQUE keeps the row loaded last, so the late load of open
+    rows replaces the resolved one. A sequence column, such as the time of the last error, would keep
+    the resolved row until a newer error arrives. Rows with the same key never stand side by side in a
+    UNIQUE table, so there are neither two rows nor one per span, and the single row is a current state:
+    the payment alert has one row while otel_traces has an error span for every failed order.'

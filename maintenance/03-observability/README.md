@@ -6,6 +6,7 @@
 | 文件 | 用途 |
 | --- | --- |
 | [quiz-alignment.md](quiz-alignment.md) | 每道测验题对应的学习目标、讲义小节和 Lab 中的证据（OB-08、OB-17）。改题目、讲义或 Lab 时同步更新 |
+| [dog-stack.md](dog-stack.md) | `environments/dog-stack/` 中各 override 文件的作用，改上游提交 `STACK_COMMIT` 后的核对方法，Litefuse 与 private endpoint（OB-15 从课程目录移来；学员需要的部分已并入课程 README） |
 
 ## 维护要点
 
@@ -13,3 +14,9 @@
 - Doris App 1.0.5 的 Discover 和 Traces 用浏览器本地时间拼时间条件，表里存的是 UTC：本机不在 UTC 时，相对时间范围查不到最新的行。Lab 3 让 notebook 打印 UTC 的绝对时间范围。插件升级后先确认这个行为是否还在，再决定是否改正文（讲义 3.2 节、Lab 3 第 2 节、quiz03 的 `fix_empty_time_range`）。
 - Lab 3 的网页步骤按 Grafana 11.4.0 写。改正文或升级 Grafana 后，用无头 Chrome 按正文逐步走一遍（做法见 plan-doc 的 handoff，脚本按 Lab 3 的节号打印每一步看到的结果）。
 - 讲义中引用的数字（失败订单的 span 数、各服务的 error span 数、主机 CPU 的忙碌比例等）来自 2026-10-20 在 Doris 4.1.3、demo 2.0.2 上的实测；升级 demo 或上游 DOG 栈后要重新核对。
+- Level 2 也建立在这个 flag 上（B4）：Lab 4 的汇总和告警、Lab 5–7 的故障时间窗（从第一单失败开始）都要求 flag 开过；Lab 8 第 11 节由学员在 flag 页面把它关掉，故事到此结束。之后重跑 Lab 8 第 10 节会等不到 Alerting（等待单元的提示说 flag 要是 50%）；Lab 4–7 仍能用之前的失败数据（B4 干净环境关 flag 后重跑 Lab 4、5、7 通过），只是故障时间窗中失败的比例会越来越低。
+- 讲义和 Lab 中依赖 Doris 4.1.3 行为、升级后要重新核对的地方（B4 在 4.1.3 上实测或读源码 `7126cf65d96`）：`UTC_DATE()` 在规划时不折叠，不能做分区裁剪（讲义 5.3）；BUCKETS AUTO 估算低于上一分区一半时沿用上一分区的桶数（`DynamicPartitionScheduler.checkAndFixAutoBucketCalcNumIsValid`，讲义 5.7、Lab 5 第 2 节、quiz05）；同步物化视图的列名不能与基表或其他视图的列重名，`CREATE MATERIALIZED VIEW IF NOT EXISTS` 不跳过已有视图（Lab 6 第 4 节先 DROP）；不走索引的 `MATCH_PHRASE` 和 `LIKE` 过滤掉的行记在 `RowsExprPredFiltered`（`SegmentIterator::_execute_common_expr`，`SCAN_FILTER_COUNTERS`）；`ALTER TABLE ... SET ("compression" = ...)` 报 Unknown table property；`group_commit_mode` 表属性自 4.1 起有。
+- Lab 5 的分桶倾斜（按 `service_name` 分 10 桶时最大的 tablet 约 38%，有一两个几乎为空）取决于各服务名的哈希值和 demo 的流量构成，换 demo 版本后要重新跑一遍再改数字（讲义 5.6）。RANDOM 表每个 tablet 的占比在数据少时是 7%–13%，数据多了才接近 10%：4.1.3 的导入按批轮流写各个 tablet（`VTabletFinder` 的 `FIND_TABLET_EVERY_BATCH`，起点由 FE 的 `TabletLoadIndexRecorderMgr` 按分区轮转）。
+- Level 2 的 Expected 按数据最少的情况写（B4 干净环境：Lab 1 之后直接做 Lab 2–8，Lab 4 开始时只有 5 单）：数量写成「tens of thousands or more」这类下限，失败比例在单数少时加了「chance can put the share far from half」。改正文时用干净环境的输出再核对一遍。
+- Lab 8 第 10 节用 Grafana 的 provisioning API 建规则：带固定 uid 的规则第一次要先 POST `/api/v1/provisioning/alert-rules`，组的 PUT 只更新已有 uid 的规则（否则 500 "could not find alert rule"），`lab.provision_alert_rule_group()` 已处理；`X-Disable-Provenance: true` 让规则在网页中可改。升级 Grafana 后先核对这两点。
+- 网页步骤的核对脚本（无头 Chrome）：Lab 1 第 5 节和 Lab 8 第 11 节的 flag 页面、Lab 3 第 2–8 节、Lab 8 第 4–6 节，用法见 plan-doc 的 handoff。

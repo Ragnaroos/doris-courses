@@ -1,109 +1,115 @@
-title: "Module 7 Quiz: Trace Analysis and Litefuse"
-description: Six questions check whether you can choose window and aggregate operations for trace analysis,
-  interpret percentile evidence, place Litefuse in an LLM application workflow next to the DOG stack, and find
-  its traces in Doris.
+title: 'Module 7 Quiz: Trace Analysis and Litefuse'
+description: Six questions check whether you can measure failure rates and latency per operation, read
+  percentiles, find where failures start, use window functions, and explain and find the traces of an
+  LLM application in Litefuse and Doris.
 questions:
-- id: choose_ranked_span_analysis
-  objective: Choose row-level ranking over aggregate-only analysis
-  prompt: A team needs the three longest server spans for each service_name, and each result must retain
-    its trace_id, span_id, and timestamp. Which analysis shape fits?
+- id: break_down_by_operation
+  objective: Compute the failure rate and the latency of each operation from server spans.
+  prompt: Since the payment failure began, frontend-proxy's ingress shows 30 failed requests among 75,022,
+    a failure rate of 0.0%, while checkout's PlaceOrder shows 31 failed among 57. Which conclusion is
+    right?
   options:
-  - id: count_only
-    text: Return the number of spans per service without durations or identifiers
-  - id: window_rank
-    text: Assign a per-service rank by descending duration in a window, then retain rows whose rank is
-      at most three
-  - id: global_limit
-    text: Sort all services together by duration and keep the first three rows
-  - id: max_only
-    text: Return only MAX(duration) for each service
-  answer: window_rank
-  explanation: The required grain is one row per selected span, while the ranking scope is each service.
-    A window function supplies the per-service rank and keeps row-level identifiers; a global limit or
-    aggregate-only query answers different questions.
-- id: choose_event_count_grain
-  objective: Keep event-count calculations at the requested grain
-  prompt: Each server span has an events array. A dashboard needs the average number of events per request,
-    not the total number of events in the selected interval. Which expression matches the requested grain?
+  - id: per_operation
+    text: 'Judge rates per operation: the gateway''s rate hides that about half of the orders fail'
+  - id: store_healthy
+    text: The store is healthy, because the gateway, which sees every request, almost never fails
+  - id: checkout_cause
+    text: Checkout causes the failures, because it has the highest failure rate of all operations
+  - id: loaded_twice
+    text: The counts disagree, so the spans of one of the services were loaded into Doris twice
+  answer: per_operation
+  explanation: 'A gateway counts every request of the store, so the failures of one operation vanish in
+    its rate; broken down by operation, PlaceOrder and the payment service''s Charge fail about half of
+    the time. A high rate shows where failures are visible, not where they start: checkout fails because
+    its call to payment fails. And the counts differ because the two operations count different requests,
+    not because of a repeated load.'
+- id: read_p99
+  objective: Interpret latency percentiles without claiming more than they show.
+  prompt: An operation with 75,000 requests has a P50 of 2 ms and a P99 of 3,000 ms. Which statement does
+    this support?
   options:
-  - id: total_size
-    text: Sum size(events) once for the whole interval
-  - id: max_size
-    text: Return only the maximum array size and label it as the average
-  - id: row_count
-    text: Count span rows and assume every request contains one event
-  - id: average_size
-    text: Average size(events) across requests, optionally grouped by service and operation
-  answer: average_size
-  explanation: The event count must first be calculated per request, then averaged at the reporting grain.
-    A total answers total volume, and a maximum is not an average.
-- id: choose_latency_percentile
-  objective: Choose a statistic that exposes tail latency
-  prompt: A service has an average response time of 120 ms, but user complaints mention occasional multi-second
-    waits. The team needs to monitor the slow tail without assuming every request is slow. Which metric
-    is the most appropriate?
-  options:
-  - id: percentile
-    text: P95 or P99 latency, supplemented by request volume
-  - id: average
-    text: Average latency only, because it reveals the slowest requests
-  - id: maximum
-    text: Maximum latency only, because one worst sample represents the tail
-  - id: median
-    text: Median latency only, because the middle request reveals occasional multi-second waits
-  answer: percentile
-  explanation: High percentiles show the slow tail that an average can hide. Request volume remains useful
-    because a large P99 change can have a different impact when traffic is low.
-- id: interpret_p99_result
-  objective: Interpret percentile evidence without overclaiming
-  prompt: A grouped query reports P99 latency of 2.1 seconds for one API, while its P50 is 90 ms. Which
-    conclusion is best supported?
-  options:
-  - id: no_issue
-    text: The P50 proves the tail is harmless
-  - id: volume
-    text: The result alone proves exactly how many users were affected
-  - id: tail_slow
-    text: About one percent of requests are at or above the reported tail level under the chosen definition;
-      this does not mean every request took 2.1 seconds
+  - id: tail_one_percent
+    text: About 1% of its requests took 3 seconds or more; half took at most 2 ms
   - id: all_slow
-    text: Every request took at least 2.1 seconds
-  answer: tail_slow
-  explanation: A high percentile describes the tail of the observed distribution, not every request. Additional
-    volume and distribution checks are needed to estimate how many users were affected.
-- id: choose_litefuse_for_llm_traces
-  objective: Choose the appropriate surface for Large Language Model (LLM) traces
-  prompt: A team is building an AI assistant and needs to inspect prompts, model calls, tool steps, token
-    costs, and response quality across Large Language Model (LLM) application runs. The existing DOG stack
-    handles infrastructure logs, metrics, and distributed service traces. Which choice fits?
+    text: Every request took about 3 seconds, so all of its users waited that long
+  - id: average_between
+    text: Its requests took 1.5 seconds on average, halfway between P50 and P99
+  - id: users_affected
+    text: Exactly 750 users waited 3 seconds, because P99 counts the slowest users
+  answer: tail_one_percent
+  explanation: 'P99 is the duration that 99% of the requests did not exceed, so about 1% took that long
+    or longer, and P50 says that half took at most 2 ms. Percentiles describe a distribution: they do
+    not make every request slow, they are not an average, and they count requests, not users. Before calling
+    the operation slow, check what the slow requests are: flagd''s flag streams, which stay open for minutes,
+    set a gateway''s P99 without being slow requests.'
+- id: find_failure_start
+  objective: Find with SQL the service in which each failure of many traces starts.
+  prompt: In each failed order's trace, the server spans of payment, checkout, frontend, and frontend-proxy
+    have errors. Checkout's call to payment, the frontend's call to checkout, and the proxy's call to
+    the frontend failed too; payment made no failed call. Where does each failure start?
   options:
-  - id: metrics_only
-    text: Count the model calls and tokens as metrics per model, and chart them in Grafana next to the host
-      metrics
-  - id: service_traces
-    text: Search otel_traces in Grafana, because the demo's service spans already record each model call's
-      prompt and answer
-  - id: litefuse
-    text: Trace the application with Litefuse, and keep the DOG stack for infrastructure telemetry
-  - id: replace_all
-    text: Replace the DOG stack with Litefuse, because Litefuse also collects the logs, host metrics, and
-      service spans
-  answer: litefuse
-  explanation: Litefuse records each request of an LLM application as a trace with an observation per step;
-    in the Lab, the document search and the model call, with its prompt, answer, tokens, and cost. Metrics
-    keep counts and totals, but not the prompt or the steps of a request, and the demo's service spans record
-    no prompts at all. Litefuse does not collect logs, metrics, or service spans, so it adds to the DOG stack
-    instead of replacing it; in the Lab, both keep their tables in the same Doris, in the databases otel and
-    litefuse.
+  - id: no_failed_call
+    text: 'In payment: its server span failed while none of its own calls in the trace failed'
+  - id: first_ended
+    text: In the error span that ended first in the trace, whichever service recorded it
+  - id: most_errors
+    text: In the frontend, which recorded the most error spans of all services per order
+  - id: no_error_child
+    text: In every error span whose direct children have no error, the frontend's POST included
+  answer: no_failed_call
+  explanation: 'A service fails on its own when its server span failed and none of the calls that it made
+    failed: only payment, which NOT EXISTS finds for every trace. Checkout, the frontend, and the proxy
+    each failed because one of their calls did. End times come from different services'' clocks and SDKs,
+    which can disagree by fractions of a millisecond. The number of error spans shows how much a service
+    records, not where the failure began. And POST /api/checkout records no error between two error spans,
+    so a rule on direct children wrongly stops at the frontend''s POST.'
+- id: rolling_share
+  objective: Use a window function to compute a value for each row from the rows related to it.
+  prompt: For every order, in time order, you want the share of failures among that order and the nine
+    orders before it. Which expression gives it?
+  options:
+  - id: avg_over_frame
+    text: AVG(failed) OVER (ORDER BY timestamp ROWS BETWEEN 9 PRECEDING AND CURRENT ROW)
+  - id: group_by_ten
+    text: AVG(failed) with GROUP BY FLOOR(order_number / 10), one row per group of ten
+  - id: partition_by_trace
+    text: AVG(failed) OVER (PARTITION BY trace_id ORDER BY timestamp), computed for every order
+  - id: limit_ten
+    text: AVG(failed) over the rows of ORDER BY timestamp DESC LIMIT 10
+  answer: avg_over_frame
+  explanation: 'A window function keeps every row and computes its value over related rows: ORDER BY puts
+    the orders in time order, and the frame limits the window to the current order and the nine before
+    it. GROUP BY collapses each group of ten orders into one row. PARTITION BY trace_id starts a new window
+    for each order, which then holds only that order. LIMIT gives one share, for the last ten orders only.'
+- id: llm_trace_contents
+  objective: Explain what the trace of an LLM application records that service spans do not.
+  prompt: A team runs an AI assistant next to the store, and the DOG stack collects the logs, metrics,
+    and spans of its services. What does Litefuse record about each request of the assistant that otel_traces
+    does not?
+  options:
+  - id: prompts_and_tokens
+    text: The prompt and the answer, the model, its tokens and their cost, and the steps around the call
+  - id: host_load
+    text: The CPU and the memory that the host spent while the model computed the answer
+  - id: error_logs
+    text: The error logs that the assistant's services wrote, with the severity of each line
+  - id: service_calls
+    text: The calls between the assistant's services per minute, like the exporter's otel_traces_graph
+  answer: prompts_and_tokens
+  explanation: 'An LLM trace records each step of a request as an observation: the search for documents,
+    and the model call as a generation with its prompt, answer, model, parameters, token counts, and cost.
+    Service spans record requests between services, with durations and statuses, but no prompts. Litefuse
+    does not collect host metrics, logs, or calls between services; it adds to the DOG stack, which keeps
+    collecting them.'
 - id: locate_litefuse_traces
-  objective: Locate the Doris tables that hold an LLM application's traces
+  objective: Find an LLM application's traces in Doris, and query them with SQL.
   prompt: An application sends its traces to Litefuse with the Langfuse SDK, using a public key, a secret
-    key, and Litefuse's address. Its Litefuse project has the ID llm_app. Where can you query the model calls
-    of these traces with SQL?
+    key, and Litefuse's address. Its Litefuse project has the ID llm_app. Where can you query the model
+    calls of these traces with SQL?
   options:
   - id: otel_traces
-    text: In otel.otel_traces, because every span that reaches Doris passes through the DOG Collector on its
-      way
+    text: In otel.otel_traces, because every span that reaches Doris passes through the DOG Collector
+      on its way
   - id: spans_table
     text: In litefuse.spans_llm_app, the table into which Litefuse's worker loads the project's observations
   - id: postgres

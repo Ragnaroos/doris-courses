@@ -167,7 +167,7 @@ You need the DOG stack and the demo from Module 1, with the payment failure turn
 
 Open [Quiz 3: Visualizing Observability Data](quiz03_observability_visualization.ipynb). It has six single-choice questions and needs no running environment.
 
-Next: this is the last module of Level 1. Level 2 starts with [Module 4: Table Models for Observability Data](../../level2/module04-table-model/lab04_table_models.ipynb).
+Next: this is the last module of Level 1. Level 2 starts with [Module 4: Table Models for Observability Data](../../level2/module04-table-model/course.md).
 
 ## References
 

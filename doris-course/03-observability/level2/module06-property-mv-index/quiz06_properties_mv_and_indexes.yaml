@@ -1,108 +1,130 @@
-title: "Module 6 Quiz: Table Properties, Materialized Views, and Indexes"
-description: Six questions check whether you can distinguish storage compression, Materialized View (MV)
-  acceleration, and inverted-index filtering, and judge what plan or profile evidence proves.
+title: 'Module 6 Quiz: Table Properties, Materialized Views, and Indexes'
+description: Six questions check whether you can read a table's storage properties, compare compression
+  fairly, explain how an inverted index answers text searches, read a Query Profile's counters, and explain
+  and predict a synchronous materialized view.
 questions:
-- id: choose_compression_for_cold_logs
-  objective: Choose compression from workload priorities
-  prompt: A log table is growing quickly. The team expects high redundancy across message text, prioritizes
-    storage reduction on older data, and can accept more CPU work during compression. Which table property
-    is the most appropriate?
+- id: read_missing_compression
+  objective: Read the storage properties of a table from `SHOW CREATE TABLE`, including the ones that
+    it leaves out.
+  prompt: The exporter creates otel_logs with "compression" = "zstd", but SHOW CREATE TABLE otel_logs
+    on Doris 4.1.3 has no compression line. Which conclusion is right?
   options:
-  - id: zstd
-    text: compression = zstd
-  - id: lz4
-    text: compression = lz4, because it always stores fewer bytes than ZSTD
-  - id: partition
-    text: A daily partition, because partitioning is a compression algorithm
-  - id: index
-    text: An inverted index, because indexes replace data-file compression
-  answer: zstd
-  explanation: ZSTD generally provides a better compression ratio than the default LZ4 and is suited to
-    logs and cold data, with a speed tradeoff. Partitioning and indexing solve different problems.
-- id: choose_mv_for_repeated_aggregate
-  objective: Choose an MV for a repeated single-table aggregate
-  prompt: Dashboards repeatedly run the same MAX(value) query grouped by metric_name on a large metrics
-    table. The team wants Doris to accelerate the aggregate while continuing to query the base table.
-    Which option fits?
+  - id: default_omitted
+    text: 'It uses ZSTD: SHOW CREATE TABLE leaves out properties at their default, and 4.x defaults to
+      ZSTD'
+  - id: lz4f_default
+    text: It uses LZ4F, the default, because Doris ignored the exporter's compression property
+  - id: uncompressed
+    text: It stores its data without compression, because a property that SHOW CREATE TABLE leaves out
+      is not set
+  - id: per_partition
+    text: Each partition sets its own compression, which SHOW PARTITIONS shows instead of the table
+  answer: default_omitted
+  explanation: 'SHOW CREATE TABLE omits properties whose value is the default, and in Doris 4.x the default
+    compression is ZSTD, so the exporter''s setting equals it and is not shown. LZ4F is not the 4.x default,
+    and Doris applied the exporter''s property. A line that is missing does not mean that a property is
+    unset: every table compresses its data. Compression is a property of the table, set when it is created,
+    not of each partition.'
+- id: fair_compression_test
+  objective: Design a comparison of compression algorithms that changes only the algorithm.
+  prompt: You want to know how much disk LZ4 needs for the course's logs compared with ZSTD. Which measurement
+    isolates the effect of the algorithm?
   options:
-  - id: dashboard_cache
-    text: Store the maximum only in Grafana, because Doris cannot materialize aggregates
-  - id: sync_mv
-    text: Create a single-table aggregate MV and rely on transparent query rewriting
-  - id: inverted_text
-    text: Add an inverted index to metric_name, because it materializes the maximum value
-  - id: duplicate_copy
-    text: Create a DUPLICATE copy of every raw metric row
-  answer: sync_mv
-  explanation: A single-table aggregate MV stores the precomputed result. The optimizer can rewrite a
-    matching aggregate over the base table to use the MV, so applications do not need to query the MV
-    name explicitly.
-- id: interpret_explain_mv_evidence
-  objective: Interpret plan evidence for one MV rewrite
-  prompt: A simplified EXPLAIN plan for a base-table query contains a scan of mv_metrics_max instead of
-    the base metrics table. The aggregate and grouping match the MV. What does this evidence support?
+  - id: same_rows_once
+    text: Two new tables that differ only in compression, each loaded once with the same rows, sized after
+      the BEs report
+  - id: copy_vs_original
+    text: Copy otel_logs into a new LZ4 table and compare its size with that of otel_logs right after
+      the INSERT
+  - id: query_speed
+    text: Run the same query on an LZ4 and a ZSTD table and compare their durations, since faster means
+      smaller
+  - id: alter_before_after
+    text: ALTER otel_logs to LZ4, then compare its SHOW DATA size before and after the change
+  answer: same_rows_once
+  explanation: 'Only the algorithm may differ: the same rows, loaded the same way into tables laid out
+    the same way, with sizes read after the BEs have reported them, a minute or so later. otel_logs has
+    received thousands of small loads and holds indexes, so a fresh copy differs from it in much more
+    than the algorithm, and right after an INSERT the reported size is still 0. A query''s duration measures
+    much else and says nothing about space. And Doris 4.1.3 rejects an ALTER of compression: it is set
+    when a table is created.'
+- id: match_phrase_tokens
+  objective: Explain how the inverted index of a text column answers `MATCH_ANY`, `MATCH_ALL`, and `MATCH_PHRASE`.
+  prompt: idx_body uses the unicode parser with lower_case and support_phrase. Which condition finds the
+    access-log line "POST /api/checkout?currencyCode=USD HTTP/1.1" 500?
   options:
-  - id: all_queries
-    text: That all queries against the base table will use the MV
-  - id: aggregate_columns_removed
-    text: That the base table no longer stores any columns used by the aggregate
-  - id: alert
-    text: That an alert rule has been created on the MV
-  - id: this_query
-    text: That this query plan was rewritten to use the MV; it does not prove every future query shape
-      will match
-  answer: this_query
-  explanation: EXPLAIN evidence applies to the submitted query and plan. MV rewriting depends on matching
-    structure, grouping, and aggregate expressions, so the result cannot be generalized to unrelated query
-    shapes.
-- id: explain_mv_structural_mismatch
-  objective: Explain why an MV expression does not match
-  prompt: An MV groups by date_trunc(event_time, 'day'). A query groups by date_format(event_time, '%Y-%m-%d').
-    EXPLAIN scans the base table. What is the most likely reason?
+  - id: two_short_phrases
+    text: body MATCH_PHRASE 'post api checkout' AND body MATCH_PHRASE 'http 1.1 500'
+  - id: one_long_phrase
+    text: body MATCH_PHRASE 'POST /api/checkout HTTP/1.1 500', which copies the words of the line
+  - id: like_lowercase
+    text: body LIKE '%post /api/checkout%' AND body LIKE '%HTTP/1.1" 500%'
+  - id: match_all_currency
+    text: body MATCH_ALL 'checkout currency 500', the words that the line contains
+  answer: two_short_phrases
+  explanation: 'The parser splits the line into lowercase words, post, api, checkout, currencycode, usd,
+    http, 1.1, and 500, and a phrase matches words that stand next to each other in order, whatever their
+    case and punctuation: both short phrases do. In the long phrase, currencycode and usd stand between
+    checkout and http in the line, so it does not match. LIKE compares characters and is case-sensitive,
+    so post does not match POST, and it reads every row. MATCH_ALL needs every word, and currency is not
+    one: the word in the line is currencycode.'
+- id: read_scan_counters
+  objective: Interpret the row counters of a Query Profile without claiming more than they show.
+  prompt: For the search of the failed checkouts, the profile without the index shows RowsExprPredFiltered
+    79,840 and RowsRead 27; with the index, RowsInvertedIndexFiltered 79,840 and RowsRead 27. Which conclusion
+    do these counters support?
   options:
-  - id: structural_match
-    text: Doris uses structural matching; the two different time expressions do not match, so storing
-      the raw event_time in the MV is more reusable
-  - id: date_type
-    text: MV rewriting never supports time columns
-  - id: explain_limit
-    text: EXPLAIN can show only base tables, even when the MV is used
-  - id: compression
-    text: ZSTD compression disables MV rewrites for date columns
-  answer: structural_match
-  explanation: MV rewrite matching is structural. Different expressions are not interchangeable merely
-    because they represent the same calendar day. Keeping a raw time column in the MV allows the optimizer
-    to derive more query expressions from it.
-- id: interpret_inverted_index_profile
-  objective: Interpret index-filter evidence without overclaiming
-  prompt: 'A scan profile for WHERE service_name = ''checkout'' contains RowsInvertedIndexFiltered: 8.4K.
-    Which conclusion is best supported?'
+  - id: read_every_body
+    text: Without the index, Doris read every row's body to find 27; with it, it skipped those rows unread
+  - id: speedup_ratio
+    text: With the index, the query ran about 3,000 times as fast, which is the ratio of skipped rows
+      to the rows read
+  - id: zone_maps
+    text: The zone maps of body ruled out the 79,840 rows in both runs, and the index only counted them
+  - id: every_search
+    text: Now that the index is on, every search of otel_logs skips the same 79,840 rows before reading
+  answer: read_every_body
+  explanation: 'The counters record where each row of this scan went: read, tokenized, and dropped by
+    the filter expression, or skipped by the index before any reading. They do not measure time, so they
+    cannot give a speedup. Zone maps keep a minimum and a maximum per segment and page and cannot rule
+    out words in a text, as RowsStatsFiltered 0 shows. And the numbers belong to this query on this data:
+    another search skips other rows.'
+- id: view_lifecycle
+  objective: Explain how a synchronous materialized view is built, kept up to date, and stored.
+  prompt: CREATE MATERIALIZED VIEW server_minutes_mv on otel_traces has just returned. Which description
+    of the view is right?
   options:
-  - id: no_scan
-    text: The counter proves Doris read no data from any file
-  - id: table_created
-    text: The counter alone proves the table is partitioned by service_name
-  - id: filtered_rows
-    text: The inverted index filtered candidate rows in this scan; it does not prove every part of query
-      latency or every future query is optimized
-  - id: all_latency
-    text: The counter proves all 8.4K rows caused the entire query latency
-  answer: filtered_rows
-  explanation: The counter is evidence that the inverted index removed candidate rows during this scan.
-    By itself, it does not attribute total elapsed time or establish behavior for unrelated predicates.
-- id: map_property_to_requirement
-  objective: Distinguish compression, partitioning, and indexing
-  prompt: 'A team has three goals: reduce data-file size for cold logs, retain data by day, and accelerate
-    keyword filtering on a text body. Which mapping addresses the goals without conflating their responsibilities?'
+  - id: job_then_loads
+    text: A job builds it from the existing rows; after that, every load updates it in the same transaction
+  - id: ready_at_return
+    text: It already holds every existing row, because CREATE returns only after the view is complete
+  - id: scheduled_refresh
+    text: Doris refreshes it from the table every 10 minutes, like the exporter's job for the service
+      graph
+  - id: separate_table
+    text: It is a separate table, which queries must name in FROM instead of otel_traces
+  answer: job_then_loads
+  explanation: CREATE returns as soon as Doris accepts the view. A job then builds it from the table's
+    rows, and SHOW ALTER TABLE MATERIALIZED VIEW shows when it is FINISHED; from then on, each load into
+    otel_traces updates the view in its own transaction, so the view is never behind. Refreshes on a schedule
+    belong to asynchronous materialized views. A synchronous view is stored as an index of its table,
+    AGG_KEYS in DESC ... ALL, and queries keep naming the table.
+- id: predict_view_rewrite
+  objective: Predict whether Doris can answer a query from a materialized view.
+  prompt: server_minutes_mv groups the server spans by date_trunc(end_time, 'minute') and service_name,
+    with COUNT and SUM columns. Which query can Doris answer from it?
   options:
-  - id: partition_all
-    text: A daily partition, because it compresses text and evaluates keyword expressions
-  - id: mv_text
-    text: An unpartitioned MV containing the original text, because its rows control retention and compression
-  - id: mapped
-    text: ZSTD compression, range partitions by time, and an inverted index on the text body
-  - id: inverted_all
-    text: One inverted index on every column, because it also performs retention and compression
-  answer: mapped
-  explanation: Compression reduces stored bytes, range partitioning enables time-based pruning and lifecycle
-    management, and an inverted index accelerates matching predicates on text or other non-key columns.
+  - id: coarser_grain
+    text: Server spans per service in the last 30 minutes, filtered on date_trunc(end_time, 'minute')
+  - id: raw_end_time
+    text: Server spans per service in the last 30 minutes, filtered on end_time >= UTC_TIMESTAMP() - INTERVAL
+      30 MINUTE
+  - id: all_spans
+    text: All spans per service and minute, the client and internal spans included
+  - id: max_duration
+    text: The longest server span of each service and minute, with MAX(duration)
+  answer: coarser_grain
+  explanation: 'Doris can compute this result from the view''s rows: the filter uses the view''s own expression,
+    and adding up the minutes of each service is a coarser grain. The view keeps the minute, not end_time,
+    so a filter on end_time cannot be applied to its rows. It holds only server spans, so it cannot count
+    the others. And it keeps counts and sums, not durations, so no maximum can be derived from it.'

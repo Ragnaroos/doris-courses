@@ -1,6 +1,7 @@
 """Offline checks for the observability runtime boundary."""
 
 import base64
+import io
 import itertools
 import json
 import subprocess
@@ -335,6 +336,78 @@ def flag_page(variant, value=0.5):
         "adFailure": {"reason": "STATIC", "variant": "off", "boolValue": False, "metadata": {}},
         "paymentFailure": {"reason": "STATIC", "variant": variant, "doubleValue": value, "metadata": {}},
     }}).encode()
+
+
+class AlertRuleProvisioningTests(unittest.TestCase):
+    RULE = {"uid": "failed-orders", "title": "Failed orders", "for": "1m",
+            "labels": {"team": "doris-course", "severity": "critical"}}
+
+    def provision(self, answers):
+        """Run provision_alert_rule_group with Grafana's answers by (method, path); return the calls."""
+        lab = object.__new__(ObservabilityLab)
+        calls = []
+
+        def send(method, url, body=None, *, auth, headers=None, missing_ok=False):
+            path = url.replace(lab.grafana_url, "")
+            calls.append((method, path, body, auth, headers))
+            return answers.get((method, path))
+
+        with patch.object(ObservabilityLab, "_send", side_effect=send), \
+             patch("doris_course.doris_client.show_sql") as statement, \
+             patch("doris_course.doris_client.show_frame") as shown:
+            lab.provision_alert_rule_group("Doris course", "orders", [self.RULE], interval_seconds=30,
+                                           admin_password="secret")
+        return calls, statement, shown
+
+    def test_a_new_rule_is_created_then_its_group_is_sent(self):
+        group = json.dumps({"title": "orders", "interval": 30, "rules": [self.RULE]})
+        calls, statement, shown = self.provision({
+            ("GET", "/api/folders"): json.dumps([{"uid": "f1", "title": "Doris course"}]),
+            ("GET", "/api/v1/provisioning/alert-rules/failed-orders"): None,  # 404: Grafana does not have it
+            ("PUT", "/api/v1/provisioning/folder/f1/rule-groups/orders"): group,
+        })
+        self.assertEqual([(method, path) for method, path, *_ in calls], [
+            ("GET", "/api/folders"),
+            ("GET", "/api/v1/provisioning/alert-rules/failed-orders"),
+            ("POST", "/api/v1/provisioning/alert-rules"),
+            ("PUT", "/api/v1/provisioning/folder/f1/rule-groups/orders"),
+        ])
+        # A group's PUT only updates rules that exist, so the new rule is created in its folder and group first.
+        self.assertEqual(calls[2][2], {**self.RULE, "folderUID": "f1", "ruleGroup": "orders"})
+        self.assertEqual(calls[3][2], {"title": "orders", "interval": 30, "rules": [self.RULE]})
+        # Every request signs in as admin; writes keep the rule editable in the web page.
+        self.assertTrue(all(auth == ("admin", "secret") for *_, auth, _ in calls))
+        self.assertEqual(calls[3][4], {"X-Disable-Provenance": "true"})
+        # The learner sees the requests, without the password.
+        self.assertNotIn("secret", statement.call_args.args[1])
+        self.assertEqual(shown.call_args.args[1].to_dict("records"), [{
+            "rule": "Failed orders", "uid": "failed-orders", "pending_period": "1m",
+            "labels": "severity=critical, team=doris-course"}])
+
+    def test_a_rerun_updates_the_rule_and_a_missing_folder_is_created(self):
+        calls, _, _ = self.provision({
+            ("GET", "/api/folders"): json.dumps([]),
+            ("POST", "/api/folders"): json.dumps({"uid": "f2", "title": "Doris course"}),
+            ("GET", "/api/v1/provisioning/alert-rules/failed-orders"): json.dumps(self.RULE),
+            ("PUT", "/api/v1/provisioning/folder/f2/rule-groups/orders"): json.dumps({"rules": [self.RULE]}),
+        })
+        self.assertEqual([(method, path) for method, path, *_ in calls], [
+            ("GET", "/api/folders"),
+            ("POST", "/api/folders"),
+            ("GET", "/api/v1/provisioning/alert-rules/failed-orders"),
+            ("PUT", "/api/v1/provisioning/folder/f2/rule-groups/orders"),
+        ])
+        self.assertEqual(calls[1][2], {"title": "Doris course"})
+
+    def test_a_wrong_password_stops_with_a_card(self):
+        lab = object.__new__(ObservabilityLab)
+        refused = urllib.error.HTTPError("http://grafana/api/folders", 401, "Unauthorized", {}, io.BytesIO(b"{}"))
+        with patch("doris_course.doris_client.urllib.request.urlopen", side_effect=refused), \
+             patch("doris_course.doris_client.card") as card:
+            with self.assertRaises(EnvironmentNotReady):
+                lab._send("GET", "http://grafana/api/folders", auth=("admin", "wrong"))
+        self.assertEqual(card.call_args.args[2], "Grafana refused the admin password")
+        self.assertIn("GRAFANA_ADMIN_PASSWORD", card.call_args.args[0])
 
 
 class FeatureFlagTests(unittest.TestCase):

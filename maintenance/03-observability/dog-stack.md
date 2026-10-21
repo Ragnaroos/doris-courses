@@ -1,4 +1,6 @@
-# DOG stack
+# DOG stack 的 override 文件（维护说明）
+
+原为 `doris-course/03-observability/environments/dog-stack/README.md`，B4（OB-15）移到开发区。下面的路径相对于课程目录 `doris-course/03-observability/`。
 
 The observability course uses the upstream
 [`ai-observe/ai-observe-stack`](https://github.com/ai-observe/ai-observe-stack)

@@ -18,9 +18,8 @@ def objectives(lesson):
 
 
 class LessonTests(unittest.TestCase):
-    def test_every_level1_module_has_a_lesson(self):
-        modules = sorted(ROOT.glob("level1/module*"))
-        self.assertEqual([lesson.parent for lesson in LESSONS if "level1" in lesson.parts], modules)
+    def test_every_module_has_a_lesson(self):
+        self.assertEqual([lesson.parent for lesson in LESSONS], sorted(ROOT.glob("level*/module*")))
 
     def test_a_lesson_names_its_module_as_its_lab_and_quiz_do(self):
         for path in LESSONS:
@@ -69,6 +68,31 @@ class LessonTests(unittest.TestCase):
                 with self.subTest(lesson=path.parent.name, image=target):
                     self.assertTrue((path.parent / target).is_file())
                     self.assertGreater(len(alt.split()), 10)
+
+
+class ReadmeTests(unittest.TestCase):
+    README = (ROOT / "README.md").read_text()
+
+    def test_readme_has_the_sections_of_the_course_template(self):
+        self.assertEqual(re.findall(r"^## (.+)$", self.README, re.M), [
+            "Who this course is for", "What you will learn", "Course outline", "Environment", "Get started",
+            "Dataset", "Clean up", "Troubleshooting",
+        ])
+
+    def test_readme_outline_leads_to_every_lesson_in_order(self):
+        rows = re.findall(r"^\| (\d) \| \[(Module (\d+): [^\]]+)\]\(([^)]+)\) \|", self.README, re.M)
+        self.assertEqual([row[3] for row in rows], [lesson.relative_to(ROOT).as_posix() for lesson in LESSONS])
+        for level, name, number, path in rows:
+            with self.subTest(module=number):
+                # The outline uses the lesson's own name, and the module's level.
+                self.assertTrue((ROOT / path).read_text().startswith(f"# {name}\n"))
+                self.assertIn(f"level{level}/", path)
+
+    def test_readme_lists_every_port_variable(self):
+        variables = set(re.findall(r'env_port\("(DORIS_OBS_\w+)"', (ROOT / "doris_course/environment.py").read_text()))
+        self.assertTrue(variables)
+        for variable in sorted(variables):
+            self.assertIn(f"`{variable}`", self.README)
 
 
 if __name__ == "__main__":
