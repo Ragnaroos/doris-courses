@@ -79,12 +79,13 @@ The Doris image digest is
 
 - **Platforms:** all images are published for linux/amd64 and linux/arm64. The course was verified
   on macOS with Apple silicon and Docker Desktop; on Apple silicon, the environment cell adds the
-  Java option that the demo's Java services need on M4 and later chips. Linux has not been verified.
+  Java option that the demo's Java services need on M4 and later chips. Linux has not been verified;
+  [On Linux](#on-linux) lists what differs there.
 - **Software:** Docker with Docker Compose 2.24.4 or later (the environment cell checks it), Git,
   and Python 3.10 to 3.13.
 - **Memory:** the DOG stack uses about 5 GB, most of it for Doris, the demo about 3 GB, and Litefuse
   about 1 GB from Module 7 on; the model server of the optional Lab 7A about 0.4 GB more. Give
-  Docker at least 10 GB of memory.
+  Docker at least 10 GB of memory; on Linux, keep at least 10 GB free for the containers.
 - **CPU:** Module 8 keeps every CPU of the Docker host busy for up to 5 minutes, at the lowest
   priority, to make an alert fire. Your computer may run its fans.
 - **Disk:** about 21 GB for the images, 5 GB of them Litefuse's, plus the data that Doris keeps. The
@@ -118,9 +119,29 @@ first, and stop with the variable to set when a port is in use.
 | 23100 | Litefuse web UI and API (user `learner@example.com`, password `doris-course-1`) | `DORIS_OBS_LITEFUSE_PORT` |
 | 28080 | Local model server of the optional Lab 7A (OpenAI-compatible API) | `DORIS_OBS_LLM_PORT` |
 
+### On Linux
+
+The course has been verified only with Docker Desktop on macOS. With Docker Engine on Linux, these
+steps differ:
+
+- Install Docker Engine and its Compose plugin from
+  [Docker's repository](https://docs.docker.com/engine/install/). A distribution's own package can
+  be older than Compose 2.24.4; the environment cell tells you if yours is.
+- Let your user run `docker` without `sudo`, since the notebooks run it:
+  `sudo usermod -aG docker "$USER"`, then sign out and in again.
+- Docker Engine has no memory setting: the containers share the computer's memory with Jupyter and
+  the browser. Keep at least 10 GB free for them.
+- On Debian and Ubuntu, `python3 -m venv` needs the package `python3-venv`, for example
+  `sudo apt install python3-venv`.
+- Doris writes its logs in `.runtime/doris-logs/` as root, so on your computer they are root's files
+  too. `lab.teardown()` gives them to your user at the end; run it before you delete `.runtime/`.
+- Rootless Docker and Podman have not been tried. The demo's collector, for one, mounts Docker's
+  socket at `/var/run/docker.sock`.
+
 ## Get started
 
-1. Install Docker, give it at least 10 GB of memory, and start it.
+1. Install Docker, give it at least 10 GB of memory, and start it. On Linux, read
+   [On Linux](#on-linux) first.
 2. Create the course's Python environment. Run these commands from this directory, with Python 3.10
    to 3.13:
 
@@ -160,9 +181,10 @@ times in UTC and one partition per UTC day, kept for 7 days. Litefuse keeps its 
 
 ## Clean up
 
-- `lab.stop_demo()` stops and removes the demo's containers. The telemetry already in Doris stays,
-  and `lab.start_demo()` starts the demo again. The feature flags stay as you set them in the demo's
-  flag page; Module 8 sets `paymentFailure` back to `off`.
+- `lab.stop_demo()` stops and removes the demo's containers, with the volumes that Docker created for
+  them. The telemetry already in Doris stays, and `lab.start_demo()` starts the demo again. The
+  feature flags stay as you set them in the demo's flag page; Module 8 sets `paymentFailure` back to
+  `off`.
 - `lab.stop_litefuse()` stops and removes the Litefuse containers. Its user, keys, and traces stay in
   its volumes and in Doris, and `lab.start_litefuse()` starts it again with them.
 - `lab.stop_local_model()` stops the model server of the optional Lab 7A. The downloaded model stays
@@ -171,11 +193,12 @@ times in UTC and one partition per UTC day, kept for 7 days. Litefuse keeps its 
   the local model, the Module 2 collectors, the Module 8 CPU load if it still runs, and the DOG stack,
   with Grafana's volume, which holds the dashboard of Module 3 and the alerting of Module 8. It also
   removes `.runtime/collector-state/`, where the Module 2 log collector keeps its read position, and
-  turns the demo's feature flags off. `lab.teardown(keep_data=True)` keeps the volumes, the read
-  position, and the flags, so that a later `lab.prepare_environment()` and `lab.start_litefuse()`
-  continue with the same data.
+  turns the demo's feature flags off. `lab.teardown(keep_data=True)` keeps the volumes of the DOG
+  stack, Litefuse, and the local model, the read position, and the flags, so that a later
+  `lab.prepare_environment()` and `lab.start_litefuse()` continue with the same data.
 - The upstream checkout and the Doris FE logs stay in `.runtime/`. Delete that directory when you no
-  longer need them.
+  longer need them. Doris writes its logs as root; `lab.teardown()` gives them to your user, so that
+  you can delete them on Linux too.
 
 ## Troubleshooting
 
@@ -183,8 +206,13 @@ times in UTC and one partition per UTC day, kept for 7 days. Litefuse keeps its 
   port's variable. Stop the program that uses the port, or set the variable to a free port and
   restart Jupyter.
 - **The demo does not start, or its containers keep restarting.** Docker probably has too little
-  memory: give it at least 10 GB. The cell lists the containers that are not running; `docker logs
-  <container>` shows why.
+  memory: give it at least 10 GB, or on Linux free that much. The cell lists the containers that are
+  not running; `docker logs <container>` shows why.
+- **Docker reports "permission denied" (Linux).** Your user may not run Docker yet. Run
+  `sudo usermod -aG docker "$USER"`, sign out and in again, and restart Jupyter.
+- **`.runtime/` cannot be deleted (Linux).** Doris wrote files there as root. Run `lab.teardown()`,
+  or `lab.teardown(keep_data=True)` to keep the data, which gives them to your user; then delete the
+  directory.
 - **Discover or Traces shows no hits.** The Doris App 1.0.5 compares its time range in your
   computer's time zone with the UTC times in Doris, so a relative range such as Last 15 minutes
   misses the newest rows unless your computer uses UTC. Set an absolute range in UTC; Lab 3 prints

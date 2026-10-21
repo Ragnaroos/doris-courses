@@ -163,6 +163,8 @@ class RuntimeTests(unittest.TestCase):
             self.assertLess(litefuse, model)
             self.assertLess(model, collectors)
             self.assertLess(collectors, core)
+            # The demo's volumes are anonymous ones that no later start reuses: they go even with keep_data.
+            self.assertIn("--volumes", script[demo:litefuse])
             self.assertEqual("--volumes" in script[litefuse:model], volumes)
             self.assertEqual("--volumes" in script[model:collectors], volumes)
             self.assertEqual("--volumes" in script[core:], volumes)
@@ -172,6 +174,21 @@ class RuntimeTests(unittest.TestCase):
             # The flag page edits a file of the upstream checkout; teardown restores the pinned version.
             reset = f"git -C .runtime/ai-observe-stack checkout -- {FLAGS_FILE}"
             self.assertEqual(reset in script[core:], volumes)
+            # Doris wrote its logs as root. Once it is gone, they go to the owner of their directory,
+            # with the image that ran Doris, so that the learner can delete them on Linux too.
+            handback = script.index("docker run --rm --entrypoint chown", core)
+            self.assertIn(f"docker image inspect {environment.DORIS_IMAGE}", script[core:handback])
+            self.assertIn(f'-v "$(pwd -P)/.runtime/doris-logs:/logs" {environment.DORIS_IMAGE} '
+                          "-R --reference=/logs /logs", script[handback:])
+
+    def test_stop_demo_removes_its_anonymous_volumes(self):
+        lab = object.__new__(ObservabilityLab)
+        lab.lab_dir = Path.cwd()
+        with patch("doris_course.doris_client.run_shell") as shell:
+            lab.stop_demo()
+        # Images of the demo declare volumes that its Compose file does not name. Without --volumes,
+        # every stop would leave them behind, and the next start would create new ones.
+        self.assertEqual(shell.call_args.args[0], f"docker compose -p {environment.DEMO_PROJECT} down --volumes")
 
     def test_shell_runs_from_the_course_root(self):
         lab = object.__new__(ObservabilityLab)
