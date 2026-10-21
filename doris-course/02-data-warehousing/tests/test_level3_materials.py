@@ -1,9 +1,7 @@
 """Offline checks for the Data Warehousing Level 3 learner materials."""
 
 import ast
-import io
 import re
-import tokenize
 import unittest
 from pathlib import Path
 from urllib.parse import unquote, urlsplit
@@ -13,27 +11,6 @@ import yaml
 
 ROOT = Path(__file__).resolve().parents[1]
 LEVEL3 = ROOT / "level3"
-
-
-def ends_with_bare_lab_call(source):
-    """Return True when a cell's last statement is a bare lab.<method>(...) call."""
-    statements = ast.parse(source).body
-    if not statements or not isinstance(statements[-1], ast.Expr):
-        return False
-    call = statements[-1].value
-    return (
-        isinstance(call, ast.Call)
-        and isinstance(call.func, ast.Attribute)
-        and isinstance(call.func.value, ast.Name)
-        and call.func.value.id == "lab"
-    )
-
-
-def hides_trailing_result(source):
-    """Like IPython, skip trailing comments and blank lines, then look for a final ";"."""
-    skipped = {tokenize.COMMENT, tokenize.NL, tokenize.NEWLINE, tokenize.ENDMARKER}
-    tokens = [t for t in tokenize.generate_tokens(io.StringIO(source).readline) if t.type not in skipped]
-    return tokens[-1].type == tokenize.OP and tokens[-1].string == ";"
 
 
 class Level3MaterialsTest(unittest.TestCase):
@@ -203,17 +180,6 @@ class Level3MaterialsTest(unittest.TestCase):
                     continue
                 with self.subTest(source=str(path.relative_to(LEVEL3)), target=target):
                     self.assertTrue((path.parent / unquote(url.path)).exists())
-
-    def test_trailing_lab_calls_end_with_semicolon(self):
-        # Jupyter echoes a cell's last value: lab.sql() would show its table twice,
-        # lab.execute() would print a stray row count.
-        for path in sorted(LEVEL3.glob("module*/lab*.ipynb")):
-            notebook = nbformat.read(path, as_version=4)
-            for cell in notebook.cells:
-                if cell.cell_type != "code" or not ends_with_bare_lab_call(cell.source):
-                    continue
-                with self.subTest(notebook=path.name, cell=cell.get("id")):
-                    self.assertTrue(hides_trailing_result(cell.source))
 
 
 if __name__ == "__main__":

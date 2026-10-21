@@ -1,27 +1,24 @@
 """Explicit opt-in lifecycle for course 02's own single-node Compose project."""
 
+import json
 import os
 import shlex
 import subprocess
 
 import pymysql
 
+from doris_labkit.docker import port_in_use
+
+from .environment import SANDBOX_PORTS, connection_settings, port
 from .runtime import COURSE_ROOT, WarehouseLab
 from .ui import WorkflowProgress
 from .onboarding import SetupRequired
 
 COMPOSE_FILE = COURSE_ROOT / "environments/single-node/compose.yml"
 PROJECT = "doris-warehousing-course"
-CONNECTION = {
-    "DW_HOST": "127.0.0.1",
-    "DW_PORT": "52030",
-    "DW_BE_HTTP_URL": "http://127.0.0.1:51040",
-    "DW_USER": "root",
-    "DW_PASSWORD": "",
-}
 STARTUP_STEPS = {
     1: "Check Docker and Compose",
-    2: "Validate the single-container course configuration",
+    2: "Validate the course configuration and its host ports",
     3: "Prepare the Doris image",
     4: "Start or reuse the container and volumes, then wait for health",
     5: "Verify the FE connection and BE execution",
@@ -64,10 +61,55 @@ def _run(command, progress, *, timeout=30):
     progress.log(result.stdout)
 
 
-def _verify_sql():
+def published_ports(project):
+    """Return the host ports that the running containers of a Compose project publish."""
+    containers = subprocess.run(
+        ["docker", "ps", "--quiet", "--filter", f"label=com.docker.compose.project={project}"],
+        check=True, timeout=30, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+    ).stdout.split()
+    ports = set()
+    for container in containers:
+        # .HostConfig.PortBindings lists what the container asked for, even while it restarts.
+        bindings = subprocess.run(
+            ["docker", "inspect", "--format", "{{json .HostConfig.PortBindings}}", container],
+            check=True, timeout=30, text=True, stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+        ).stdout
+        for entries in (json.loads(bindings or "null") or {}).values():
+            ports.update(int(entry["HostPort"]) for entry in entries or [] if entry.get("HostPort"))
+    return ports
+
+
+def check_host_ports(ports, project, progress):
+    """Stop before starting containers when another program holds one of the course's host ports."""
+    ours = published_ports(project)
+    blocked = []
+    for variable, (default, purpose) in ports.items():
+        number = port(variable)
+        if number in ours:
+            status = "used by this course"
+        elif port_in_use(number):
+            status = "in use"
+            blocked.append((number, variable, purpose, default))
+        else:
+            status = "available"
+        progress.log(f"127.0.0.1:{number} {purpose} ({variable}): {status}")
+    if blocked:
+        listed = "; ".join(f"{number} ({variable}, {purpose})" for number, variable, purpose, _ in blocked)
+        first, variable, _, default = blocked[0]
+        raise SetupRequired(
+            f"Another program is using {listed}. Nothing was started. Find it with "
+            f"`lsof -nP -iTCP:{first} -sTCP:LISTEN` (macOS and Linux); when that shows Docker itself, "
+            f"`docker ps --filter publish={first}` names the container. Stop it if it is yours. Otherwise "
+            f"start Jupyter again with a free port in the variable, for example "
+            f"`{variable}={default + 10000} .venv/bin/jupyter lab`, and rerun this Lab from the top.",
+            detail="\n".join(progress.logs),
+        )
+
+
+def _verify_sql(settings):
     connection = pymysql.connect(
-        host=CONNECTION["DW_HOST"], port=int(CONNECTION["DW_PORT"]),
-        user=CONNECTION["DW_USER"], password=CONNECTION["DW_PASSWORD"],
+        host=settings["DW_HOST"], port=int(settings["DW_PORT"]),
+        user=settings["DW_USER"], password=settings["DW_PASSWORD"],
         connect_timeout=5, read_timeout=10, autocommit=True,
     )
     try:
@@ -93,6 +135,7 @@ def prepare_environment(*, start=False, streaming=False, streaming_profile=None)
     def command(*arguments):
         return compose_command(*arguments, streaming=True) if streaming else compose_command(*arguments)
 
+    settings = connection_settings()
     progress = WorkflowProgress("Prepare the Doris lab environment", STARTUP_STEPS)
     try:
         progress.advance(1)
@@ -100,6 +143,7 @@ def prepare_environment(*, start=False, streaming=False, streaming_profile=None)
         _run(["docker", "compose", "version"], progress)
         progress.advance(2)
         _run(command("config", "--quiet"), progress)
+        check_host_ports(SANDBOX_PORTS, PROJECT, progress)
         progress.advance(3)
         _run(command("pull", "--policy", "missing"), progress, timeout=1800)
         progress.advance(4)
@@ -107,7 +151,7 @@ def prepare_environment(*, start=False, streaming=False, streaming_profile=None)
         _run(command("up", "-d", "--wait", "--wait-timeout", "300"),
              progress, timeout=1800)
         progress.advance(5)
-        _verify_sql()
+        _verify_sql(settings)
         progress.log("SELECT 1 = 1; BE SUM(number) = 45")
         progress.advance(6)
         _run(command("ps"), progress)
@@ -121,14 +165,20 @@ def prepare_environment(*, start=False, streaming=False, streaming_profile=None)
                 detail += "\n" + output
         progress.fail(detail, opened=not isinstance(error, SetupRequired))
         raise
-    os.environ.update(CONNECTION)
+    os.environ.update(settings)
     progress.finish()
-    return dict(CONNECTION)
+    return settings
 
 
 def connect_sandbox(*, module=None):
-    """Connect this notebook to the course container without starting Docker."""
-    os.environ.update(CONNECTION)
+    """Connect this notebook to the course container without starting Docker.
+
+    The connection variables always point at the course sandbox on the ports
+    that DW_FE_QUERY_PORT, DW_FE_HTTP_PORT, and DW_BE_HTTP_PORT set, so a value
+    left over from another server cannot redirect the Labs.
+    """
+    settings = connection_settings()
+    os.environ.update(settings)
     try:
         lab = WarehouseLab(allow_writes=True)
     except pymysql.err.OperationalError as error:
@@ -141,9 +191,10 @@ def connect_sandbox(*, module=None):
         except SetupRequired:
             raise
         raise SetupRequired(
-            "Doris is not reachable at 127.0.0.1:52030. Open Lab 1, run Initialize the Lab Tools, "
-            "then Start and Connect. Wait for connection_ok = 1, return here, and rerun this cell. "
-            "Opening Jupyter alone does not start the database.",
+            f"Doris is not reachable at 127.0.0.1:{settings['DW_PORT']} (DW_FE_QUERY_PORT). Open Lab 1, "
+            "run Initialize the Lab Tools, then Start and Connect. Wait for connection_ok = 1, return here, "
+            "and rerun this cell. Opening Jupyter alone does not start the database. If you changed the "
+            "port variables, start Jupyter with the same values for every notebook.",
             labs=(1,), detail=str(error),
         ) from None
     try:

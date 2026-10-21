@@ -54,8 +54,8 @@ Level 1 provides seven modules, each containing a lesson, a Lab, and five intera
 | Module 5 | Sandbox, historical Parquet archive and simulated CSV in the repository |
 | Modules 6–7 | Sandbox and tables produced by the previous module, simulated events in the repository |
 
-The course image is apache/doris:all-in-one-4.1.3. The Module 5 Lab practices Stream Load,
-while the lesson also introduces the use cases and workings of continuous ingestion with Kafka, CDC, and object storage.
+The course image is apache/doris:all-in-one-4.1.3. The Module 5 Lab practices Stream Load and Group Commit;
+continuous ingestion with Kafka, CDC, and Streaming Jobs is in an [optional reading](level1/module05-ingestion/optional05_continuous_ingestion.md) with its own quiz.
 The optional [Lab 5A: Kafka / Routine Load](level1/module05-ingestion/optional05_kafka_routine_load.ipynb) and
 [Lab 5B: MySQL / Flink CDC](level1/module05-ingestion/optional05_flink_mysql_cdc.ipynb) provide real pipelines you can start;
 see [Continuous Ingestion Environment](environments/streaming/README.md) for prerequisites, separate data, and shutdown instructions. They do not change the completion requirements for the seven main Labs.

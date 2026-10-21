@@ -1,73 +1,87 @@
 title: "Module 4 Quiz: Querying External Data and Joining Lake Tables"
-description: "Five single-choice questions; no database connection required. View explanations after submitting."
+description: "Six single-choice questions; no database connection required. View explanations after submitting."
 questions:
-- id: q1
+- id: files_tables_catalogs
   objective: "Distinguish Doris internal tables, Parquet files, Iceberg tables, and External Catalogs."
-  prompt: "A teammate finds Parquet files in object storage and assumes they already form an Iceberg table that Doris will manage after creating an External Catalog. Which design note corrects that assumption?"
+  prompt: "A teammate finds Parquet files in object storage and assumes that they already form an Iceberg table, which Doris will then store once an External Catalog exists. Which note corrects this?"
   options:
-  - id: format_table_and_catalog_layers
-    text: "Parquet is a file format, Iceberg manages table metadata and data files, and a Catalog provides an external access entry point"
-  - id: parquet_directory_is_iceberg
-    text: "A directory containing only Parquet files already constitutes an Iceberg table"
-  - id: catalog_copies_data
-    text: "Creating an External Catalog copies external data into Doris internal tables"
-  - id: doris_manages_external_tables
-    text: "After an External Catalog is created, Doris takes over file organization and transactions for external tables"
-  answer: format_table_and_catalog_layers
-  explanation: "File formats, lake table formats, and access entry points are different layers: Parquet stores data, Iceberg manages table metadata and data files, and a Catalog provides access. Iceberg also requires table metadata, so a directory of Parquet files alone is not an Iceberg table. Creating a Catalog establishes an access entry point; it does not load or copy the data into internal tables. An access entry point also does not move the management of external tables to Doris; you still need to understand the external system's metadata and transaction boundaries."
-- id: q2
-  objective: "Choose between direct external queries and loading into internal tables based on exploration and repeated-analysis needs."
-  prompt: "Historical orders already exist in the lake. What is a reasonable starting point when exploring a question for the first time?"
+  - id: format_table_entry
+    text: "Parquet is a file format, Iceberg adds metadata over files, and a Catalog only gives Doris access"
+  - id: parquet_is_iceberg
+    text: "Any directory of Parquet files is an Iceberg table, and a Catalog copies it into Doris's storage"
+  - id: catalog_converts_files
+    text: "Creating the Catalog turns the files into an Iceberg table, which Doris then keeps as its own"
+  - id: internal_after_query
+    text: "The files are already a table, and the first query through the Catalog makes it an internal one"
+  answer: format_table_entry
+  explanation: "A Parquet file holds columnar data; an Iceberg table is metadata and snapshots that list such files; an External Catalog is Doris's entry to another system's tables, and it copies nothing. Files without Iceberg metadata are not an Iceberg table, whatever their format. A Catalog reads existing metadata; it creates no table from files. Querying through a Catalog stores nothing in Doris; loading does."
+- id: catalog_database_table
+  objective: "Find a lake table through a Catalog and name it as catalog.database.table."
+  prompt: "Two External Catalogs, lake_prod and lake_test, both contain reporting.orders. The session's current Catalog is internal, and a report must read the production table. Which name selects it?"
   options:
-  - id: migrate_everything_first
-    text: "Migrate the entire data lake before starting the first analytical query"
-  - id: query_directly_first
-    text: "Evaluate direct external queries first, then assess loading and refresh costs for repeated analysis"
-  - id: one_load_stays_synchronized
-    text: "Run INSERT INTO SELECT once, then treat the internal results as automatically synchronized data"
-  - id: wide_table_first
-    text: "Materialize orders and all dimensions into a wide table before performing any join analysis"
-  answer: query_directly_first
-  explanation: "Solve the current question with direct external queries first, then decide whether to load and materialize based on performance, freshness, and cost. Exploration does not require a full migration; evaluate access paths to the existing data first. A one-time INSERT INTO SELECT saves only the current results; continuous synchronization requires a separate design. Doris supports multi-table joins, so prebuilding a wide table is not necessary for every scenario."
-- id: q3
-  objective: "Explain how Catalog, Database, and Table identify an external table."
-  prompt: "Two external Catalogs, lake_prod and lake_test, both contain reporting.orders. The current Catalog is internal, but a report must read the production lake table. Which reference selects that exact object?"
-  options:
-  - id: two_part_name
-    text: "reporting.orders, because a two-part name searches every Catalog for a matching table"
-  - id: database_and_table_swapped
-    text: "lake_prod.orders.reporting, because the table name follows the Catalog"
-  - id: catalog_and_database_only
-    text: "lake_prod.reporting, because a Catalog and Database together identify one table"
   - id: three_part_name
-    text: "lake_prod.reporting.orders, identifying Catalog, Database, and Table"
+    text: "lake_prod.reporting.orders: the Catalog, the database, and the table"
+  - id: two_part_name
+    text: "reporting.orders, which Doris looks up in every Catalog that it knows"
+  - id: file_path_name
+    text: "s3://warehouse/reporting/orders, the location of the table's data files"
+  - id: internal_name
+    text: "internal.reporting.orders, since internal is the session's current Catalog"
   answer: three_part_name
-  explanation: "The three-part name lake_prod.reporting.orders selects the production Catalog, its reporting Database, and its orders Table without relying on the current Catalog. A two-part name is resolved in the current Catalog, which is internal here; it does not search all Catalogs. lake_prod.orders.reporting swaps the Database and Table positions. A Catalog and Database identify a namespace, not a specific table."
-- id: q4
-  objective: "Identify duplicate dimension records or missing matches by comparing results before and after a join."
-  prompt: "After a LEFT JOIN with customers, 100 lake orders become 103 rows and the total amount increases. What is the most appropriate next step?"
+  explanation: "A table in another Catalog has a three-part name: catalog, database, table, so lake_prod.reporting.orders picks the production copy. A two-part name is resolved in the current Catalog, here internal, not searched in every Catalog. A file location is not a table name, and a query of the files would bypass the table's metadata. internal holds Doris's own tables, not the lake's."
+- id: snapshots_and_files
+  objective: "Read an Iceberg table's snapshots and files, and explain which files a query of the table reads."
+  prompt: "An Iceberg table's $snapshots lists an append and then an overwrite that replaced all of its rows; $files lists one data file. What does a query of the table through its Catalog read?"
   options:
-  - id: check_duplicate_matches
-    text: "Check for multiple matches on customer join keys and verify the affected orders"
+  - id: current_snapshot_files
+    text: "The data file of the current snapshot, which is the one that $files lists"
+  - id: every_file_ever
+    text: "Every data file that the table ever had, from both of its snapshots together"
+  - id: first_snapshot
+    text: "The files of the first snapshot, because the table was created with those files"
+  - id: whole_directory
+    text: "Whatever files are in the table's directory in object storage, old or new"
+  answer: current_snapshot_files
+  explanation: "A snapshot lists the files that make up the table at that moment, and a query reads the current snapshot's files, the ones that $files lists. The older snapshot's file is still in object storage until it is cleaned up, but it is no longer part of the table. The first snapshot was replaced by the overwrite. Iceberg's metadata, not the directory's contents, decides which files belong to the table."
+- id: query_in_place_or_load
+  objective: "Choose between querying external data in place and loading it into an internal table."
+  prompt: "Historical orders are in the lake. An analyst explores a question for the first time; later, a daily report will read the same history many times a day. What is a sound approach?"
+  options:
+  - id: explore_then_load
+    text: "Explore through the Catalog first, then load what the report reads and plan how to refresh it"
+  - id: always_load_first
+    text: "Load the whole history into Doris before the first question, since lake queries cannot join"
+  - id: never_load
+    text: "Query the lake in place for both, because a load would keep following the lake's changes"
+  - id: load_then_stop_lake
+    text: "Load once and then delete the lake tables, since Doris now holds every future change too"
+  answer: explore_then_load
+  explanation: "Querying in place needs no copy, which suits exploring; a report that reads the same data again and again can gain from an internal table, and that copy needs a refresh plan, because a load copies one moment. Lake tables can be joined with Doris tables, so nothing forces a load before exploring. A load does not follow later changes in the lake. Deleting the lake would lose the history that other systems still write."
+- id: s3_function_and_load
+  objective: "Read files in object storage with the S3 table function and load them with INSERT INTO SELECT."
+  prompt: "Three Parquet files of last month's orders are in object storage, and no more will be added. A team wants to look at them with SQL first and then keep the rows in Doris. What fits?"
+  options:
+  - id: s3_select_then_insert
+    text: "Query them with the S3 table function, then INSERT INTO an internal table SELECT from it"
+  - id: iceberg_catalog_over_files
+    text: "Create an Iceberg Catalog over the bucket, since any set of Parquet files is an Iceberg table"
+  - id: routine_load_bucket
+    text: "Create a Routine Load job on the bucket, so that Doris keeps polling it for the three files"
+  - id: select_stores_rows
+    text: "Run SELECT on the S3 table function only; the query keeps the rows that it reads in Doris"
+  answer: s3_select_then_insert
+  explanation: "The S3 table function reads exactly the files that it is given, so the team can look first, and INSERT INTO ... SELECT from the same function keeps the rows in an internal table. Files without Iceberg metadata are not an Iceberg table. Routine Load consumes a message stream such as Kafka, not files. A SELECT returns rows and stores nothing."
+- id: join_fanout_and_missing
+  objective: "Find duplicate or missing dimension rows by comparing results before and after a join."
+  prompt: "After a LEFT JOIN with the customer table, 100 lake orders become 103 rows, and the total amount grows. What should the team do next?"
+  options:
+  - id: check_join_key_matches
+    text: "Look for customers with more than one row for a key, and check the orders that they multiplied"
   - id: switch_to_inner_join
-    text: "Switch to INNER JOIN to guarantee that each order matches exactly once"
-  - id: apply_distinct
-    text: "Apply DISTINCT to all results and use the deduplicated amount directly in reports"
-  - id: switch_to_average
-    text: "Change SUM to AVG to avoid adding duplicate amounts"
-  answer: check_duplicate_matches
-  explanation: "Multiple matching customer rows on the right multiply orders on the left, so locate the join keys and detail records involved. An INNER JOIN does not eliminate multiple matches and may also lose unmatched orders. DISTINCT does not guarantee the correct business grain; duplicates with different field values remain. Average amount and total amount are different metrics, so switching to AVG changes the question."
-- id: q5
-  objective: "With an Iceberg environment available, verify the same batch of orders through direct queries, joins, and after loading."
-  prompt: "A team reads a fixed Iceberg snapshot directly, then loads its orders into an internal table. Both paths show four orders totaling 170, but a reviewer suspects one customer ID changed. Which check can establish consistency?"
-  options:
-  - id: access_succeeds
-    text: "Confirm that the external query succeeds and the internal table exists, then assume the data is consistent"
-  - id: counts_and_totals_only
-    text: "Compare row counts and total amounts without checking order identifiers or other fields"
-  - id: compare_rows_same_snapshot
-    text: "Compare the same snapshot's order IDs and fields row by row, plus counts, amounts, and joins against the same customer-dimension version"
-  - id: compare_durations
-    text: "Compare whether external and internal query durations are similar and infer consistent results from the timing"
-  answer: compare_rows_same_snapshot
-  explanation: "Use the same lake snapshot and customer-dimension version, then compare each order and its fields alongside the aggregate and join checks. A successful query and an existing table prove accessibility, not content consistency. Equal counts and totals can hide a changed customer ID or offsetting amounts. Similar durations reflect execution performance, not equal business results."
+    text: "Use an INNER JOIN instead, which keeps each order only once and the total at its original value"
+  - id: drop_customers_and_reload
+    text: "Delete all the lake orders and load them again, since the extra rows came from the lake table"
+  - id: accept_new_total
+    text: "Accept the larger total, since a LEFT JOIN keeps every order and so cannot overstate amounts"
+  answer: check_join_key_matches
+  explanation: "More rows than orders after a join means that some orders matched several dimension rows: find the customer keys with duplicates and the orders that they multiplied. An INNER JOIN multiplies the same rows, and it also drops orders without a customer. The extra rows came from the join with the dimension, not from the lake table. A LEFT JOIN keeps every order but still multiplies an order that matches several rows."

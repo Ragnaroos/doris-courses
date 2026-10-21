@@ -9,13 +9,18 @@ These independent optional labs do not change the completion requirements for th
 
 Use Linux Docker Engine or Docker Desktop with Linux containers, Docker Compose v2, and the course Python dependencies. Run Jupyter on the Docker host; use SSH port forwarding for remote browser access. This configuration is not for remote Docker daemons or production clusters.
 
-The Flink CDC profile requires **at least 18 GiB of Docker-visible RAM and 4 CPUs**: a 12 GiB Doris container cap plus a 6 GiB planning budget for dependencies. The Kafka profile can run on a development machine with **14 GiB of Docker-visible RAM and 4 CPUs** because it adds only one broker. Also allow at least 8 GB of additional disk space. These are conservative lab profiles, not measured minimums or production sizing claims. On Docker Desktop, allocate these resources to the Docker VM, not just the physical host.
+| Lab | Docker memory | CPUs | Measured peak (Docker Desktop, Apple silicon) | First download |
+| --- | --- | --- | --- | --- |
+| Lab 5A, Kafka | at least 8 GiB | 4 | Doris 2.9 GiB, Kafka 0.4 GiB | `apache/kafka:3.9.0`, about 640 MB |
+| Lab 5B, Flink CDC | at least 10 GiB | 4 | Doris 2.8 GiB, Flink JobManager 1.8 GiB, TaskManager 1.1 GiB, MySQL 0.5 GiB | `mysql:8.0.33` and `flink:1.20.1-scala_2.12-java11`, about 1.5 GB, plus 65 MB of connector JARs |
 
-The first notebook cell runs `docker info` and rejects insufficient total capacity before starting containers. It does not measure free memory or reserve resources. On a shared host, check current memory pressure and disk space yourself; meeting the total-capacity check does not guarantee success. Initial startup needs Docker Hub and Maven Central access.
+Doris runs with a 6 GiB memory limit in these Labs, so the requirement is that limit plus the other services' peaks, rounded up; a 16 GB Mac can give Docker the 8 GiB of Lab 5A. On Docker Desktop, set the memory under **Settings → Resources**: it is what the Docker VM gets, not the Mac's memory. Also allow about 8 GB of free disk space.
+
+The first notebook cell runs `docker info` and rejects insufficient total capacity before starting containers. It does not measure free memory or reserve resources: on a machine that also runs other containers or heavy programs, check `docker stats` first. The first startup needs Docker Hub and Maven Central.
 
 Start Jupyter from the course root, open a notebook, and run its cells in order. `prepare_environment(start=True, streaming=True)` applies the committed `doris-resources.yml` overlay, then starts only the selected streaming dependency profile.
 
-**Finish other course work before the first streaming startup.** Applying the overlay may recreate the existing course Doris container; it retains the same Compose project, FE metadata volume, BE storage volume, and ports. It does not delete data volumes. The overlay sets both memory and memory-plus-swap limits to 12 GiB, matching the previously validated local setting rather than relying on an undocumented `docker update`.
+**Finish other course work before the first streaming startup.** Applying the overlay recreates the existing course Doris container; it keeps the same Compose project, FE metadata volume, BE storage volume, and ports, and it deletes no data. The overlay sets both the memory and the memory-plus-swap limit to 6 GiB. With a limit, the BE measures free memory inside its own container, so Kafka, MySQL, and Flink cannot push it below its low water mark; the image gives the BE 40% of the container's limit, 2.4 GiB, and the Labs need about 1.8 GiB. At 4 GiB the BE's 1.6 GiB is not enough: Lab 5A's job loads nothing and Lab 5B's queries fail with `MEM_ALLOC_FAILED`.
 
 Both labs reuse `environments/single-node`. Do not run two instances of the same lab concurrently, or start a main-course notebook while a streaming lab is running: the main-course startup uses the base configuration without this overlay and may recreate the container without the cap.
 
@@ -44,7 +49,7 @@ docker stats --no-stream
 docker compose --project-name doris-warehousing-course \
   -f environments/single-node/compose.yml \
   -f environments/streaming/doris-resources.yml up -d --wait --wait-timeout 300
-# Confirm both limits: each should be 12884901888 bytes.
+# Confirm both limits: each should be 6442450944 bytes.
 docker inspect doris-warehousing-course-doris-1 \
   --format 'Memory={{.HostConfig.Memory}} MemorySwap={{.HostConfig.MemorySwap}}'
 # Start only the dependencies for the lab you selected.
@@ -78,7 +83,7 @@ docker compose -f environments/streaming/compose.yml logs --tail=100 kafka mysql
 ```
 
 - **Resource preflight failure:** increase Docker VM resources or choose a host meeting the lab profile. Do not disable the check to claim the profile is validated on a smaller machine.
-- **`MEM_LIMIT_EXCEEDED`:** confirm the Doris limits with the inspect command above, then check host/VM free memory, container usage, and Doris memory watermarks. If another main-course startup removed the overlay, finish active work and reapply the documented overlay. Do not disable memory protection or delete volumes to bypass the error.
+- **`MEM_LIMIT_EXCEEDED` or `MEM_ALLOC_FAILED`:** confirm the Doris limits with the inspect command above, then check Docker's memory, `docker stats`, and the BE's limit in the error (`process memory used … limit …`). If a main-course startup removed the overlay, finish active work and run the Lab's first cell again, which reapplies it. Do not disable memory protection or delete volumes to bypass the error.
 - **Routine Load failure:** data waits report unexpected PAUSED/STOPPED/CANCELLED states with the job name, `ReasonOfStateChanged`, and `ErrorLogUrls`. Run the supplied `SHOW ALL ROUTINE LOAD FOR ...` statement for details. Confirm that Doris can reach the advertised broker address. Intentional pause verification uses a direct query, not the healthy-job wait.
 - **Interrupted Kafka notebook:** the notebook stops stale jobs matching its own `course_orders_<12-hex-chars>` name and `ext_kafka_orders` target before rebuilding the table. If it finds another job, it refuses to stop it and asks you to inspect it; do not stop jobs in other databases.
 - **Flink failure:** data and checkpoint waits check job state on every poll and fail on terminal states, even if an earlier checkpoint completed. Follow the exception-page link and inspect SQL Client, JobManager, and TaskManager logs. Check JARs, networking, and source permissions. A SQL Client exit code alone does not establish success.
@@ -103,7 +108,7 @@ From the course directory, using Python with the course dependencies installed; 
 DW_ALLOW_WRITES=yes .venv/bin/python scripts/run_streaming_labs.py all
 ```
 
-Replace `all` with `kafka` or `cdc` to select one lab. This executes notebook code without saving outputs; browser UI inspection is separate. Validation records are in `maintenance/02-data-warehousing/VALIDATION.md` at the repository root. Linux local validation does not establish a clean-install or Docker Desktop/ARM compatibility guarantee.
+Replace `all` with `kafka` or `cdc` to select one lab. This executes notebook code, including the reference solutions of the practices, without saving outputs; browser UI inspection is separate. Both Labs have been run on Docker Desktop with Apple silicon.
 
 ## Official references
 

@@ -11,6 +11,7 @@ import requests
 
 from doris_labkit.profiles import normalize_statement, profile_metric, profile_row_sum
 
+from .environment import connection_settings
 from .runtime import expect, normalized
 from .streaming import wait_for
 from .ui import show_log, show_records
@@ -29,7 +30,8 @@ def _profiles(lab):
 
 
 def _profile_text(lab, profile_id):
-    endpoint = os.environ.get('DW_FE_HTTP_URL', 'http://127.0.0.1:51030').rstrip('/')
+    endpoint = os.environ.get('DW_FE_HTTP_URL') or connection_settings()['DW_FE_HTTP_URL']
+    endpoint = endpoint.rstrip('/')
     url = endpoint + '/rest/v2/manager/query/profile/text/' + profile_id
 
     def read():

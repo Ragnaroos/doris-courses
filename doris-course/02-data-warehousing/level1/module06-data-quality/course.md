@@ -1,129 +1,80 @@
 # Module 6: Data Quality and Schema Validation
 
-| Course Information | Details |
+| Course information | Value |
 | --- | --- |
 | Course | Data Warehousing with Apache Doris · Level 1 |
-| Product Version | Apache Doris 4.x |
-| Lab Version | Apache Doris 4.1.3 |
-| Estimated Time | About 65 minutes, including course notes, hands-on lab, and quiz |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox from Module 1; `wwi_customers` from Lab 5, or Lab 6 loads it |
+| Estimated time | About 70 minutes: reading 30, Lab 30, quiz 10 |
 
-[Course contents](../README.md) · [Open Lab 6](lab06_validate_orders.ipynb) · [Open Quiz 6](quiz06_data_quality_and_rejection.ipynb)
+[Course README](../../README.md) · [Open Lab 6](lab06_validate_orders.ipynb) · [Open Quiz 6](quiz06_data_quality_and_rejection.ipynb)
 
-## Module Goal
+## Module goal
 
-This module introduces data type validation and business quality rules, and how to preserve and handle invalid records.
+Accept only the new orders that can be trusted, keep every rejected one with its reason and its original text, and prove that the checks catch the errors they claim to catch.
 
-After completing this module, you will be able to separate orders into accepted and rejected records, trace rejection reasons, and validate checking rules with known errors.
+## Learning objectives
 
-## Learning Objectives
+After completing this module, you will be able to:
 
-After completing this module, you should be able to:
+1. Distinguish type checks from business quality rules.
+2. Stage raw input as text so that every rejected row can be traced to its source.
+3. Route accepted and rejected rows with explicit rules and an independent customer dimension.
+4. Check input coverage, uniqueness, amounts, and row-by-row results together.
+5. Prove that a check works by making it fail on a known error.
+6. Check what a schema change affects before and after you make it.
 
-1. Distinguish field type validation from business quality rules.
-2. Preserve input identifiers and raw fields to trace every rejected record.
-3. Use an independent customer dimension and explicit rules to route accepted and rejected data.
-4. Check input coverage, business uniqueness, amounts, and row-by-row results together.
-5. Use known errors to verify that checks fail, and distinguish offline time criteria from actual freshness.
+## Module structure
 
-## Module Schedule
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 6.1 Type Checks and Business Rules | 5 min | Why a value that converts can still be wrong |
+| 6.2 Stage the Raw Input | 5 min | Keep every input, as text, with its own ID |
+| 6.3 Route With Rules | 7 min | A classification view, two writes, and a trace back to the input |
+| 6.4 Check More Than Totals | 5 min | Coverage, uniqueness, amounts, and every field |
+| 6.5 Make the Checks Fail on Purpose | 3 min | Known errors that the checks must catch |
+| 6.6 When the Schema Changes | 5 min | What a new column or a new type affects |
+| Lab 6 | 30 min | Stage 13 inputs, route them 10 and 3, and test the checks |
+| Quiz 6 | 10 min | Six questions on these objectives |
 
-| Section | Learning Format | Suggested Time | Learning Outcome |
-| --- | --- | --- | --- |
-| 6.1 Schema and Business Quality | Compare fields, schema changes, and rules | 10 minutes | Explain why correct types do not imply business correctness |
-| 6.2 Staging and Rejection | Classification SQL and routing results | 13 minutes | Trace raw fields and each rejection reason |
-| 6.3 Quality Tests and Validation | Error injection examples | 7 minutes | Prove that checks detect known errors |
-| Lab 6 | Hands-on practice | 30 minutes | Complete the 13→10＋3 split and produce accepted input for Module 7 |
-| Quiz 6 | Interactive quiz | 5 minutes | Check rules, sources, routing, reconciliation, and validation effectiveness |
+## 6.1 Type Checks and Business Rules
 
-## 6.1 Schema and Business Quality
-
-### Two Different Checks
-
-Module 5 already explained that data accepted by an interface is not necessarily ready for business reports.
-This section first preserves all raw input, then routes it according to business rules.
+Module 5 showed that a load can succeed and still be wrong. Before orders reach reports, two different kinds of checks apply:
 
 | Input | Type check | Business check |
 | --- | --- | --- |
-| Amount not-a-number | Cannot convert to DECIMAL | Must not enter the accepted table as a normal amount |
-| Empty order ID | Cannot obtain a valid integer identifier | Cannot identify the order; reject it |
-| Customer ID 999999 | Can convert to an integer | Not in the customer dimension; still reject it |
-| Negative amount | Can be a valid decimal | Whether it is allowed depends on the business contract; this sample disallows it |
+| Amount `not-a-number` | Cannot become a DECIMAL | Must not reach the accepted table as an amount |
+| Missing order ID | No integer to identify the order | Cannot be an order; reject it |
+| Customer ID `999999` | Converts to an integer | No such customer: still reject it |
+| A negative amount | A valid decimal | Allowed only if the contract says so; this batch does not |
 
-Doris table field constraints, strict load mode, and this course's SQL quality rules operate at different levels.
-Business checks such as dimension joins are implemented with explicit SQL in this course, not automatically by declaring a field type.
+A column's type, a load's strict mode, and the course's SQL rules work at different levels. A rule such as "the customer exists" is a join against a customer dimension, written in SQL; no column type can express it.
 
-### Define the Data Contract for This Batch First
+### Agree on a contract for the batch first
 
-A data contract is a shared agreement between upstream and downstream systems on field meanings and acceptance criteria.
-For example, all inputs in this batch are "new orders," so an order ID is required, the amount must be nonnegative, and the customer must be registered.
-Expressing these agreements as checks tells downstream systems which data can be used for analysis and which must be returned for processing.
+A **data contract** is what the sender and the receivers agree each field means and when a row is acceptable. For this batch of new orders: an order ID is required, the amount is not negative, the customer is a known customer, and the source is `COURSE_SIMULATION`. The known customers come from the WWI customer table of Module 5, never from the inputs themselves, or every unknown customer would count as known.
 
-Accepted data must have a usable order ID, a nonnegative amount, a valid customer reference, and a source of
-COURSE_SIMULATION. The customer dimension comes from the WWI customer table loaded in Module 5. Do not generate
-a temporary "customer list" from the current input, or invalid customers will also be treated as valid.
+## 6.2 Stage the Raw Input
 
-When field structure changes, recheck column mappings, types, and business rules.
-For example, if upstream changes the amount to include tax, the original pretax aggregation rules must change even if the field remains a decimal.
-This lab implements the contract as SQL classification rules and result checks.
+The raw table `orders_raw` stores every business field as text, plus a stable `input_id`. Lab 6 loads the thirteen inputs from `raw_orders.json` with Stream Load, the method of Module 5: with `format=json` and `strip_outer_array=true`, each object of the file's array becomes a row, its keys matched to the columns named in `columns`. Because every business column is text, the load's strict mode has nothing to reject: `not-a-number` and a missing order ID arrive as they were sent. A typed staging table would reject those rows at the door, and their content would be lost.
 
-### When Fields Change, Do the Existing Checks Still Apply?
+Two identifiers do different jobs: `input_id` identifies one arrival in this batch, `order_id` the business order. An input without an order ID still has an `input_id`, and two arrivals of the same order keep two `input_id`s.
 
-Schema validation checks whether a batch of input matches the table structure; Schema Change modifies the table structure itself.
-For example, after adding a nullable `order_channel`, the value for old data can remain unknown for now, but load mappings and downstream SELECT statements must be checked;
-changing an amount from pretax to tax-inclusive requires a new agreement on its meaning even if the type stays the same.
-
-| Change method | Main work | Impact to understand in this section |
-| --- | --- | --- |
-| Lightweight Schema Change | Supported operations modify metadata only, without rewriting existing data files | Examples include eligible additions of value columns; still check defaults, column mappings, and downstream compatibility |
-| Heavyweight Schema Change | Converts or rewrites data files in the background | Some type or column-order changes; monitor job status, resources, and conversion results |
-
-Do not assume all tables use the same path based only on labels such as "add column" or "change type"; consider the target version and table model.
-The following shows the operation on a separate copy; do not run it on orders_clean:
-
-```text
-ALTER TABLE <separate_copy_table> ADD COLUMN order_channel VARCHAR(20) NULL;
-DESC <separate_copy_table>;
-```
-
-Before running it, check whether existing writes explicitly name columns; afterward, verify the table definition, the new column values in old rows, and loading of new batches.
-For background conversions, use `SHOW ALTER TABLE COLUMN` to inspect job status, then verify the converted data.
-Do not confuse successful submission with completed conversion. Full rollout and rollback are covered in Level 3, Module 12.
-This lab keeps fields unchanged and focuses on data acceptance. [Schema Change](https://doris.apache.org/docs/4.x/table-design/schema-change/)
-
-## 6.2 Staging and Rejection
-
-### Trace Every Error to Its Source
-
-The raw layer `orders_raw` initially stores business fields as strings and adds a stable input_id.
-Original values are not discarded when conversion fails, so you can later explain which row and field had a problem.
-
-Two identifiers are needed here: `input_id` identifies a particular input received in this batch, while `order_id` identifies the business order.
-Even if an input lacks an order ID, input_id can still locate the raw record; when the same order arrives repeatedly,
-different input_id values also preserve a trace of each arrival.
-
-| input_id | Raw order_id | Raw order_amount | customer_id | Expected destination |
+| input_id | Raw order_id | Raw order_amount | customer_id | Destination |
 | ---: | --- | --- | --- | --- |
-| 1–10 | 900001–900010 | Valid amounts totaling 1400.00 | 1–10 | Accepted |
+| 1–10 | 900001–900010 | Valid amounts, 1400.00 in total | 1–10 | Accepted |
 | 11 | 900012 | not-a-number | 1 | INVALID_AMOUNT |
 | 12 | NULL | 100.00 | 1 | INVALID_ORDER_ID |
 | 13 | 900013 | 100.00 | 999999 | INVALID_CUSTOMER |
 
-`TRY_CAST` attempts a field type conversion and returns NULL if it fails, making errors easy to identify in routing rules.
-For example, `TRY_CAST('not-a-number' AS DECIMAL(18, 2))` returns NULL,
-so the classification rule marks the corresponding input as INVALID_AMOUNT; valid amounts pass this check.
-The original text remains in orders_raw for reprocessing after correction.
-For conversion behavior, see [CAST and TRY_CAST](https://doris.apache.org/docs/4.x/sql-manual/basic-element/sql-data-types/conversion/cast-expr/).
-Rules select the first rejection reason in this order: order ID → amount → customer reference → source.
-If a row has multiple problems, record the first matching reason; after correcting and reprocessing it, check for remaining problems.
+## 6.3 Route With Rules
 
-### Express Rules in SQL with CASE
+`TRY_CAST` tries a conversion and returns NULL when it fails: `TRY_CAST('not-a-number' AS DECIMAL(18, 2))` is NULL, so a rule can test for that, while the original text stays in `orders_raw` for correcting and reprocessing. See [CAST and TRY_CAST](https://doris.apache.org/docs/4.x/sql-manual/basic-element/sql-data-types/conversion/cast-expr/).
 
-CASE WHEN checks conditions from top to bottom; THEN supplies the matching result, and ELSE applies if none match.
-The following view preserves the raw fields and only adds reject_reason. TRY_CAST checks validity;
-when data is actually written to the accepted table, the target column types constrain the stored values.
+The rules run in a fixed order, order ID, amount, customer, source, and record the first reason that matches; a row with several problems shows its first one, and the others after it is corrected. `CASE WHEN` checks conditions from top to bottom, `THEN` gives the result of the first that matches, and `ELSE` applies when none does. The view keeps the raw fields and adds `reject_reason`:
 
-**SQL reading example: corresponds to the classification step in Lab 6. Do not rerun it on a completed lab.**
-First prepare orders_raw and the independent customers dimension table in the lab:
+**SQL reading example: the classification step of Lab 6. Do not rerun it after the Lab.**
+The Lab first prepares `orders_raw` and the customer dimension `customers`:
 
 <!-- reading-only-example -->
 ```sql
@@ -139,28 +90,12 @@ SELECT *, CASE
 FROM orders_raw;
 ```
 
-In this example, customers.customer_id cannot be NULL; do not apply NOT IN directly to a customer set that might contain NULL.
-input_id=11 passes the order ID check before matching the amount rule; input_id=13 has a valid amount,
-but its customer reference does not exist, so it matches INVALID_CUSTOMER. The ten normal inputs have NULL reject_reason values.
+`customers.customer_id` cannot be NULL here; never apply `NOT IN` to a list that might contain NULL: the condition would then be true for no row at all. Input 11 passes the order ID rule and matches the amount rule; input 13 has a valid amount but an unknown customer. The ten normal inputs get a NULL reason.
 
-`orders_classified` is a regular view that stores the classification SQL; querying it runs conversion checks and classification logic.
-The view computes reject_reason for every input. Subsequent writes send records with a NULL reason to the accepted table
-and records with a reason to the rejected table. Two explicit writes in the lab perform the routing; creating the view alone does not move data automatically.
+`orders_classified` is an ordinary view: it stores the query, and every query of it runs the rules again. Creating it moves no data. Two writes route the inputs:
 
-```text
-13 raw input rows in orders_raw
-          │ Check against the independent customer dimension
-          ▼
-Classification view orders_classified (with reject_reason)
-          ├─ NULL reason → orders_clean: 10 rows
-          └─ Non-NULL reason → orders_rejected: 3 rows, preserving input_id
-```
-
-### Two WHERE Clauses Decide the Destination
-
-**SQL reading example: corresponds to the routing step in Lab 6. Do not rerun it on a completed lab.**
-The lab first creates empty orders_clean and orders_rejected tables, then performs the following two writes.
-The accepted table uses Duplicate Key; rerunning appends data rather than updating existing routing results.
+**SQL reading example: the routing step of Lab 6. Do not rerun it after the Lab.**
+The Lab first creates the empty `orders_clean` and `orders_rejected`; `orders_clean` is a Duplicate Key table, so running these writes twice would append twice.
 
 <!-- reading-only-example -->
 ```sql
@@ -177,16 +112,20 @@ SELECT input_id, reject_reason
 FROM orders_classified WHERE reject_reason IS NOT NULL;
 ```
 
-IS NULL and IS NOT NULL split the same classification result into two mutually exclusive groups: ten accepted rows and three rejected rows.
-These writes are not automatically an atomic cross-table transaction; if interrupted between the steps, success of the first step does not mean everything is complete.
-This lab preserves static raw input. To redo it, recreate the result tables in the lab's initialization order, then complete both steps and verify them.
+`IS NULL` and `IS NOT NULL` split the same classification into two groups that do not overlap: ten accepted and three rejected. The two writes are not one transaction across both tables: if the work stops between them, the first write's success does not mean the batch is done. To redo the Lab, recreate the result tables and run both writes again.
 
-After learning CASE, you can write a read-only SELECT to try out a new rule before deciding whether to use it for actual routing.
-The lab's independent exercise asks you to add an amount review rule without changing the accepted table used by Module 7.
+```text
+13 raw inputs in orders_raw
+          │ rules, with the independent customer dimension
+          ▼
+the view orders_classified (with reject_reason)
+          ├─ NULL reason → orders_clean: 10 rows
+          └─ a reason    → orders_rejected: 3 rows, with their input_id
+```
 
-### Trace Rejected Records Back to Raw Fields
+### Trace a rejection back to its input
 
-After completing the routing steps in the lab, run:
+After the routing:
 
 ```sql
 SELECT r.input_id, r.order_id, r.order_amount, r.customer_id, x.reason
@@ -195,15 +134,9 @@ JOIN orders_raw r ON x.input_id = r.input_id
 ORDER BY r.input_id;
 ```
 
-The result should match rows 11, 12, and 13 in the table above. The rejected table stores identifiers and reasons, while the raw table stores original text;
-the two are joined by input_id. A temporary ErrorURL does not replace these business records that remain available for long-term queries.
+The result is rows 11, 12, and 13 of the table in 6.2. The rejected table keeps identifiers and reasons, the raw table the original text, joined by `input_id`. A load's `ErrorURL` expires; these tables can be queried as long as you keep them. A rule can be tried with a plain `SELECT` with `CASE` before it routes anything: Lab 6's practice does that.
 
-A customer ID that converts successfully but references a nonexistent customer still cannot enter the accepted table.
-A NULL source or a source other than COURSE_SIMULATION is also rejected, although the current thirteen-row sample has no additional source-error rows.
-
-## 6.3 Quality Tests and Validation
-
-### Preserving the Total Count Is Only the First Step
+## 6.4 Check More Than Totals
 
 ```sql
 SELECT reject_reason, COUNT(*) AS input_rows
@@ -212,8 +145,7 @@ GROUP BY reject_reason
 ORDER BY reject_reason;
 ```
 
-Expect ten rows with a NULL reason and one row for each of the three rejection reasons. Ensure both coverage and no overlap:
-an input must not enter both the accepted and rejected tables, and no input may be omitted.
+Expect ten rows without a reason and one for each of the three reasons: every input has exactly one destination, and none is in both tables or in neither.
 
 ```sql
 SELECT COUNT(*) AS orders,
@@ -222,73 +154,80 @@ SELECT COUNT(*) AS orders,
 FROM orders_clean;
 ```
 
-The query result should be 10, 10, and 1400.00. Next, compare order fields row by row to check that the details match the raw input and business rules.
-Detailed checks can reveal differences hidden in aggregates, such as two incorrect amounts that increase and decrease by the same amount, leaving the total unchanged.
+Expect 10, 10, and 1400.00. Then compare every field with the expected orders: two wrong amounts, one too high and one too low, would leave the total right.
 
-| Check level | What this lab verifies |
+| Check | What Lab 6 verifies |
 | --- | --- |
-| Input coverage | All 13 inputs have a destination: 10 accepted, 3 rejected |
-| Identifiers and relationships | No duplicate order IDs, customers exist, and sources are correct |
-| Amounts and statuses | Initial total 1400.00, status CREATED, and zero payments/refunds |
-| Time criteria | Event times are non-NULL and do not exceed the fixed business cutoff |
-| Complete records | Every field matches the independent sample row by row |
+| Coverage | All 13 inputs have a destination: 10 accepted, 3 rejected |
+| Identifiers and references | No duplicate order ID, every customer exists, every source is right |
+| Amounts and states | 1400.00 in total, all CREATED, nothing paid or refunded |
+| Time | Every event time is set and before the batch's fixed cutoff |
+| Every field | Each order equals the expected order |
 
-### Deliberately Introduce Errors to Verify That Checks Work
+The cutoff `2026-01-02 12:00:00` checks this offline batch. A pipeline that keeps running also needs the time of the business event, the time it was loaded, and the time it was checked, to tell late events from slow transport or a backlog.
 
-The lab uses two counterexamples to test order ID uniqueness separately: first append an existing order, then restore the data
-and change the second row's order ID to the first row's order ID. The second counterexample preserves all amounts, still with ten rows totaling 1400.00,
-but contains a duplicate order ID and omits the original second order.
+## 6.5 Make the Checks Fail on Purpose
 
-Both counterexamples call the uniqueness check directly, preventing aggregate checks from failing first and obscuring whether the uniqueness rule works.
-Each time, display the duplicate order ID, confirm that the uniqueness check fails, then restore from the preserved classified input and run all checks.
+A check that has never failed may not check anything. Lab 6 breaks the accepted table twice, on purpose, and calls the uniqueness check directly each time, so that the totals do not fail first and hide whether that rule works:
+
+1. Append a copy of an existing order: the uniqueness check must fail.
+2. Restore, then change the second order's ID to the first order's ID: still ten rows and 1400.00, but one order twice and another missing. The uniqueness check must fail again.
 
 ```text
-Correct input → Checks pass
-Appended duplicate / Duplicate with unchanged totals → Uniqueness check fails (expected)
-Restore data → Checks pass again → Hand over to Module 7
+Correct input → checks pass
+A duplicate, or a duplicate with the same totals → the uniqueness check fails, as expected
+Restore from the classified input → checks pass again → Module 7
 ```
 
-Expected results come from fixed input and business rules; restoration reclassifies the preserved raw data.
-This provides an independent basis for judging whether restoration is correct even if the target table was written incorrectly.
+The expected values come from the fixed input and the rules, and the restore reclassifies the raw input, so the checks have an independent reference even after the accepted table was written wrongly.
 
-The fixed cutoff `2026-01-02 12:00:00` checks event times for this offline sample batch.
-Continuous ingestion also requires recording business event time, ingestion time, and observation time
-to distinguish late business events, transmission delays, and processing backlogs.
+## 6.6 When the Schema Changes
 
-## Hands-on Lab 6: Preserve Input, Route Rejections, and Automate Validation
+Validating input against a schema is different from changing the schema itself. Adding a nullable column `order_channel` leaves it NULL in the old rows, but a load that maps columns by position, or an `INSERT INTO ... VALUES` without a column list, no longer fits the table, and a `SELECT *` downstream returns one more column. Changing what a column means, such as an amount that becomes tax-inclusive, needs a new agreement even when the type stays the same.
 
-Before starting, complete Module 5, understand the distinction between load responses and business quality, and use the course's dedicated lab database.
+| Kind of change | What Doris does | What to check |
+| --- | --- | --- |
+| Lightweight Schema Change | Some operations, such as adding a value column, change only metadata | Defaults, column mappings, and the downstream queries |
+| Heavyweight Schema Change | Other operations, such as some type changes, rewrite the data files in the background | The job's state, resources, and the converted data |
 
-Open [Lab 6](lab06_validate_orders.ipynb) and complete these steps in order:
+Whether a change is light or heavy depends on the operation, the table model, and the version, not on its name. Try it on a separate copy, never on `orders_clean`:
 
-1. Stage thirteen input rows, including an invalid amount, a missing order ID, and an invalid customer.
-2. Explicitly route them into ten accepted rows and three rejected rows, tracing reasons by input_id.
-3. Check accepted records row by row, inject duplicate orders to verify that checks fail, then restore the correct data.
+```text
+ALTER TABLE <separate_copy_table> ADD COLUMN order_channel VARCHAR(20) NULL;
+DESC <separate_copy_table>;
+SHOW ALTER TABLE COLUMN;
+```
 
-### Data Sources and Notes
+Before the change, find the writes and queries that depend on the column order; after it, check the definition, the new column in old rows, a new load, and the downstream results. A background change is done when `SHOW ALTER TABLE COLUMN` reports `FINISHED`, not when the `ALTER` returns. The [schema and deletion extension](../extensions/extension67_schema_and_delete.ipynb) adds a column and changes a type on a copy of the orders; Level 3 covers rolling changes out. See [Schema Change](https://doris.apache.org/docs/4.x/table-design/schema-change/).
 
-The historical portion uses Microsoft WWI; new orders and changes are marked COURSE_SIMULATION and reference WWI customers and products without backfilling history.
-See [Data notes](../../datasets/README.md) for fields, business definitions, and expected results.
+## Lab 6: Preserve Input, Route Rejections, and Automate Validation
 
-For additional operations, see [Level 1 Extension Labs](../extensions/README.md). They run on separate `ext_*` tables without repeatedly rewriting this lab's business results.
+Open [Lab 6: Preserve Input, Route Rejections, and Automate Validation](lab06_validate_orders.ipynb). You:
 
-## Module Summary
+1. Stage the thirteen inputs with Stream Load, including an invalid amount, a missing order ID, and an unknown customer.
+2. Route them into ten accepted and three rejected rows, and trace each rejection to its raw text by `input_id`.
+3. Check the accepted orders, break them twice on purpose to see the uniqueness check fail, and restore them.
+4. Practice: try a new amount-review rule with `CASE` before using it.
 
-- Type validation asks whether a value can be parsed; business rules ask whether it belongs in reports. An integer customer ID does not prove the customer exists.
-- Preserve input_id and original text to trace rejection reasons; error logs do not automatically become a business rejection table.
-- Use Module 5's independent customer dimension and route by order ID, amount, customer, and source rules. This sample has 13 inputs, 10 accepted and 3 rejected.
-- Totals, uniqueness, relationships, amounts, and field-by-field comparisons complement each other; one total cannot prove data is complete and correct.
-- Known duplicates must cause checks to fail, and restored data must pass again; a fixed cutoff is not a freshness metric for a running system.
+You need the course sandbox from Module 1 and `wwi_customers` from Lab 5; if it is missing, the Lab loads that one table from the bundled package. Module 7 reads the accepted orders. The [data notes](../../datasets/README.md) describe the inputs.
 
-## Knowledge Quiz 6: Data Quality and Schema Validation
+## Summary
 
-After completing the course notes and lab, open [Quiz 6](quiz06_data_quality_and_rejection.ipynb).
-The quiz contains five single-choice questions and requires no Doris or external services; read the explanations after submitting.
+- A type check asks whether a value converts; a business rule asks whether it belongs in reports: an integer customer ID does not make the customer real.
+- Stage raw input as text with its own `input_id`, so that nothing is rejected at the door and every rejection keeps its original text; an expired `ErrorURL` is no substitute.
+- Route with explicit rules against an independent customer dimension: 13 inputs, 10 accepted and 3 rejected, each with one reason.
+- Coverage, uniqueness, amounts, and a comparison of every field complement each other; a total that matches cannot prove that the details are right.
+- A check is proven when a known error makes it fail and the restored data passes again; a fixed cutoff is not a freshness measure for a running pipeline.
+- Before a schema change, find the writes and queries that depend on the columns; after it, check old rows, new loads, and the change's job until it is FINISHED.
+
+## Quiz 6
+
+Open [Quiz 6: Data Quality and Schema Validation](quiz06_data_quality_and_rejection.ipynb). It has six single-choice questions and needs no running environment.
 
 Next module: [Module 7: Data Updates, Deletion, and Event Replay](../module07-state-changes/course.md).
 
-## Official References
+## References
 
-- [Stream Load: Type conversion and quality parameters](https://doris.apache.org/docs/4.x/data-operate/import/import-way/stream-load-manual/)
-- [CAST and TRY_CAST](https://doris.apache.org/docs/4.x/sql-manual/basic-element/sql-data-types/conversion/cast-expr/)
-- [Schema Change](https://doris.apache.org/docs/4.x/table-design/schema-change/)
+- [Apache Doris: Stream Load, including strict mode and filtering](https://doris.apache.org/docs/4.x/data-operate/import/import-way/stream-load-manual/)
+- [Apache Doris: CAST and TRY_CAST](https://doris.apache.org/docs/4.x/sql-manual/basic-element/sql-data-types/conversion/cast-expr/)
+- [Apache Doris: Schema Change](https://doris.apache.org/docs/4.x/table-design/schema-change/)

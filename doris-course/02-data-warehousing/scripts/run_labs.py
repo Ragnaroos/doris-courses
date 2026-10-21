@@ -3,7 +3,6 @@
 import argparse
 import json
 import os
-import re
 import sys
 from pathlib import Path
 
@@ -26,7 +25,8 @@ EXTENSIONS = [
 ]
 
 
-def execute_notebook(path, *, solutions=False):
+def execute_notebook(path):
+    """Run every code cell in order, the collapsed reference solutions too, as Run All does."""
     notebook = json.loads(path.read_text())
     namespace = {"__name__": "__main__"}
     previous_directory = Path.cwd()
@@ -34,13 +34,6 @@ def execute_notebook(path, *, solutions=False):
     try:
         os.chdir(path.parent)
         for index, cell in enumerate(notebook["cells"]):
-            if solutions and "course_solution" in cell.get("metadata", {}).get("tags", []):
-                source = "".join(cell["source"])
-                solution_blocks = re.findall(r"```python\n(.*?)```", source, re.DOTALL)
-                if len(solution_blocks) != 1:
-                    raise ValueError("Expected one reference solution: " + cell["id"])
-                exec(compile(solution_blocks[0], f"{path.name}:solution-{index}", "exec"), namespace)
-                print("PASS reference solution: " + path.name, flush=True)
             if cell["cell_type"] == "code":
                 source = cell["source"]
                 source = "".join(source) if isinstance(source, list) else source
@@ -55,7 +48,6 @@ def execute_notebook(path, *, solutions=False):
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
     parser.add_argument("--iceberg", action="store_true", help="Also prepare the local lakehouse fixture and execute Module 4")
-    parser.add_argument("--solutions", action="store_true", help="Validate folded reference solutions after each independent exercise")
     parser.add_argument("--extensions", action="store_true", help="Run the three additional Level 1 notebooks after the main Labs")
     parser.add_argument("--extensions-only", action="store_true", help="Run only extensions; main Labs 1, 4, 5, 6 and 7 must already be complete")
     args = parser.parse_args()
@@ -70,7 +62,7 @@ def main():
         paths = list((ROOT / "level1" / module).glob("lab*.ipynb"))
         if len(paths) != 1:
             raise RuntimeError(f"Expected exactly one lab in {module}")
-        execute_notebook(paths[0], solutions=args.solutions)
+        execute_notebook(paths[0])
     if args.extensions or args.extensions_only:
         for name in EXTENSIONS:
             execute_notebook(ROOT / "level1/extensions" / name)

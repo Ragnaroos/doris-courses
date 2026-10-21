@@ -1,73 +1,87 @@
 title: "Module 6 Quiz: Data Quality and Schema Validation"
-description: Five single-choice questions; no database connection required. View explanations after submitting.
+description: "Six single-choice questions; no database connection required. View explanations after submitting."
 questions:
-- id: q1
-  objective: Distinguish field type validation from business quality rules.
-  prompt: A new-order input has order_amount=-15.00. It parses as DECIMAL, but the agreed rule for this batch requires a nonnegative amount. How should the input be handled?
+- id: type_check_or_business_rule
+  objective: "Distinguish type checks from business quality rules."
+  prompt: "A new order has order_amount = -15.00. The value converts to DECIMAL, but the contract for this batch requires an amount that is not negative. How should the input be handled?"
   options:
+  - id: reject_under_amount_rule
+    text: "Reject it under the amount rule, and keep its original input and the reason"
   - id: accept_valid_decimal
-    text: Accept it because a valid DECIMAL value satisfies the table's numeric field type
-  - id: reject_and_preserve
-    text: Reject it under the amount rule and preserve the original input and rejection reason
-  - id: replace_with_zero
-    text: Replace the amount with zero during parsing and accept it without recording the change
-  - id: remove_minus_sign
-    text: Remove the minus sign as a formatting correction and accept 15.00 without source confirmation
-  answer: reject_and_preserve
-  explanation: "Reject the input under the amount rule, preserving the raw negative amount and the reason for the rejection. DECIMAL accepts negative values, but type validity does not satisfy the batch's nonnegative business rule. Silently replacing the value with zero destroys the evidence needed to repair it correctly. Removing the minus sign invents a different business amount without confirmation from the source."
-- id: q2
-  objective: Preserve input identifiers and raw fields to trace every rejected record.
-  prompt: Two weeks after a load, support asks why one specific order input was rejected, but the temporary load error URL has expired. What evidence should the warehouse have retained?
+    text: "Accept it, because it is a valid DECIMAL and the column's type is satisfied"
+  - id: change_sign
+    text: "Accept it as 15.00, because a sign error is a formatting problem of the source"
+  - id: drop_silently
+    text: "Drop it without a record, since a rejected row should not stay in the warehouse"
+  answer: reject_under_amount_rule
+  explanation: "The value passes the type check but breaks a business rule of the contract, so it is rejected with its reason, and its original input stays traceable. A valid type says nothing about the business meaning. Changing the sign invents a value that the source did not send. Dropping it without a record makes the rejection impossible to explain or correct later."
+- id: stage_raw_text_with_input_id
+  objective: "Stage raw input as text so that every rejected row can be traced to its source."
+  prompt: "Two weeks after a load, support asks why one particular input was rejected. The load's ErrorURL has expired. Which design still answers the question?"
   options:
-  - id: error_url_only
-    text: Keep only the load error URL and consult temporary error details when needed
-  - id: rejection_counts_only
-    text: Count only the total rejections each time and delete the details to save space
-  - id: input_id_raw_fields_reasons
-    text: Preserve input_id, raw fields, and rejection reasons so each record can be linked back to the original row
-  - id: cleaned_fields_only
-    text: Keep only cleaned fields and error types, discarding the original values
-  answer: input_id_raw_fields_reasons
-  explanation: "Stable input identifiers, raw fields, and rejection reasons support tracing, repair, and reprocessing. Temporary error details help troubleshooting but cannot replace long-term, complete business rejection records. A count cannot explain which input was rejected or why. Cleaning changes the original information, and keeping only modified values may leave the original failure unexplained."
-- id: q3
-  objective: Use an independent customer dimension and explicit rules to route accepted and rejected data.
-  prompt: You receive 50 order rows. Customer IDs in 2 rows do not exist in the independent customer dimension; all others meet the rules. Customer references must be valid. How should the rows be routed?
+  - id: raw_text_input_id_reason
+    text: "The raw input kept as text with an input_id, and a rejected table of input_id and reason"
+  - id: typed_staging_table
+    text: "A typed staging table, so that the load rejected the bad input when it first arrived"
+  - id: accepted_table_only
+    text: "The accepted table only, since a rejected input is by definition not part of the data"
+  - id: keep_error_url
+    text: "A copy of the ErrorURL in a note, so that support can open it again when they need it"
+  answer: raw_text_input_id_reason
+  explanation: "Text columns accept every input exactly as it was sent, input_id identifies each arrival, and the rejected table names its reason, so a join on input_id answers the question at any time. A typed staging table loses the bad input at the door, so nothing is left to explain. The accepted table contains no rejected input. An ErrorURL points to a log that Doris deletes after a while; the copied link would lead nowhere."
+- id: route_with_independent_dimension
+  objective: "Route accepted and rejected rows with explicit rules and an independent customer dimension."
+  prompt: "Of 50 new order inputs, 2 have customer IDs that are not in the independent customer dimension; all the others meet every rule. Customers must exist. How should the inputs be routed?"
   options:
   - id: route_48_and_2
-    text: Preserve all 50 raw rows, write 48 accepted records, and write 2 rejected records with reasons
-  - id: fill_dimension_from_input
-    text: Extract customer IDs from these 50 rows to fill the dimension, then classify all inputs as accepted
-  - id: check_types_only
-    text: Check only that customer IDs can be converted to integers and write all 50 rows to the accepted table
-  - id: accept_all_and_copy
-    text: Write all 50 rows to the accepted table and also copy the 2 suspicious rows to the rejected table
+    text: "Keep all 50 raw inputs, write 48 accepted orders, and write 2 rejections with their reasons"
+  - id: add_missing_customers
+    text: "Add the 2 customers to the dimension from these inputs, then accept all 50 of the orders"
+  - id: reject_whole_batch
+    text: "Reject the whole batch of 50, because the two unknown customers make all of the rows unsafe"
+  - id: accept_with_null_customer
+    text: "Accept all 50, and set the customer ID of the 2 inputs to NULL so that the rule is satisfied"
   answer: route_48_and_2
-  explanation: "The independent dimension validates the references, and the accepted and rejected groups are mutually exclusive and together cover all 50 inputs. Filling the dimension from the rows being checked uses the data to prove its own validity, which bypasses the rule. A customer ID that converts to an integer is not necessarily a valid reference. Writing all 50 rows to the accepted table lets the rejected rows contaminate downstream metrics, even if they are also copied to the rejected table."
-- id: q4
-  objective: Check input coverage, business uniqueness, amounts, and row-by-row results together.
-  prompt: A new accepted table has four rows totaling 100, exactly matching the source's row count and total. A reviewer suspects one order was omitted and another loaded twice with the same amount. What additional evidence is needed?
+  explanation: "Each input is routed by the rules: 48 meet them and are accepted, 2 fail the customer rule and are rejected with their reason, and all 50 stay in the raw table. Building the dimension from the inputs would make every unknown customer known. Rejecting the batch throws away 48 valid orders for a problem of 2. Setting the customer to NULL changes the input to pass a rule, and hides the problem."
+- id: totals_are_not_details
+  objective: "Check input coverage, uniqueness, amounts, and row-by-row results together."
+  prompt: "A new accepted table has four rows that total 100, exactly as in the source. A reviewer suspects that one order is missing and another was loaded twice with the same amount. What evidence settles it?"
   options:
-  - id: totals_are_enough
-    text: None; matching row count and total prove that every source order appears once
-  - id: sort_by_order_id
-    text: Sort by order_id; ordering the rows will restore the omitted order and remove the duplicate
-  - id: unique_ids_only
-    text: Check only that order IDs are unique; equal amounts and valid customer references follow automatically
-  - id: compare_row_by_row
-    text: Compare source and target order IDs and fields row by row, including amounts, statuses, and customer references
-  answer: compare_row_by_row
-  explanation: "Independent row-by-row checks of order IDs and fields reveal missing, repeated, or altered records that matching totals hide. An omitted order and a repeated order of the same amount can leave both the row count and the total unchanged. Sorting only changes the display order. Unique target IDs would not reveal a missing source ID or prove that the other fields match."
-- id: q5
-  objective: Use known errors to verify that checks fail, and distinguish offline time criteria from actual freshness.
-  prompt: A tester deliberately repeats one source order and reruns the validation suite; another check compares against a fixed historical cutoff. What outcome would show that these checks mean what the team claims?
+  - id: compare_ids_and_fields
+    text: "Compare the source's and the table's order IDs and fields row by row, and count each ID"
+  - id: totals_match_so_fine
+    text: "None is needed: the row count and the total match the source, so no order can be missing"
+  - id: recount_rows
+    text: "Count the table's rows again later, after the BE's next report, in case the count was early"
+  - id: compare_averages
+    text: "Compare the average amount with the source's average, which a duplicate would have changed"
+  answer: compare_ids_and_fields
+  explanation: "A missing order and a duplicated one with the same amount leave the row count and the total unchanged; only comparing order IDs and fields row by row, and counting each ID, finds them. Matching totals are a first check, not proof. Counting again gives the same four rows. A duplicate with the average amount, or two errors that cancel, leave the average unchanged too."
+- id: break_the_checks_on_purpose
+  objective: "Prove that a check works by making it fail on a known error."
+  prompt: "A tester adds a copy of one source order and reruns the checks; another check compares event times with a fixed cutoff for this batch. Which outcome shows that the checks mean what the team claims?"
   options:
-  - id: adjust_expectation
-    text: After adding duplicates, change the expected row count so the check continues to pass
+  - id: duplicate_fails_restore_passes
+    text: "Uniqueness fails on the copy and passes after a restore; the cutoff says nothing about freshness"
+  - id: all_checks_pass
+    text: "Every check passes with the copy in place, which shows that the checks are robust to small errors"
   - id: cutoff_proves_freshness
-    text: Treat a successful fixed-cutoff check as proof that current ingestion latency is zero
-  - id: fail_then_pass
-    text: Adding a known duplicate should fail and restoring the data should pass; a fixed-time check does not represent real-time freshness
-  - id: normal_inputs_only
-    text: Run only normal inputs and assume that all anomalies can be detected once they pass
-  answer: fail_then_pass
-  explanation: "Known errors test whether the rules detect the problems they claim to detect, and actual freshness also requires event, ingestion, and observation times. Adjusting expectations to accommodate incorrect output prevents the checks from detecting problems. A fixed sample cutoff and current end-to-end ingestion latency are different metrics. Passing normal samples does not prove that the error paths work; inject targeted errors."
+    text: "The uniqueness check fails, and the fixed cutoff shows that the data in the table is up to date"
+  - id: total_check_fails
+    text: "The total check fails first, which is enough to show that the uniqueness check is not needed"
+  answer: duplicate_fails_restore_passes
+  explanation: "A check is shown to work when a known error makes it fail and the corrected data makes it pass again; a fixed cutoff checks one offline batch and measures no freshness of a running pipeline. Checks that pass with a known error in place do not detect it. A cutoff in the past cannot say whether today's data arrived. A copy with the same amount may not change the total at all, which is exactly why the uniqueness check is called directly."
+- id: schema_change_effects
+  objective: "Check what a schema change affects before and after you make it."
+  prompt: "A team adds a nullable column order_channel to a table that a daily job loads with INSERT INTO ... VALUES, without naming the columns. What should they check?"
+  options:
+  - id: positional_writes_break
+    text: "That the job names its columns, since a write by position no longer fits the new column list"
+  - id: metadata_only_no_effect
+    text: "Nothing: adding a nullable column changes only metadata, so no write or query is affected"
+  - id: old_rows_get_values
+    text: "That the old rows get order_channel values, which Doris fills in from the next daily load"
+  - id: rebuild_table_first
+    text: "That the table is rebuilt first, because Doris rewrites all data files for any new column"
+  answer: positional_writes_break
+  explanation: "An INSERT without a column list must supply a value for every column in order, so after the change the job's writes no longer fit; naming the columns, and checking SELECT * downstream, keeps them right. Adding a value column can be a lightweight change of metadata, but that is about how Doris stores it, not about who depends on the column list. Old rows keep NULL in the new column; no load fills them in. Doris rewrites files only for heavyweight changes, such as some type changes."

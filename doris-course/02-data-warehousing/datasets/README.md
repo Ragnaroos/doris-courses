@@ -62,8 +62,8 @@ When distributing the package to learners, include this document, the manifest, 
 - Redeliveries with the same event_id have identical business fields. delivery_id is a delivery identifier, not a logistics tracking number.
 - The initial snapshot retains event IDs S1001…S1010, while order IDs are separately 900001…900010; the two identifiers do not need to be equal.
 
-900001 goes through payment, shipment, and receipt to reach DELIVERED; 900003 goes through payment, cancellation, and refund to reach REFUNDED;
-900002 is canceled without payment, and the other orders remain CREATED. Delivery deliberately sends the receipt event first to test out-of-order resolution.
+900001 is paid, shipped, and delivered, reaching DELIVERED; 900003 is paid, cancelled, and refunded, reaching REFUNDED;
+900002 is cancelled without payment, and the other orders remain CREATED. Lab 7 deliberately sends the DELIVERED event of 900001 first, to test out-of-order resolution.
 
 After replay: 11 current orders with an amount of 1510.00 and 18 logical history records; cumulative payments of 250.00 and refunds of 150.00,
 with net receipts of 100.00. One delivery before interruption plus two rounds of nine deliveries gives 19 raw deliveries in total.

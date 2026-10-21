@@ -15,8 +15,9 @@
 分节标题保留简洁的功能名称，例如 Streaming Job 与 CDC_STREAM；业务场景、术语含义和工作过程放在正文讲清楚。
 学员材料保留实验前置条件、操作风险与功能成熟度；制作状态和测试记录集中在本目录。
 Level 1 的 Iceberg Lab 已实测；三份基础扩展覆盖文件查询、Group Commit 等操作，新增 Lab 5A / 5B 覆盖 Kafka 与 MySQL/Flink CDC 的选做链路。Streaming Job / CDC_STREAM 和持续文件仍仅介绍。具体实测边界见 VALIDATION.md。
-七份讲义的学习目标与五道测验逐项对应，单元总结回扣相同目标；题目定义中的
-objective 保存对应的学习目标原文，离线测试检查覆盖关系。
+Level 1 的七份讲义（B5 起按课程模板）各有六条学习目标，与六道测验逐项对应，单元总结回扣相同目标；
+题目定义中的 objective 保存对应的学习目标原文，`tests/test_lessons.py` 检查；Module 5 的选读材料
+`optional05_continuous_ingestion.md` 另有六题。每道题的出处见 [quiz-alignment.md](quiz-alignment.md)。
 教学时间是包含讲义、实验和测验的估计，不含环境准备，仍需试讲校准。
 讲义完善不代表外部集成实验或目标发布版本已经验证；实际范围见验证记录。
 
@@ -42,8 +43,10 @@ objective 保存对应的学习目标原文，离线测试检查覆盖关系。
 export DW_DATABASE=dw_course_l1_validation
 export DW_ALLOW_WRITES=yes
 .venv/bin/python scripts/run_labs.py
-# 加入本地湖表实验，并执行所有折叠参考答案：
-.venv/bin/python scripts/run_labs.py --iceberg --solutions
+# 加入本地湖表实验（折叠的参考答案是代码单元，和 Run All 一样总会执行）：
+.venv/bin/python scripts/run_labs.py --iceberg
+# 再加三份基础扩展（需要 .[extensions] 的 PyArrow）；主线结果已在库中时改用 --extensions-only：
+DW_DATABASE=dw_course_l1_extensions_check .venv/bin/python scripts/run_labs.py --iceberg --extensions
 # 单独选做持续接入；先读 environments/streaming/README.md，使用固定独立实验库：
 .venv/bin/python scripts/run_streaming_labs.py all
 ```

@@ -1,73 +1,87 @@
 title: "Module 5 Quiz: Batch and Continuous Data Ingestion"
-description: "Five single-choice questions; no database connection required. View explanations after submitting."
+description: "Six single-choice questions; no database connection required. View explanations after submitting."
 questions:
-- id: q1
-  objective: "Choose ingestion paths for local files, object storage, message streams, and database changes."
-  prompt: "A finite comma-separated values (CSV) file arrives on the course host each night, while a Kafka topic keeps receiving events. Which ingestion paths match these different schedules?"
+- id: choose_a_load_method
+  objective: "Choose a load method for a local file, files in object storage, a message stream, a database's changes, or many small writes."
+  prompt: "A team has three new sources: a CSV file exported once to an analyst's laptop, a month of Parquet files in object storage that they want to inspect with SQL before keeping, and an application that writes one order at a time, many per second. Which plan fits?"
   options:
-  - id: routine_load_for_csv
-    text: "Use Routine Load for CSV; export Kafka messages to files and consider continuous ingestion complete"
-  - id: stream_load_for_kafka
-    text: "Use Stream Load for CSV; use Stream Load once for Kafka and wait for automatic consumption"
-  - id: catalog_for_both
-    text: "Create an External Catalog for both CSV and Kafka and continuously load through the Catalog"
-  - id: stream_load_and_routine_load
-    text: "Use Stream Load for CSV and Routine Load for continuous Kafka consumption"
-  answer: stream_load_and_routine_load
-  explanation: "With Stream Load the client pushes each local batch, while a Routine Load job maintains Kafka consumption progress continuously. Routine Load in this course targets Kafka, and exporting messages to a one-off file does not establish continuous consumption. One Stream Load is one pushed batch, not an automatically created Kafka consumption job. A Catalog provides external access, not a universal continuous load job for every source."
-- id: q2
-  objective: "Explain the roles of CSV column mappings, Parquet fields, and default values."
-  prompt: "A headerless CSV lists order_id, customer_id, amount, but the target table's numeric columns are in a different order. A Wide World Importers (WWI) Parquet file has named fields, and a missing payment state has no verified value. What prevents a type-valid but incorrect load?"
+  - id: stream_s3_group_commit
+    text: "Stream Load for the CSV, the S3 table function with INSERT INTO SELECT for the Parquet files, Group Commit for the single orders"
+  - id: broker_load_for_everything
+    text: "Broker Load for the CSV and the Parquet files, and one more Broker Load job for every single order that the application writes"
+  - id: routine_load_for_files
+    text: "Routine Load for the CSV and the Parquet files, since a job keeps their progress, and plain Stream Load without Group Commit for each order"
+  - id: catalog_for_laptop_file
+    text: "An External Catalog over the laptop's CSV and the Parquet files, and a separate INSERT INTO SELECT statement for each new order"
+  answer: stream_s3_group_commit
+  explanation: "A finite local file fits Stream Load, a fixed set of files in object storage fits the S3 table function, which lets you look before INSERT INTO SELECT keeps the rows, and many tiny writes fit Group Commit, which merges them into fewer transactions. Broker Load suits large batches of files in object storage, not a file on a laptop, and a job per order would pay a job's cost for every order. Routine Load consumes a message stream such as Kafka, not files. An External Catalog reads another system's tables, not a CSV on a laptop, and one INSERT per order commits one transaction per order."
+- id: map_fields_to_columns
+  objective: "Map CSV positions, Parquet fields, and default values to the columns of a target table."
+  prompt: "A headerless CSV lists customer_id, order_id, amount, but the target table starts with order_id. A Parquet file of history has named fields. No source sends a payment status for new orders. Which approach loads correct rows?"
   options:
-  - id: map_and_align_explicitly
-    text: "Map CSV positions explicitly, align Parquet fields with the target schema, and use a payment default only when the business rule supports it"
-  - id: trust_parsed_types
-    text: "Accept the CSV load if numeric types parse; compatible types prove the positions have the intended meanings"
-  - id: ignore_parquet_names
-    text: "Ignore Parquet field names and mappings; every Parquet value always follows the target table's physical column order"
-  - id: default_to_paid
-    text: "Default the missing payment state to PAID; a populated field is sufficient evidence that payment occurred"
-  answer: map_and_align_explicitly
-  explanation: "A headerless CSV needs an explicit positional mapping, Parquet carries a field schema that must be aligned with the target, and a default needs a business basis. Numeric types that parse do not reveal which source position means customer or amount. Parquet field names and schema matter; the physical order of the target columns is not proof of semantic alignment. A PAID default cannot invent a payment fact that is absent from the source."
-- id: q3
-  objective: "Judge correctness using load responses, loaded row counts, relationships, and amounts."
-  prompt: "A 100-row load returns Hypertext Transfer Protocol (HTTP) 200; its JavaScript Object Notation (JSON) result says Status=Success, NumberLoadedRows=98, and NumberFilteredRows=2. The task requires retaining all orders. What should you do?"
+  - id: columns_names_and_no_payment_default
+    text: "List the CSV's columns in file order, rely on the Parquet field names, and leave payment status to the source instead of a default"
+  - id: trust_the_table_order
+    text: "Load the CSV without a columns list, since both IDs are integers and Doris checks types, and give the Parquet file the same settings"
+  - id: default_payment_paid
+    text: "List the CSV's columns, and set the payment status column to a default of PAID so that every new order has a value"
+  - id: csv_separator_for_parquet
+    text: "Load the CSV with columns, and give the Parquet file a comma separator and the same columns list so that both loads match"
+  answer: columns_names_and_no_payment_default
+  explanation: "columns names, in the file's order, the column that each CSV value fills, so the two IDs land in the right columns; Parquet carries field names, and a default may fill a missing column only when the business rule says what the missing value means, which is not true of a payment. Without columns, the swapped IDs still convert, so the type check cannot catch the swap. A default of PAID invents a payment that no source reported. A Parquet file is not a delimited text file: separators and positions do not apply to it."
+- id: judge_a_load
+  objective: "Judge a load from its response and from the rows, relationships, and amounts in the target table."
+  prompt: "A 100-row load returns HTTP 200, and its JSON says Status Success, NumberLoadedRows 98, NumberFilteredRows 2. The task requires every order to be loaded. What should you conclude?"
   options:
-  - id: deliver_on_success
-    text: "Deliver the report based on Success; the database has handled the two filtered rows"
-  - id: investigate_and_repair
-    text: "Investigate filtering and missing orders, repair according to the retry strategy, then verify"
-  - id: resend_with_new_label
-    text: "Immediately resend the entire file with a new label, ignoring the 98 rows already written"
-  - id: aggregate_loaded_rows
-    text: "Complete business verification as long as amounts from the existing 98 rows can be aggregated"
-  answer: investigate_and_repair
-  explanation: "Locate the filtered rows and verify the target results, then choose recovery through backfilling, rebuilding, or another appropriate method. A successful load job does not establish business completeness. A new label creates a new batch and may append the 98 already-written rows again in a detail table. Aggregating the loaded rows does not prove order completeness or correct customer references."
-- id: q4
-  objective: "Distinguish load-batch retries, business-event deduplication, and continuous-job recovery."
-  prompt: "In this course's off_mode loading, the result of a file request is uncertain. How should batch retries differ from business deduplication?"
+  - id: two_rows_missing
+    text: "The load is incomplete: find the two filtered rows and why, fix them, and check the table again"
+  - id: http_200_is_success
+    text: "The load is complete, because an HTTP status of 200 means that Doris stored the whole file"
+  - id: success_means_all_rows
+    text: "The load is complete, because a Status of Success means that every row of the file was loaded into the table"
+  - id: filtered_rows_are_duplicates
+    text: "The load is complete, because filtered rows are duplicates that Doris removed on purpose"
+  answer: two_rows_missing
+  explanation: "Status Success with NumberFilteredRows 2 means that the load committed, without two rows that it rejected; when every order must be loaded, find those rows through the response's ErrorURL, correct them, and check the table's rows and amounts. HTTP 200 only says that the request was received and answered. Success with a filter ratio that allows rejected rows still leaves those rows out. Filtered rows are rows that failed a check, such as a type conversion, not duplicates."
+- id: retry_with_the_label
+  objective: "Retry a load batch safely with its label, and tell a batch retry from business deduplication."
+  prompt: "A Stream Load of ten new orders into a Duplicate Key table timed out on the client, so nobody knows whether it committed. Which retry keeps the table correct?"
   options:
-  - id: new_label_resend
-    text: "Generate a new label and resend the same file; avoiding conflicts with the original request guarantees no duplicates"
-  - id: same_label_for_all_files
-    text: "Permanently submit different files with the same label so it automatically deduplicates all business events"
-  - id: batch_and_business_identity
-    text: "Retain batch identity within the label's retention period and check the original result; use separate stable keys and versions for business events"
-  - id: trust_kafka_offsets
-    text: "Once Kafka offsets advance, assume the current order state and other tables are all correctly updated"
-  answer: batch_and_business_identity
-  explanation: "Batch identity, business-event identity, and recovery position have distinct roles; cases such as Publish Timeout require checking the original result first. A new label may append the same batch again, so confirm the original transaction state before resending. Labels have a retention period and identify load batches; they are not universal business deduplication keys for different files. Advancing Kafka offsets cannot replace out-of-order version resolution, business verification, or cross-table recovery checks."
-- id: q5
-  objective: "Distinguish the grain and measurement definitions of WWI historical orders, account receipts, and new orders simulated for the course."
-  prompt: "An analyst wants one per-order sales series from WWI order lines, customer-account receipts, and generated course orders. Several lines can belong to one order, receipts are not allocated to individual orders, and the generated orders are simulations. Which treatment preserves the sources' meanings?"
+  - id: same_label_soon
+    text: "Resend it within a few hours with the same label; if the first attempt committed, Doris loads nothing"
+  - id: new_label_now
+    text: "Resend it right away with a new label, because a label whose load may have failed cannot be reused"
+  - id: same_label_after_days
+    text: "Resend it two days later with the same label, once Doris has cleared the outcome of the first attempt"
+  - id: same_label_group_commit
+    text: "Resend it with the same label and Group Commit, so that Doris merges both attempts into one transaction"
+  answer: same_label_soon
+  explanation: "Doris remembers a Stream Load's label for 12 hours after the load finishes: a retry with the same label is answered with Label Already Exists if the batch committed, and loads it once if it did not. A new label is a new batch, so if the first attempt had committed, the table would hold the ten orders twice. After two days the label is forgotten, and the same label loads the batch again. A Group Commit request cannot carry a label at all. None of this deduplicates business events that arrive in different batches: that needs business keys and versions."
+- id: group_commit_visibility
+  objective: "Explain what Group Commit changes for many small loads, and when their rows become visible."
+  prompt: "An application sends ten single-order Stream Loads, one after another, with group_commit set to async_mode, to a table whose group_commit_interval_ms is 2000. Right after the tenth response, a dashboard counts the orders. What should the team expect?"
   options:
-  - id: lines_as_orders
-    text: "Every order line has an order ID, so line counts can directly serve as order counts"
-  - id: receipts_as_refunds
-    text: "Customer account receipts are negative, so they can be counted directly as order refunds"
-  - id: simulation_as_history
-    text: "Simulated orders use WWI customers and products, so their payments are also real history"
-  - id: respect_each_grain
-    text: "Aggregate lines by order, do not force account receipts into per-order allocations, and mark simulated sources separately"
-  answer: respect_each_grain
-  explanation: "Identify the grain and source of orders, account transactions, and COURSE_SIMULATION separately to avoid mixing measurement definitions. An order may have several product lines, so line counts must be interpreted at their actual grain. Negative receipts in this dataset represent account receipts, not evidence of per-order refunds. Referencing real sample customers and products does not turn generated payments, refunds, and regions into original historical facts."
+  - id: maybe_none_yet
+    text: "Possibly none yet: each response came once its row reached the write-ahead log, before the group commits"
+  - id: all_ten_visible
+    text: "All ten: each response reported Success, and a load's rows are visible by the time its response returns"
+  - id: ten_transactions
+    text: "Ten transactions and ten new versions in the tablet, one per request, all visible before the responses arrived"
+  - id: needs_commit_statement
+    text: "None until someone runs a COMMIT statement for the table, which async_mode requires after each batch of requests"
+  answer: maybe_none_yet
+  explanation: "In async_mode, Doris answers once a load's rows are in its write-ahead log and commits the collected loads together when the group's interval or size is reached, so the ten rows become visible together, about 2 seconds later, in one transaction and one new version. A successful response in async_mode does not mean the rows are visible yet. Ten transactions and ten versions are what off_mode produces for ten loads. No COMMIT statement is involved: the group commits on its own."
+- id: grains_and_definitions
+  objective: "Distinguish the grain and amount definitions of WWI historical orders, account receipts, and the simulated new orders."
+  prompt: "An analyst wants one daily sales series built from WWI order lines, WWI customer-account receipts, and the course's simulated orders. Several lines belong to one order, receipts are recorded per customer account, and the simulated orders are generated. Which treatment keeps each source's meaning?"
+  options:
+  - id: lines_by_order_receipts_apart
+    text: "Sum lines into orders, keep account receipts out of per-order amounts, and label the simulated orders as such"
+  - id: count_lines_as_orders
+    text: "Count each order line as one order, and add every account receipt to the day of the order that it probably paid"
+  - id: split_receipts_evenly
+    text: "Split each account receipt evenly over the customer's orders of that month, and mix in the simulated orders"
+  - id: drop_simulated_flag
+    text: "Sum lines into orders, then drop the source column so that WWI and simulated orders form one longer history"
+  answer: lines_by_order_receipts_apart
+  explanation: "Order lines become orders by summing quantity times unit price per order and counting distinct order IDs; account receipts belong to accounts, not to orders, so they cannot be placed on an order; and the simulated orders stay marked COURSE_SIMULATION. Counting lines counts products, not orders, and placing a receipt on a guessed order invents a link. Splitting a receipt evenly also invents per-order payments. Dropping the source mixes generated data into the real history."

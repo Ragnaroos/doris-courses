@@ -11,7 +11,7 @@ services:
       MINIO_ROOT_USER: course_lake
       MINIO_ROOT_PASSWORD: course_lake_local_only
     ports:
-      - "127.0.0.1:51900:9000"
+      - "127.0.0.1:${DW_LAKE_S3_PORT:-51900}:9000"
     volumes:
       - lake-data:/data
     networks:
@@ -31,7 +31,7 @@ services:
       AWS_SECRET_ACCESS_KEY: course_lake_local_only
       AWS_REGION: us-east-1
     ports:
-      - "127.0.0.1:51818:8181"
+      - "127.0.0.1:${DW_LAKE_REST_PORT:-51818}:8181"
     volumes:
       - lake-catalog:/catalog
     networks:

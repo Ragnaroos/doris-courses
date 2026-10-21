@@ -1,73 +1,87 @@
 title: "Module 3 Quiz: Doris Table Models, Partitioning, and Bucketing"
-description: "Five single-choice questions; no database connection required. View explanations after submitting."
+description: "Six single-choice questions; no database connection required. View explanations after submitting."
 questions:
-- id: q1
-  objective: "Predict the results of the same input in the Duplicate, Unique, and Aggregate models."
-  prompt: "With the same key design and no Sequence column, write (order_id, amount) rows (17,90), (17,85), and (23,12) in order, waiting for each write to succeed and become visible before the next. The Aggregate amount column declares SUM. Which result is correct?"
+- id: same_writes_three_models
+  objective: "Predict the results of the same input in the Duplicate, Unique, and Aggregate Key models."
+  prompt: "Without a Sequence column, the rows (17, 90), (17, 85), and (23, 12) of (order_id, amount) are written in this order, each after the previous one finished, into a Duplicate, a Unique, and an Aggregate Key table whose amount is SUM. What does each table hold?"
   options:
-  - id: all_keep_latest
-    text: "All three models retain the latest amount of 85 for order 17"
   - id: three_rows_85_175
-    text: "Duplicate retains three rows; order 17 is 85 in Unique and 175 in Aggregate"
+    text: "Duplicate keeps three rows; order 17 is 85 in the Unique table and 175 in the Aggregate"
+  - id: all_keep_latest
+    text: "All three tables keep the latest amount of order 17, 85, because each one has key order_id"
   - id: duplicate_rejects
-    text: "Duplicate rejects duplicate keys; order 17 is 85 in Unique and 175 in Aggregate"
+    text: "The Duplicate table rejects the second row of 17; order 17 is 85 in Unique and 175 in Aggregate"
   - id: unique_keeps_larger
-    text: "Duplicate retains three rows; order 17 keeps the larger amount of 90 in Unique and 175 in Aggregate"
+    text: "Duplicate keeps three rows; order 17 is 90 in Unique, the larger amount, and 175 in Aggregate"
   answer: three_rows_85_175
-  explanation: "Duplicate retains all three detail rows, Unique retains the later value 85 under these sequential-write conditions, and Aggregate sums 90 and 85 into 175 for order 17. The models have different write semantics, so they cannot all be read as keeping the latest snapshot. Duplicate Key uses its keys for sorting, not for rejecting repeated business keys. Unique does not select the largest amount; the amount is not a version, and 175 is not the current order amount."
-- id: q2
-  objective: "Choose logical keys and table models for detail records, current state, or aggregate metrics."
-  prompt: "A merchant needs the latest status per order for a dashboard and every distinct status-change event for audit. A network retry can resend the same event_id. Which keys preserve both grains?"
+  explanation: "Duplicate Key keeps every row, Unique Key keeps the later of two rows with the same key when they are written one after another, and Aggregate Key with SUM adds 90 and 85 into 175. The three models treat the same key differently, so they cannot all keep the latest amount. Duplicate Key uses its key for sorting and rejects nothing. Unique Key does not pick the larger amount: without a Sequence column, the later write wins."
+- id: model_and_keys
+  objective: "Choose a key model and key columns for detail records, current state, or additive metrics."
+  prompt: "A dashboard needs each order's latest status, and an audit needs every distinct status-change event. Retries can resend the same event_id. Which tables keep both answers?"
   options:
+  - id: order_id_and_event_id
+    text: "A Unique Key table by order_id for the current status, and one by event_id for the events"
   - id: order_id_for_both
-    text: "Use order_id as the unique key for both the current-state table and event history"
-  - id: keys_swapped
-    text: "Use event_id as the unique key for the current-state table and order_id for event history"
-  - id: order_id_and_stable_event_id
-    text: "Use order_id as the unique key for the current-state table and a stable event_id for event history"
-  - id: new_event_id_per_delivery
-    text: "Use order_id as the unique key for the current-state table and generate a new event_id for every redelivery in event history"
-  answer: order_id_and_stable_event_id
-  explanation: "Keyed by order_id, the current-state table has one row per order, and keyed by a stable event_id, the history has one row per distinct event; redeliveries of the same event still use the original ID. Keying the history by order_id as well makes the events of one order overwrite each other, so the history is incomplete. Swapping the keys leaves the current-state table with one row per event, while the history loses earlier events of the same order. A new event_id for every redelivery disguises a duplicate delivery as a new business event, breaking event deduplication."
-- id: q3
-  objective: "Distinguish the roles of partitions, buckets, sort keys, and business unique keys."
-  prompt: "A date-partitioned Duplicate Key table is hashed by order_id. A retry appends the same order twice, and a teammate proposes adding buckets to remove the duplicate. Which diagnosis is right?"
+    text: "One Unique Key table by order_id for both, since every event belongs to exactly one order"
+  - id: aggregate_by_status
+    text: "An Aggregate Key table by order_id and status, with SUM, for both the dashboard and the audit"
+  - id: duplicate_for_events
+    text: "A Unique Key table by order_id, and a Duplicate Key table by event_id that keeps every retry"
+  answer: order_id_and_event_id
+  explanation: "The current status has one row per order, so its key is order_id; the history has one row per distinct event, so its key is event_id, and a resent event replaces itself instead of adding a row. Keying the history by order_id would keep only one event per order. Summing by status adds up states, which neither question asks for. A Duplicate Key table keeps every retry as another row, so the audit would count resent events twice."
+- id: four_design_choices
+  objective: "Distinguish partitions, buckets, sort keys, and business unique keys."
+  prompt: "A date-partitioned Duplicate Key table is bucketed by HASH(order_id). A retry wrote the same order twice, and a teammate proposes more buckets to remove the copy. Which diagnosis is right?"
   options:
-  - id: layout_does_not_deduplicate
-    text: "Date partitions choose ranges and hash buckets distribute rows; neither removes a repeated business event, so deduplication needs its own key or rule"
-  - id: partition_makes_unique
-    text: "The date partition already makes order_id globally unique, so the second row must only be a display artifact"
+  - id: neither_removes_duplicates
+    text: "Partitions pick ranges and buckets spread rows; neither removes a copy: that needs a key or a rule"
   - id: more_buckets_deduplicate
-    text: "More hash buckets will keep only one copy of each order_id when the retry is loaded"
-  - id: compaction_keeps_latest
-    text: "A Duplicate Key sort key keeps only the latest retry after Compaction finishes"
-  answer: layout_does_not_deduplicate
-  explanation: "Partition and bucket choices organize data, and a Duplicate Key sort key orders it; none of them is a business-event deduplication rule. A date partition is not a global uniqueness constraint. Hashing the same order_id places the matching rows in one shard but does not remove either row, however many buckets there are. Compaction preserves Duplicate Key rows; it does not turn the model into Unique Key."
-- id: q4
-  objective: "Use EXPLAIN to compare scan ranges with date filters and bucket-key filters."
-  prompt: "A reviewer compares a date-filter query with the same query plus order_id equality on a date-partitioned, HASH(order_id) table. Both return one row. What plan evidence distinguishes the filters' scan effects?"
+    text: "More buckets put each order alone in its own bucket, so the second copy falls away when it is written"
+  - id: sort_key_is_unique
+    text: "The sort key already makes order_id unique, so the copy is only shown twice and stores once"
+  - id: partition_by_order_id
+    text: "Partitioning by order_id instead of the date would keep one row per order in each partition"
+  answer: neither_removes_duplicates
+  explanation: "Partitioning decides which range a row belongs to and bucketing which tablet stores it; neither decides that two rows are the same order, so removing the copy needs a Unique Key, a business key with versions, or a rule. More buckets only spread the same rows over more tablets. A Duplicate Key table's key orders the rows and keeps both copies. A partition by order_id would still keep both copies, in the same partition."
+- id: partition_and_bucket_pruning
+  objective: "Read EXPLAIN to tell partition pruning from bucket pruning."
+  prompt: "On a table partitioned by date and bucketed by HASH(order_id) into 4 buckets per day, a date filter's plan shows partitions=1/2 and tablets=4/4. Adding order_id = 1 to the filter changes the plan to tablets=1/4. What did each filter do?"
   options:
-  - id: returned_rows
-    text: "Look only at the final number of returned rows and treat it as the scan volume"
-  - id: total_bucket_count
-    text: "Look only at the total bucket count specified at table creation and assume every query scans all Tablets"
-  - id: identical_plan_text
-    text: "Compare only whether the plan text is identical word for word, without analyzing the ranges corresponding to the filters"
-  - id: partitions_and_tablets
-    text: "Compare the selected partitions and Tablet ranges, distinguishing date pruning from bucket pruning"
-  answer: partitions_and_tablets
-  explanation: "Comparing the selected partitions and Tablet ranges lets you observe the two types of pruning separately: the date condition prunes partitions, and order_id equality prunes buckets. Returned rows are not scanned rows, nor do they indicate how many shards were read. Applicable filters can prune partitions and Tablets, so the total bucket count does not equal the scan range of every query. Plan representations may change across versions; understand the selected ranges rather than comparing the text word for word."
-- id: q5
-  objective: "Verify results using both detail records and amounts, without equating plan pruning with performance gains."
-  prompt: "A candidate current-order view returns four order IDs and a total amount of 200, matching an independent extract. A downstream report filters by status, but one order's status differs from the extract. EXPLAIN scans fewer Tablets than before. What should release review conclude?"
+  - id: date_partitions_id_bucket
+    text: "The date pruned the other day's partition; the order ID pruned three of that day's four buckets"
+  - id: id_pruned_partitions
+    text: "The order ID pruned the partitions, and the date pruned nothing, since dates are not hashed"
+  - id: both_prune_partitions
+    text: "Both filters pruned partitions; tablets=1/4 means one partition of four is left to read"
+  - id: plan_reads_one_row
+    text: "The date pruned one partition, and tablets=1/4 means that the query reads exactly one row"
+  answer: date_partitions_id_bucket
+  explanation: "partitions=1/2 shows partition pruning by the date; tablets=1/4 then counts the tablets of the remaining partition, and an equality filter on the bucketing column leaves the one bucket that can hold order 1. The order ID cannot rule out a day, since every day can hold any order. tablets= counts tablets, not partitions. A tablet holds many rows; the plan does not count rows."
+- id: merge_on_write
+  objective: "Explain what Merge-on-Write does for a Unique Key table."
+  prompt: "A Unique Key table with \"enable_unique_key_merge_on_write\" = \"true\" receives order 1 at 2300.00, then at 2250.00. What does Merge-on-Write do?"
   options:
-  - id: totals_prove_statuses
-    text: "Publish: matching order count and amount prove that every status is correct"
-  - id: fewer_tablets_prove_all
-    text: "Publish: fewer planned Tablets prove both business correctness and lower actual latency"
-  - id: reconcile_then_measure
-    text: "Reconcile the status mismatch row by row, then measure actual runtime under the same workload"
-  - id: ignore_status_mismatch
-    text: "Ignore the status mismatch because a matching total is sufficient for a status-filtered report"
-  answer: reconcile_then_measure
-  explanation: "Status affects the report population, so reconcile the detail first and test performance separately with runtime evidence. Equal counts and totals can hide a wrong field value. EXPLAIN describes planned pruning, not actual latency or business correctness. A matching total today does not make an incorrect status safe for a status-filtered report."
+  - id: marks_old_row_on_write
+    text: "When 2250.00 is written, it marks the older row of order 1 as replaced, so queries read only 2250.00"
+  - id: merges_at_query_time
+    text: "It keeps both rows unmarked until a query asks for order 1, and then returns the larger amount"
+  - id: adds_on_write
+    text: "It adds the two amounts as they are written, so a query of order 1 reads 4550.00 afterward"
+  - id: rejects_second_write
+    text: "It rejects the second write, because a Unique Key table accepts each key only once in its life"
+  answer: marks_old_row_on_write
+  explanation: "Merge-on-Write settles a key's latest row at write time: Doris marks the older row of the same key as replaced, so a query reads each key's latest row without merging at read time, and compaction removes the marked rows later. Without Merge-on-Write a Unique Key table merges at read time, and it returns the later row, not the larger amount. Adding values is what an Aggregate Key table with SUM does. A Unique Key table accepts a key again and keeps the newer row."
+- id: smaller_plan_not_speedup
+  objective: "Tell a smaller plan from a measured speedup."
+  prompt: "Adding order_id = 1 to a date filter changes a query's plan from tablets=4/4 to tablets=1/4, and both queries return order 1. What can the team conclude?"
+  options:
+  - id: less_planned_work_measure_speed
+    text: "The query plans to read one tablet instead of four; whether it runs faster still has to be measured"
+  - id: four_times_faster
+    text: "The query runs four times faster, because it reads a quarter of the tablets that it read before"
+  - id: more_accurate_result
+    text: "The result is now more accurate, because fewer tablets hold fewer rows that could be duplicates"
+  - id: table_rebucketed
+    text: "The table was rebucketed by the filter, so other queries of the table read one tablet too now"
+  answer: less_planned_work_measure_speed
+  explanation: "A plan shows what a query will read, so fewer tablets predict less work; the time also depends on the tablets' sizes, caching, and fixed costs, and must be measured on the same data and machine. A quarter of the tablets is not a quarter of the time: on ten orders the queries take about the same. Pruning must never change a result, so the answer is not more accurate, only reached with less reading. A filter changes nothing in the table."

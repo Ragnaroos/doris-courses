@@ -1,73 +1,87 @@
 title: "Module 7 Quiz: Data Updates, Deletion, and Event Replay"
-description: Five single-choice questions; no database connection required. View explanations after submitting.
+description: "Six single-choice questions; no database connection required. View explanations after submitting."
 questions:
-- id: q1
-  objective: Distinguish the keys and purposes of current order state, event history, and raw deliveries.
-  prompt: One order has a current status, a payment event, and three deliveries of that same event after retries. An auditor needs to explain the latest state, distinct business events, and delivery attempts separately. Which storage split answers all three questions?
+- id: three_grains
+  objective: "Distinguish the keys and purposes of current state, event history, and raw deliveries."
+  prompt: "One order has a current status, one payment event, and three deliveries of that same event after retries. An auditor must explain the latest state, the distinct events, and the delivery attempts separately. Which split of tables answers all three?"
   options:
-  - id: current_table_only
-    text: The current table records the latest state, so it can replace all event history and redelivery records
-  - id: overwrite_by_order_id
-    text: Overwrite current state, history, and deliveries by order_id to reduce duplicates
-  - id: new_event_id_per_delivery
-    text: Generate a new event_id for every redelivery so history counts every delivery
-  - id: three_separate_layers
-    text: The current table answers what is true now, event history answers what happened, and delivery records answer how many attempts were made
-  answer: three_separate_layers
-  explanation: "Each question needs its own grain; this course uses order_id, event_id, and attempt_id with delivery_id to represent the current state, the business events, and the delivery attempts. The latest state overwrites old values, so it cannot reconstruct all events and attempts. An order has multiple events and deliveries, and overwriting them all by order_id loses facts at each level. A duplicate delivery is not a new business event; a new event_id breaks event deduplication, and delivery counts belong in the delivery layer."
-- id: q2
-  objective: Use business versions to explain the handling of duplicate and out-of-order events.
-  prompt: Full-state events for order 701 arrive in this order—version 8 delivered, version 6 paid, version 7 shipped, then a redelivery of the same version 7 event. How should the current table and event history change?
+  - id: current_history_deliveries
+    text: "A current table by order_id, a history by event_id, and a delivery log that keeps every attempt"
+  - id: one_table_by_order
+    text: "One table by order_id that keeps the latest row, since the latest state also explains the events"
+  - id: one_table_by_event
+    text: "One table by event_id that keeps every delivery, from which the latest state is chosen by time"
+  - id: deliveries_only
+    text: "A delivery log only, since every event and every state can be rebuilt from the deliveries later"
+  answer: current_history_deliveries
+  explanation: "Each question has its own grain: the latest state is one row per order, the history one row per distinct event, and the delivery log one row per attempt, so three keys answer three questions. A table of latest rows loses the events. A table by event_id keeps each event once, so it cannot also count three deliveries, and arrival time does not decide which state is newest. Rebuilding everything from deliveries on every query moves the work and the version logic into every query."
+- id: versions_decide
+  objective: "Use business versions to resolve duplicate and out-of-order events."
+  prompt: "Full-state events for order 701 arrive in this order: version 8 DELIVERED, version 6 PAID, version 7 SHIPPED, then the same version 7 event again. The current table uses event_version as its Sequence column. What do the current table and the history hold?"
   options:
-  - id: shipped_and_every_delivery
-    text: The current state ends as shipped, and history appends a record for every delivery
-  - id: delivered_and_latest_event
-    text: The current state remains delivered, and history keeps only the version 8 event
-  - id: delivered_and_three_events
-    text: The current state remains delivered, and history keeps three events by stable event ID
-  - id: arrival_order_as_version
-    text: Use the sequence of four arrivals as version numbers and take the state with the highest arrival number
-  answer: delivered_and_three_events
-  explanation: "Full states are resolved by business version, so delivered at version 8 stays current; history is deduplicated by stable event ID, and deliveries can be recorded separately. Arrival order cannot replace business versions, and a redelivery is not a new business event. Late events still have historical value, so history keeps them. A local arrival sequence still allows a late old state to overwrite a newer one."
-- id: q3
-  objective: Distinguish partial column updates from full-row writes that omit fields.
-  prompt: Order 52 currently has status CREATED, version 4, amount 75.00, and region NORTH. A status-only update to PAID at version 5 omits amount and region. How can the team verify that a partial column update preserved those fields?
+  - id: delivered_three_events
+    text: "The current table shows DELIVERED, and the history keeps three distinct events by event ID"
+  - id: last_arrival_wins
+    text: "The current table shows SHIPPED, the last arrival, and the history keeps four events"
+  - id: highest_amount_wins
+    text: "The current table shows whichever event has the highest amount, and the history keeps three"
+  - id: duplicate_breaks_order
+    text: "The redelivery makes the current table show SHIPPED again, and the history keeps four events"
+  answer: delivered_three_events
+  explanation: "The Sequence column keeps the highest version of each order, 8, DELIVERED, whatever the arrival order, and the history keyed by event_id keeps the three distinct events, the redelivery replacing itself. Arrival order decides nothing when versions are set. The amount is not a version. A redelivered event at version 7 is still lower than version 8, and its event ID is already in the history."
+- id: partial_update
+  objective: "Distinguish partial column updates from full-row writes that omit fields."
+  prompt: "Order 52 is CREATED at version 4, with amount 75.00 and region NORTH. An update sets only its status to PAID at version 5. How can the team be sure that the amount and region are kept?"
   options:
-  - id: verify_partial_update
-    text: Enable partial updates, use an increasing version, verify that the omitted amount and region stay unchanged, and restore the setting afterward
-  - id: full_row_write
-    text: Use a normal full-row write while omitting other fields, assuming omission automatically preserves old values
-  - id: check_status_only
-    text: Enable partial updates and check only the status; treat omitted fields reverting to defaults as success
-  - id: lower_version
-    text: Enable partial updates and use a lower version, assuming the setting bypasses Sequence resolution
-  answer: verify_partial_update
-  explanation: "Enable partial updates, verify the new status and version alongside the unchanged 75.00 amount and NORTH region, then restore the session setting. Omitting fields from a normal full-row write does not promise to preserve their old values. Checking only the status misses an accidental change to an omitted field. Partial updates do not disable version resolution; a lower business version should not overwrite a higher one."
-- id: q4
-  objective: Distinguish soft deletion, SQL deletion, and physical file reclamation.
-  prompt: A paid order is cancelled and later refunded. Operations wants cancelled orders hidden from an active-order report, while finance must retain the refund trail. A teammate also assumes hiding a row immediately frees disk space. Which explanation fits these requirements?
+  - id: enable_partial_update
+    text: "Turn on partial updates, write the key, status, and version, check all four columns, and restore the setting"
+  - id: omit_columns_is_enough
+    text: "Write an INSERT with only the key, status, and version, since Doris keeps the old values of columns left out"
+  - id: write_without_version
+    text: "Turn on partial updates and write only the key and the status, since a partial update does not need a new version"
+  - id: delete_then_insert
+    text: "Delete order 52 first, then insert it with the new status, and copy the amount and region from yesterday's report"
+  answer: enable_partial_update
+  explanation: "A partial column update, turned on with enable_unique_key_partial_update on a Merge-on-Write Unique Key table, merges the supplied columns into the existing row; checking all four columns shows the kept ones, and the setting is restored afterwards. Without that setting, an INSERT with left-out columns writes a full row with defaults or NULL in them. With a Sequence column, the update needs a higher version to win over version 4. Deleting and reinserting from a report replaces facts with a copy that may be out of date."
+- id: kinds_of_deletion
+  objective: "Distinguish soft deletion, SQL DELETE, a load's delete mark, and physical reclamation."
+  prompt: "A paid order is cancelled and then refunded. Operations wants cancelled orders hidden from an active-order report, finance must keep the refund trail, and a teammate thinks that hiding a row frees its disk space at once. Which explanation fits?"
   options:
-  - id: flag_hides_rows
-    text: After setting is_deleted, an ordinary SELECT automatically hides the order
-  - id: filter_delete_and_retain
-    text: Soft deletion requires query filtering, SQL DELETE changes row visibility, and refund facts should still be retained
-  - id: delete_frees_disk
-    text: If a row cannot be queried after SQL DELETE, its physical files have been reclaimed immediately
-  - id: keep_net_amount_only
-    text: After a successful refund, delete the order and payment records; keeping only the net amount is sufficient for reconciliation
-  answer: filter_delete_and_retain
-  explanation: "The three requirements concern a business marker, logical visibility, and financial facts: soft deletion needs a query filter, SQL DELETE changes row visibility, and the refund facts stay. is_deleted is a business field in this course, so queries need an explicit filter or a view that encapsulates it. Query invisibility after SQL DELETE does not mean disk space is released immediately; physical reclamation is a separate process. Deleting the order and payment records loses the links among orders, payments, and refunds, and a net amount cannot replace traceable reconciliation records."
-- id: q5
-  objective: Verify recovery through repeated replay, row-by-row comparison, and independent business transaction records.
-  prompt: A replayable workflow writes an order's PAID event to history, then crashes before updating current state. A corresponding payment record is available from an independent source. After recovery, what evidence would show the whole workflow is consistent?
+  - id: flag_delete_and_keep_facts
+    text: "A flag hides rows only from queries that filter on it, DELETE removes them from all queries, and the refund is kept"
+  - id: delete_the_refund
+    text: "Delete the order and its payment and refund with DELETE, which removes the rows and frees their space at the same moment"
+  - id: delete_mark_frees_space
+    text: "Load the order again with a delete mark, which removes the key and returns its disk space to the BE immediately"
+  - id: soft_delete_frees_space
+    text: "Set a business flag on the order, which hides it from every query and lets compaction drop its files at once"
+  answer: flag_delete_and_keep_facts
+  explanation: "A business flag such as is_deleted keeps the row and hides it only where queries filter on it, which suits an active-order report; DELETE removes rows from every query; a refund is a fact to keep, not to delete. Deleting the payment and refund erases the trail that finance needs, and no deletion frees space at once: compaction reclaims it later. A load's delete mark deletes the key for queries, and its space is also reclaimed later. A flag hides nothing from a query that does not filter on it."
+- id: replay_after_interruption
+  objective: "Recover from an interrupted multi-table write by replaying the whole batch."
+  prompt: "A workflow writes each event first to the history table and then to the current table. It crashed after writing an event to the history but before the current table. What recovers both tables correctly?"
   options:
-  - id: replay_and_reconcile
-    text: Replay the unfinished steps, compare current state and history by event and order, and reconcile with the independent payment record
-  - id: skip_existing_event
-    text: If event_id already exists in history, skip subsequent current-state and business transaction steps
-  - id: delivery_count_unchanged
-    text: If the delivery count has not increased after recovery, conclude that all business data has been correctly restored
-  - id: assume_atomic_writes
-    text: If event history was written successfully, conclude that the current table and independent business transaction records were also committed atomically
-  answer: replay_and_reconcile
-  explanation: "Recovery must finish or safely repeat each step, then compare the expected event, the current order state, and the independent payment fact without duplicating business results. The history write may have succeeded while the later writes did not, so skipping them preserves the gap. Delivery counts describe attempts, not the correctness of the business tables. Separate writes do not become an atomic multi-table transaction merely because history was written."
+  - id: replay_whole_batch
+    text: "Replay the whole batch: the history keeps each event once, and versions keep the newest state"
+  - id: skip_events_in_history
+    text: "Replay only the events that are not yet in the history, since those in it are already done"
+  - id: rebuild_current_by_time
+    text: "Copy the event with the latest arrival time of each order from the history to the current table"
+  - id: patch_by_hand
+    text: "Edit the current table by hand from the event that the workflow was writing when it crashed"
+  answer: replay_whole_batch
+  explanation: "Because the history is keyed by event_id and the current table resolves versions, writing an event again changes nothing that was already right, so replaying the whole batch completes every step that was missing. Skipping events found in the history skips exactly the current-table write that never happened. Arrival time does not identify the newest state. A hand edit fixes one order and leaves no repeatable recovery."
+- id: reconcile_with_ledger
+  objective: "Reconcile current state with independent payment, refund, and shipment records."
+  prompt: "After the replay, orders_current shows 250.00 paid and 150.00 refunded in total. How can the team show that these amounts are right?"
+  options:
+  - id: compare_with_independent_ledger
+    text: "Compare each order with its items, payments, and refunds in the independently kept ledger"
+  - id: replay_again
+    text: "Replay the events a third time, and accept the totals if they stay the same as before"
+  - id: count_records
+    text: "Check that the history has more records than the current table has orders"
+  - id: non_negative_net
+    text: "Check that paid minus refunded is not negative for any of the current orders"
+  answer: compare_with_independent_ledger
+  explanation: "An independent ledger, kept by another system, is evidence that the replay cannot shape: each order's amount must equal its items, its paid amount its payments, and its refunded amount its refunds. A third replay of idempotent writes repeats the same result, right or wrong. Record counts say nothing about amounts. Net receipts that are not negative can still be wrong."

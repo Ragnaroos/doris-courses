@@ -107,11 +107,12 @@ def wait_for(read, accepts, *, description, timeout=180, check_health=None):
 
 
 RESOURCE_REQUIREMENTS = {
-    # Kafka only adds one broker to the 12 GiB Doris cap. This keeps the
-    # optional lab usable on a 16 GiB development Mac while leaving headroom
-    # for Docker Desktop and the host.
-    "kafka": (14, 4, "12 GiB Doris cap plus 2 GiB Kafka budget"),
-    "cdc": (18, 4, "12 GiB Doris cap plus 6 GiB dependency budget"),
+    # environments/streaming/doris-resources.yml caps Doris at 6 GiB. Measured on
+    # Docker Desktop (Apple silicon): Doris used at most 2.9 GiB in either Lab,
+    # Kafka 0.4 GiB, the Flink JobManager 1.8 GiB, the TaskManager 1.1 GiB, and
+    # MySQL 0.5 GiB. The requirement is the cap plus the others' peaks, rounded up.
+    "kafka": (8, 4, "6 GiB Doris limit plus about 0.5 GiB for Kafka"),
+    "cdc": (10, 4, "6 GiB Doris limit plus about 3.5 GiB for MySQL and Flink"),
 }
 
 
@@ -134,7 +135,7 @@ def check_resources(profile="cdc"):
         raise RuntimeError(
             f"The {profile} streaming lab requires Docker capacity of at least "
             f"{required_memory} GiB RAM and {required_cpus} CPUs ({budget}). "
-            "Increase Docker Desktop resources or use a suitable local host. "
+            "Raise the memory in Docker Desktop (Settings > Resources), or use a machine with more. "
             "See environments/streaming/README.md. No containers were started."
         )
     print("Capacity is not free memory: check host/VM load and disk space before continuing.", flush=True)
@@ -269,6 +270,25 @@ def check_routine_load(lab, job):
         )
 
 
+def routine_load_state(lab, job):
+    """Return the SHOW ROUTINE LOAD row of one job as a dict of column name to value."""
+    job = identifier(job)
+    with lab.connection.cursor() as cursor:
+        cursor.execute(f"SHOW ROUTINE LOAD FOR {job}")
+        names = [column[0] for column in cursor.description]
+        rows = [dict(zip(names, row)) for row in cursor.fetchall()]
+    if len(rows) != 1:
+        raise RuntimeError(f"Expected one Routine Load job {job}; got {len(rows)}")
+    return rows[0]
+
+
+# The jobs that the optional Kafka lab creates: the main job and the practice job.
+KAFKA_LAB_JOBS = {
+    "ext_kafka_orders": r"course_orders_[0-9a-f]{12}",
+    "ext_kafka_practice": r"course_practice_[0-9a-f]{12}",
+}
+
+
 def cleanup_kafka_routine_load(lab):
     """Stop only stale jobs created by this optional Kafka lab."""
     with lab.connection.cursor() as cursor:
@@ -278,8 +298,8 @@ def cleanup_kafka_routine_load(lab):
     stale = []
     for job in jobs:
         name = job["Name"]
-        if (re.fullmatch(r"course_orders_[0-9a-f]{12}", name) is None
-                or job["TableName"] != "ext_kafka_orders"):
+        pattern = KAFKA_LAB_JOBS.get(job["TableName"])
+        if pattern is None or re.fullmatch(pattern, name) is None:
             raise RuntimeError(
                 f"Found an active Routine Load job outside this lab: {name}. "
                 "Stop it manually only after confirming it belongs to this lab."

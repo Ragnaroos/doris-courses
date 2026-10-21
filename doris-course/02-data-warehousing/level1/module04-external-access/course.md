@@ -1,90 +1,66 @@
 # Module 4: Querying External Data and Joining Lake Tables
 
-| Course Information | Details |
+| Course information | Value |
 | --- | --- |
 | Course | Data Warehousing with Apache Doris · Level 1 |
-| Product Version | Apache Doris 4.x |
-| Lab Version | Apache Doris 4.1.3 |
-| Estimated Time | About 50 minutes, including reading, the hands-on lab, and quiz |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox from Module 1, and a local lake environment that Lab 4 starts |
+| Estimated time | About 65 minutes: reading 25, Lab 30, quiz 10 |
 
-[Course contents](../README.md) · [Open Lab 4](lab04_query_iceberg.ipynb) · [Open Quiz 4](quiz04_internal_files_and_lake_tables.ipynb)
+[Course README](../../README.md) · [Open Lab 4](lab04_query_iceberg.ipynb) · [Open Quiz 4](quiz04_internal_files_and_lake_tables.ipynb)
 
-## Module Goal
+## Module goal
 
-This module introduces the differences between internal tables, external files, and lake tables, and how to access existing lake tables through Doris.
+Query data where it already is, an Iceberg table and its files in object storage, join it with Doris tables, and decide when to load it into Doris instead.
 
-Once the Iceberg environment is ready, you will be able to query orders in the lake, join internal tables, and verify results before and after loading.
+## Learning objectives
 
-## Learning Objectives
-
-After completing this module, you should be able to:
+After completing this module, you will be able to:
 
 1. Distinguish Doris internal tables, Parquet files, Iceberg tables, and External Catalogs.
-2. Choose between direct external queries and loading into internal tables based on exploration and repeated-analysis needs.
-3. Explain how Catalog, Database, and Table identify an external table.
-4. Identify duplicate dimension records or missing matches by comparing results before and after a join.
-5. With an Iceberg environment available, verify the same batch of orders through direct queries, joins, and after loading.
+2. Find a lake table through a Catalog and name it as catalog.database.table.
+3. Read an Iceberg table's snapshots and files, and explain which files a query of the table reads.
+4. Choose between querying external data in place and loading it into an internal table.
+5. Read files in object storage with the S3 table function and load them with INSERT INTO SELECT.
+6. Find duplicate or missing dimension rows by comparing results before and after a join.
 
-## Module Schedule
+## Module structure
 
-| Section | Learning Format | Suggested Time | Learning Outcome |
-| --- | --- | --- | --- |
-| 4.1 Querying internal tables, external files, and lake tables | Objects, configuration, and SQL | 15 minutes | Distinguish access paths and explain the boundaries of JOIN and loading |
-| Lab 4 | Hands-on practice (requires Iceberg) | 30 minutes | Verify that direct queries, joins, and loading all yield ten orders and 12220.60 |
-| Quiz 4 | Interactive quiz | 5 minutes | Check objects, access choices, table identification, and join results |
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 4.1 Files, Tables, and Catalogs | 5 min | What each of the four objects is |
+| 4.2 Connect a Catalog and Find a Table | 6 min | CREATE CATALOG, its two addresses, and catalog.database.table |
+| 4.3 Snapshots and Data Files | 4 min | Which files a query of an Iceberg table reads |
+| 4.4 Query in Place or Load | 3 min | When each fits, and what loading does not do |
+| 4.5 Files Without a Table: the S3 Table Function | 3 min | Read a fixed set of files, and keep their rows |
+| 4.6 Check a Join | 4 min | Duplicate and missing dimension rows |
+| Lab 4 | 30 min | Walk the Catalog, read snapshots and files, join, and load two ways |
+| Quiz 4 | 10 min | Six questions on these objectives |
 
-## 4.1 Querying internal tables, external files, and lake tables
+## 4.1 Files, Tables, and Catalogs
 
-### First distinguish files, tables, and access entry points
+Suppose historical orders are already in a data lake, and the customers are in Doris. Analysts want to query them together without first copying all the history into Doris. Four kinds of objects are involved:
 
-Suppose historical orders are already stored in a data lake, while recent customer information is in Doris.
-Analysts want to query them together without migrating all historical data just to explore one question.
-First distinguish these four types of objects:
-
-| Object | What it manages | Relationship to other objects |
+| Object | What it is | How it relates to the others |
 | --- | --- | --- |
-| Doris internal table | Table schemas and data managed by Doris | Can serve as an analytical table after loading |
-| Parquet file | A column-encoded data file | Can be read independently or serve as a lake table's data file |
-| Iceberg table | Table metadata, snapshots, and referenced data files | Uses table metadata to determine which files a query reads |
-| External Catalog | An entry point for Doris to access external system metadata and tables | Makes external tables queryable through Doris SQL |
+| Doris internal table | A table whose definition and data Doris stores and manages | What loading writes into |
+| Parquet file | A columnar data file | Can be read on its own, or be one of a lake table's files |
+| Iceberg table | Metadata, snapshots, and the data files they list | Its metadata decides which files a query reads |
+| External Catalog | Doris's entry to another system's metadata and tables | Makes the external tables queryable with Doris SQL |
 
-Parquet describes the columns and data within a file; Iceberg organizes multiple files into a manageable table.
-A snapshot records the data files referenced by a particular version of a table. When the table changes, metadata describes the new table state,
-which readers use to select files. Querying an Iceberg table therefore requires access to both its metadata and data files.
-
-An External Catalog tells Doris where to find the table: after the metadata service connection and permissions are configured,
-Doris can retrieve the schema, plan reads, access the corresponding files, and perform filtering, joins, and aggregation.
-When configuring a Catalog, check access permissions for both the metadata service and file storage.
-For specific connection types, see [Iceberg Catalog](https://doris.apache.org/docs/4.x/lakehouse/catalogs/iceberg-catalog/).
+Parquet describes the columns and rows in one file; Iceberg turns many files into one table that can change. A query of an Iceberg table therefore needs both its metadata and its files.
 
 ```text
-Standalone Parquet ── File TVF ──────────┐
-                                 ├─ SQL query results
-Iceberg metadata and data files ─ Catalog ┘      │
-                                       └─ INSERT INTO ... SELECT
-                                                  │
-                                                  ▼
-                                             Doris internal table
+Files in object storage ── S3 table function ─────┐
+                                                 ├─ SQL results ── INSERT INTO ... SELECT ──> Doris internal table
+Iceberg metadata and data files ── Catalog ───────┘
 ```
 
-### When should you query directly, and when should you load?
+## 4.2 Connect a Catalog and Find a Table
 
-| Scenario | Initial choice | Other considerations |
-| --- | --- | --- |
-| First exploration of historical data | Query directly through a Catalog | Availability of external services, network, permissions, and metadata |
-| Join historical lake data with internal customers | Cross-Catalog JOIN | Whether join keys are unique and any customers are missing |
-| Repeatedly query the same business snapshot | Load into an internal table for analysis | Synchronization frequency, storage cost, and how changes are applied |
-| Inspect a single standalone file | File TVF | File format, fields, and access parameters |
+An External Catalog tells Doris where another system's tables are. For Iceberg with a REST catalog service, it needs two kinds of addresses: the metadata service, to find tables, snapshots, and file lists, and the object store, to read the files. Lab 4's preparation cell creates the Catalog with the course's addresses and shows the statement it ran, which you can copy.
 
-"Query directly first" is an access choice, not a guarantee that all external queries are equally fast;
-"loading" saves the results of this query; it does not automatically create an ongoing synchronization task.
-Object-storage access through a file TVF is introduced in Module 5; this lab does not include a standalone-file experiment.
-
-### Which two types of addresses must be configured to connect to lake tables?
-
-The lab setup tool creates the Catalog automatically. The same REST connection configuration is shown below to explain what the tool does.
-**External environment example; do not rerun it alongside the lab.** Names and connection parameters are placeholders; the lab actually uses the lab database name
-to generate a separate Catalog, and the returned source is the entry point for this query. Do not create another entry point and mix up table names.
+**External environment example; do not run it alongside the Lab.** The same statement, with placeholders for your own services. The Lab names its Catalog after the lab database and queries through it; do not create a second Catalog for the same tables, or their names get mixed up.
 
 <!-- external-service-example -->
 ```sql
@@ -98,31 +74,20 @@ CREATE CATALOG <catalog_name> PROPERTIES (
 );
 ```
 
-| Configuration | Purpose in this course |
+| Property | Purpose in this course |
 | --- | --- |
-| type, iceberg.catalog.type | Select the Iceberg table format and REST metadata service |
-| iceberg.rest.uri | Find tables, snapshots, and file lists through the metadata service |
-| warehouse | Object-storage location used by the course sample; must match the REST service configuration |
-| s3.endpoint, region, access credentials | Allow Doris nodes to read the actual data files |
-| use_path_style | Put the bucket name in the URL path, which the course's Silo service expects |
-| iceberg.rest.view-enabled | Disable external view support because this lab uses only lake tables |
+| type, iceberg.catalog.type | The Iceberg table format, with a REST metadata service |
+| iceberg.rest.uri | Where Doris finds tables, snapshots, and file lists |
+| warehouse | Where the tables' files are in object storage; it must match the REST service's setting |
+| s3.endpoint, s3.region, keys | Let the BEs read the files |
+| use_path_style | Put the bucket name into the URL's path, which the course's Silo expects |
+| iceberg.rest.view-enabled | Turn off Iceberg views, which the course does not use |
 
-The service addresses on the course container network are `http://course-lake-rest:8181` and
-`http://course-lake-silo:9000`, not localhost on the host running the notebook.
-The object store is [Silo](https://github.com/pgsty/silo), an open-source fork of the MinIO server maintained by the Pigsty project.
-It speaks the S3 API, so Doris reaches it through the same S3 properties it uses for Amazon S3 or MinIO;
-the course uses Silo because MinIO no longer publishes community container images.
-If you can retrieve the table definition but cannot read orders, check the metadata and file entry points separately.
-Configure credentials only in the lab environment; do not put real secrets in the course notes.
+On the course's Docker network, the services are `http://course-lake-rest:8181` and `http://course-lake-silo:9000`: names that Doris resolves, not localhost on the machine of your notebook. The object store is [Silo](https://github.com/pgsty/silo), an open-source fork of the MinIO server maintained by the Pigsty project; it speaks the S3 API, so Doris reaches it with the same properties as Amazon S3. The course uses Silo because MinIO no longer publishes community container images. When Doris finds a table's definition but cannot read its rows, check the two addresses separately. Use real credentials only in the environment, never in notes or notebooks. See [Iceberg Catalog](https://doris.apache.org/docs/4.x/lakehouse/catalogs/iceberg-catalog/).
 
-### How does a Catalog identify an external table?
+### catalog.database.table
 
-The fully qualified table name is `catalog.database.table`. For example, a lake table can be registered as
-`wwi_lake.sales.orders`: wwi_lake is the Catalog name in Doris, sales is the external database,
-and orders is the lake table. This is not a Parquet file path.
-
-The following illustrates the query structure; use the actual fully qualified table name when running it.
-After preparing the lake table, the course notebook saves its fully qualified name in the `source` variable for subsequent queries to reference directly.
+Doris's own tables are in the Catalog `internal`. A table in another Catalog has a three-part name, `catalog.database.table`: for example `wwi_lake.sales.orders`, where `wwi_lake` is the Catalog in Doris, `sales` the external database, and `orders` the lake table. It is a name, not a file path. `SHOW CATALOGS`, `SHOW DATABASES FROM <catalog>`, and `SHOW TABLES FROM <catalog>.<database>` walk down the three parts, and `SHOW CREATE TABLE` shows a lake table's kind and location: `ENGINE=ICEBERG_EXTERNAL_TABLE` and its `LOCATION` in object storage.
 
 ```sql
 SELECT order_date, COUNT(*) AS sample_orders, SUM(order_amount) AS amount
@@ -131,30 +96,51 @@ GROUP BY order_date
 ORDER BY order_date;
 ```
 
-If the external table contains this course's ten-order projection, expect five orders and 3944.20 on the first day,
-and five orders and 8276.40 on the second day. This queries the external table; no data has been written to a Doris internal table yet.
+With the course's ten orders, expect five orders and 3944.20 on the first day and five orders and 8276.40 on the second. The query reads the lake table; nothing is stored in Doris. The Lab keeps its table's full name in the variable `source`.
 
-### Why count rows after a JOIN?
+## 4.3 Snapshots and Data Files
 
-If a customer has two dimension-table records, an order for 100.00 may produce two joined rows,
-totaling 200.00 after aggregation. Correct JOIN syntax does not guarantee correct business amounts.
-Conversely, a missing customer can cause an order to disappear in an inner join.
+Each commit to an Iceberg table, such as an `INSERT`, writes new data files and a new **snapshot**: the list of files that make up the table at that moment. A query of the table reads the files of its current snapshot. Doris exposes Iceberg's metadata as tables named after the table with a suffix:
+
+| Metadata table | What it lists |
+| --- | --- |
+| `<table>$snapshots` | Each snapshot: its time, its parent, and its operation, such as `append` |
+| `<table>$files` | The data files of the current snapshot, with their format and record counts |
+| `<table>$history` | Which snapshot was current when |
+
+In the course, **Doris writes the lake table**: Lab 4's preparation inserts the ten orders, which makes one `append` snapshot and one Parquet file. In a real data lake, other engines such as Spark or Flink usually write the tables, and Doris reads them through the same Catalog. When a query plans a scan of an Iceberg table, Doris also passes its filters to Iceberg, which can skip files whose column statistics rule them out: the plan shows them as `icebergPredicatePushdown`.
+
+## 4.4 Query in Place or Load
+
+| Situation | First choice | What to weigh |
+| --- | --- | --- |
+| Exploring history for the first time | Query in place through the Catalog | The external services' availability, network, permissions |
+| Joining lake history with Doris's customers | A query across Catalogs | Whether the join keys are unique, and whether customers are missing |
+| The same snapshot queried again and again | Load it into an internal table | How often to refresh, the storage, and how changes are applied |
+| A fixed set of files, without a table | The S3 table function (4.5) | The files' format, columns, and access |
+
+Querying in place is a choice of where the data stays, not a promise that every external query is fast. Loading with `INSERT INTO ... SELECT` stores the rows that one query returned: it is a copy of that moment, and it does not follow later changes in the lake unless you load again.
+
+## 4.5 Files Without a Table: the S3 Table Function
+
+A **table function** returns rows like a table. `S3(...)` reads files in S3-compatible object storage: it takes the path of a file, or of several with a `*`, the format, and the store's address and keys, and reads exactly those files. `DESC FUNCTION S3(...)` shows the columns that it finds in a Parquet file. `SELECT` alone stores nothing; `INSERT INTO <table> SELECT ... FROM S3(...)` writes the rows into an internal table in the same statement.
+
+Lab 4 points the function at the lake table's own data file, which `$files` lists, and loads it into `orders_from_file`. The function does not read Iceberg snapshots: if the table later deleted rows in a new snapshot, the old file would still contain them, while a query through the Catalog reads only the current snapshot's files. Use the function for a fixed set of files, and the Catalog for a table. Module 5 compares it with Broker Load. See the [S3 table function](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/s3/).
+
+## 4.6 Check a Join
+
+If a customer has two rows in a dimension table, an order of 100.00 joins twice and sums to 200.00: a correct join can give a wrong amount. A customer missing from the dimension makes an order disappear from an inner join.
 
 ```text
 Order: order_id=1, customer_id=832, amount=2300.00
-          │ Join on customer_id
-          ├─ Customer row A → One order result
-          └─ Customer row B → Another order result (duplicate)
+          │ join on customer_id
+          ├─ customer row A → one result row
+          └─ customer row B → a second result row (a duplicate)
 ```
 
-The diagram uses duplicate customers to illustrate join fanout. The lab uses a unique-key customer table so each order matches at most one customer record;
-then it checks row counts and amounts before and after the join, and compares results field by field after loading.
+Lab 4's customer table is a Unique Key table, so each order matches at most one customer. Check row counts and amounts before and after a join, and compare loaded tables field by field.
 
-LEFT JOIN retains the orders on the left; orders with no matching customer still appear, with NULL customer fields;
-INNER JOIN retains only matched orders. When reconciling all orders, first use LEFT JOIN to identify missing customers
-to avoid misinterpreting "fewer orders after the join" as a decline in business volume.
-
-After completing the external lab, run the following query in the course's internal lab database to check again for missing join matches:
+`LEFT JOIN` keeps every order on the left, with `NULL` customer fields when no customer matches; `INNER JOIN` keeps only the matched orders. To reconcile all orders, use a `LEFT JOIN` and count the missing customers, so that fewer rows after a join are not mistaken for fewer orders. After Lab 4, in the lab database:
 
 ```sql
 SELECT COUNT(*) AS missing_customers
@@ -163,12 +149,7 @@ LEFT JOIN customers_sample c ON o.customer_id = c.customer_id
 WHERE c.customer_id IS NULL;
 ```
 
-The expected result is 0; otherwise, check customer keys and the data scope first rather than treating an aggregate with missing orders as a complete answer.
-
-### What should you check after loading?
-
-The lab explicitly selects six fields to write into `orders_from_lake`, rather than relying on the implicit order of external fields.
-After the query results have been loaded into the internal table, run:
+Expect 0; otherwise check the customer keys and the data's scope before trusting a total. After loading, the internal table must give the lake table's result:
 
 ```sql
 SELECT order_date, COUNT(*) AS sample_orders, SUM(order_amount) AS amount
@@ -177,48 +158,36 @@ GROUP BY order_date
 ORDER BY order_date;
 ```
 
-This result should match a direct query of the lake table; also compare order IDs, customers, dates, amounts, line counts, and sources
-to avoid different errors canceling each other out in the aggregate.
+## Lab 4: Query an Iceberg Table and Its Files
 
-**Lab requirements:** The course Doris instance is running, and Docker is available. The lab starts Silo and an Iceberg REST Catalog
-as two auxiliary containers and prepares the sample; see the [lake table environment notes](../../environments/lakehouse/README.md) for ports and data retention.
+Open [Lab 4: Query an Iceberg Table and Its Files](lab04_query_iceberg.ipynb). You:
 
-## Hands-on Lab 4: Joining lake tables and internal tables
+1. Start the lake services, create the Catalog, and read the SQL that the preparation ran.
+2. Find the table with `SHOW CATALOGS`, `SHOW DATABASES FROM`, and `SHOW CREATE TABLE`, and read its `$snapshots` and `$files`.
+3. Query the ten orders in the lake, join them with `customers_sample`, and load them into `orders_from_lake`.
+4. Read the table's data file with the S3 table function and load it into `orders_from_file`.
+5. Practice: the second day's orders, with missing customers counted, and the plans of the lake and the internal table.
 
-Before starting, complete Module 1–3 and continue using the course's isolated lab database.
+You need the course sandbox from Module 1. The Lab starts Silo and an Iceberg REST Catalog on 127.0.0.1:51900 and 51818; the first start downloads their images. See the [lake table environment notes](../../environments/lakehouse/README.md) for the ports and stopping them. The sample is the ten orders of Module 1, under the WWI data's MIT license.
 
-Open [Lab 4](lab04_query_iceberg.ipynb) and complete these steps in order:
+## Summary
 
-1. Run the setup step to start the lake table services and obtain the actual Iceberg table name.
-2. Query the ten orders in the lake directly and verify the amount of 12220.60.
-3. Join the internal customer table and check the row count, then load into an internal orders table for reconciliation.
+- A Parquet file is columnar data, an Iceberg table is metadata and snapshots over such files, and an External Catalog is Doris's entry to another system's tables; none of them copies data into Doris.
+- A Catalog needs the metadata service's address and the object store's address; `SHOW CATALOGS`, `SHOW DATABASES FROM`, and `SHOW TABLES FROM` walk down to a `catalog.database.table` name.
+- A query of an Iceberg table reads the files of its current snapshot; `$snapshots` and `$files` show them.
+- Query in place to explore and join; load into an internal table for repeated analysis, knowing that the copy does not follow later changes.
+- The S3 table function reads exactly the files it is given, ignoring any table's snapshots, and `INSERT INTO ... SELECT` keeps its rows in Doris.
+- A duplicate dimension key multiplies joined rows and a missing key drops them from an inner join: count rows and amounts before and after, and count missing matches with a `LEFT JOIN`.
 
-### Data sources and notes
+## Quiz 4
 
-The lab uses a historical subset of Microsoft's official WWI simulated wholesale business, retaining the original customer and product identifiers.
-See the [data notes](../../datasets/README.md) for fields, business definitions, and expected results.
-The setup step writes the six fields and ten rows from orders in datasets/wwi/sample.json into an Iceberg table; the data files are stored in the course object storage.
-
-See the [Level 1 extension labs](../extensions/README.md) for additional exercises, run in separate `ext_*` tables without rewriting this lab's business results.
-
-## Module Summary
-
-- Parquet is a file format, Iceberg is a table format that manages snapshots and files, and an External Catalog is an access entry point, not data replication.
-- Start with direct queries for exploration and consider loading for repeated analysis; refreshing and handling changes after loading still require an explicit design.
-- catalog.database.table identifies an external table; the notebook uses the fully qualified name returned by the setup step.
-- Duplicate dimension keys multiply JOIN results, while missing keys drop rows from inner joins; check row counts, amounts, and detail records together.
-- Verify direct lake-table queries, join results, and the internal table after loading separately; this sample has ten orders and a pre-tax amount of 12220.60 in each case.
-
-## Knowledge Quiz 4: Querying External Data and Joining Lake Tables
-
-After completing the reading and lab, open [Quiz 4](quiz04_internal_files_and_lake_tables.ipynb).
-The quiz contains five single-choice questions and does not require Doris or external services; read the answer explanations after submitting.
+Open [Quiz 4: Querying External Data and Joining Lake Tables](quiz04_internal_files_and_lake_tables.ipynb). It has six single-choice questions and needs no running environment.
 
 Next module: [Module 5: Batch and Continuous Data Ingestion](../module05-ingestion/course.md).
 
-## Official References
+## References
 
-- [Data catalog overview](https://doris.apache.org/docs/4.x/lakehouse/catalog-overview/)
-- [Iceberg Catalog](https://doris.apache.org/docs/4.x/lakehouse/catalogs/iceberg-catalog/)
-- [S3 file table-valued function](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/s3/)
-- [INSERT INTO SELECT](https://doris.apache.org/docs/4.x/data-operate/import/import-way/insert-into-manual/)
+- [Apache Doris: Catalog overview](https://doris.apache.org/docs/4.x/lakehouse/catalog-overview/)
+- [Apache Doris: Iceberg Catalog](https://doris.apache.org/docs/4.x/lakehouse/catalogs/iceberg-catalog/)
+- [Apache Doris: S3 table function](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/s3/)
+- [Apache Doris: INSERT INTO SELECT](https://doris.apache.org/docs/4.x/data-operate/import/import-way/insert-into-manual/)

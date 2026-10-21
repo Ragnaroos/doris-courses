@@ -1,6 +1,6 @@
 # Level 1 Extension Labs
 
-These notebooks supplement independent operations in the main course without adding modules or videos or replacing the seven main labs.
+These optional notebooks add hands-on work to the main course; they add no modules and replace none of the seven Labs.
 Complete Labs 1, 4, 5, 6, and 7 in main-course order before running the extensions; all use the course's single-container sandbox.
 
 | Lab | Related modules | Validation |
@@ -21,21 +21,12 @@ Generating Parquet files for the extensions requires PyArrow. Install it from th
 Run only one notebook at a time in the same lab database. Each extension lists the `ext_*` tables it rebuilds at the beginning;
 it does not modify main-course business tables, delete historical files from object storage, or restart other clusters.
 Object storage experiments reuse the course object storage from Lab 4 (Silo) and write to an independent random path each time. On failure, preserve job status and output before troubleshooting.
-Allow 80–115 minutes in total; this is additional lab time, not video duration.
-
-Maintainers can run the full regression from the course directory using Python with the above dependencies installed:
-
-```bash
-DW_ALLOW_WRITES=yes DW_DATABASE=dw_course_l1_extensions_check \
-  .venv/bin/python scripts/run_labs.py --iceberg --solutions --extensions
-```
-
-If main-course results already exist, use `--extensions-only` instead. The script does not save notebook execution outputs.
+Allow 80–115 minutes in total, in addition to the seven Labs.
 
 ## Boundaries
 
 - 100,000 rows and a single node provide only local observations, not proof of production concurrency, failure recovery, or a fixed performance gain.
-- The Group Commit extension compares acknowledgment and query visibility for individual requests; it does not verify shared transactions across requests or sustained throughput.
+- The Group Commit extension compares acknowledgment and query visibility request by request, and does not measure sustained throughput; Lab 5 shows ten async_mode loads sharing one transaction.
 - Schema changes cover only this lab's column additions and type changes, not every model and change combination.
 - Conflict detection runs in an independent staging table; it is not an atomic rejection service for concurrent consumers.
-- Kafka and MySQL/Flink CDC have separate [Lab 5A / 5B optional environments](../../environments/streaming/README.md) and are not included in this directory's three basic extensions or the `--extensions` execution scope. CDC_STREAM and continuous files in object storage are still only introduced.
+- Kafka and MySQL/Flink CDC have their own optional Labs 5A and 5B, with [their own environment](../../environments/streaming/README.md), outside these three extensions. CDC_STREAM and continuous file ingestion from object storage are covered only in the [optional reading on continuous ingestion](../module05-ingestion/optional05_continuous_ingestion.md).

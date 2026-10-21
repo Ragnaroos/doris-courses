@@ -1,73 +1,87 @@
 title: "Module 1 Quiz: Meet Doris and Analyze Your First Orders"
-description: "Five single-choice questions; no database connection required. View explanations after submitting."
+description: "Six single-choice questions; no database connection required. View explanations after submitting."
 questions:
-- id: q1
-  objective: "Distinguish between completing a transaction and analyzing a batch of orders."
-  prompt: "A retailer is separating checkout requests from a report over last month's orders. Which request belongs to the analytical workload?"
+- id: transaction_or_analysis
+  objective: "Distinguish completing a transaction from analyzing a batch of orders."
+  prompt: "A retailer separates checkout requests from a report on last month's orders. Which request belongs to the analytical workload?"
   options:
   - id: submit_and_deduct
-    text: "Submit an order and deduct inventory in the same business operation"
+    text: "Submit an order and deduct its items from inventory in one business operation"
   - id: summarize_orders_by_date
-    text: "Scan a batch of orders and calculate order counts and total amounts by date"
+    text: "Read a month of orders and count them and total their amounts by date"
   - id: address_lookup
-    text: "Look up an order's current address for a user to confirm and change"
+    text: "Look up one order's delivery address so that the customer can confirm or change it"
   - id: record_payment_status
-    text: "Record a payment result and update that order's status"
+    text: "Record a payment result and update the status of the order that it paid for"
   answer: summarize_orders_by_date
-  explanation: "Scanning and summarizing multiple orders by date is analytics, even if only a few rows are returned. Placing an order and deducting inventory completes a transaction, not cross-order analysis. Looking up one order's address uses SELECT, but this point lookup serves a transaction rather than analytics. Recording a payment result and updating the order's status touches more than one field or table, but that does not make it analytical work either."
-- id: q2
+  explanation: "Reading many orders and summarizing them by date is analysis, even when the result is a few rows. Submitting an order and deducting inventory completes one transaction. Looking up one order's address uses SELECT, but it serves the customer's transaction, not an analysis across orders. Recording a payment and updating an order's status changes one business object, which is also transaction work."
+- id: doris_between_systems
   objective: "Explain Doris's role between business databases and analytics users."
-  prompt: "An online shop must keep checkout responsive while analysts explore hourly sales trends. Which division of work fits this requirement?"
+  prompt: "An online shop must keep checkout fast while analysts explore hourly sales trends over two years of orders. Which division of work fits?"
   options:
   - id: source_transactions_doris_analytics
-    text: "The source system handles transactions, while Doris receives business data and provides queries for analytics users"
-  - id: reuse_transaction_designs
-    text: "After connecting with the MySQL protocol, all transaction designs from the source business database can be reused directly"
+    text: "The shop's database handles checkout; Doris receives the order data and answers the analysts' queries"
+  - id: doris_handles_checkout
+    text: "Doris replaces the shop's database for checkout, since it can also answer the analysts' queries"
+  - id: analysts_query_source
+    text: "The analysts query the shop's database directly, and Doris keeps a backup copy of its tables"
   - id: doris_only_stores
-    text: "Doris only stores data; report computations must still run in the source business database"
-  - id: connection_syncs_changes
-    text: "Once the Doris connection is configured, subsequent changes to source business tables synchronize continuously"
+    text: "Doris stores the orders, and the shop's database computes the hourly trends from Doris's copy"
   answer: source_transactions_doris_analytics
-  explanation: "The source system continues to process transactions, while Doris receives the business data and handles analytics in this course. Compatibility with the MySQL protocol does not imply identical transaction semantics, features, or suitable workloads. Doris itself provides analytical computation and queries; it is not merely a passive copy of the source business database. A configured connection only establishes access; continuous synchronization of source changes still requires ingestion tasks and the corresponding configuration."
-- id: q3
-  objective: "Explain the responsibilities of Frontend (FE) and Backend (BE) in a storage-compute integrated environment."
-  prompt: "A SQL client sends an order aggregation to the course's storage-compute integrated Doris cluster. Before diagnosing a slow scan, which Frontend (FE) and Backend (BE) responsibilities should the team expect?"
+  explanation: "The business database keeps doing the transactions, and Doris receives the order data and does the analytical work, so heavy analysis does not slow checkout. Doris is an analytical database, not a replacement for the checkout database. Analysts querying the shop's database directly is exactly the load that slows checkout, and a backup copy answers no query. Doris computes on the data it stores; the trends are its work, not the source database's."
+- id: fe_and_be_roles
+  objective: "Explain what the Frontend (FE) and the Backend (BE) do in an integrated storage and compute deployment."
+  prompt: "A SQL client sends an order aggregation to the course's sandbox, which uses the integrated storage and compute architecture. Which split of the work between the Frontend (FE) and the Backend (BE) should the team expect?"
   options:
-  - id: fe_scans_be_persists
-    text: "FE stores metadata and performs detail scans, while BE only persists files"
-  - id: client_splits_plan
-    text: "The client splits the distributed execution plan, and FE forwards each fragment to BE"
-  - id: fe_stores_table_data
-    text: "FE stores internal table data, while BE caches hot data and returns query results"
   - id: fe_plans_be_executes
-    text: "FE receives SQL and plans and coordinates queries, while BE stores internal table data and executes the plan"
+    text: "The FE receives the SQL and plans the query; the BE stores the data and runs the plan"
+  - id: fe_scans_be_persists
+    text: "The FE keeps the metadata and scans the order rows; the BE only writes the files to disk"
+  - id: client_splits_plan
+    text: "The client splits the query into a plan, and the FE forwards each piece of it to the BE"
+  - id: fe_stores_table_data
+    text: "The FE stores the tables' data, and the BE keeps a cache of the hot data and returns results"
   answer: fe_plans_be_executes
-  explanation: "FE receives SQL and plans and coordinates the query, while BE stores internal table data and executes the plan. This is the division of responsibilities in this section's storage-compute integrated environment and should not be applied directly to every deployment mode. FE manages metadata, but BE performs the detail scans and computation. The client only submits SQL; FE generates and coordinates the distributed plan. Saying that FE stores internal table data confuses metadata with user table data; BE stores internal table data in a storage-compute integrated environment."
-- id: q4
-  objective: "Connect to Doris and execute SQL to create tables, insert data, and aggregate by group."
-  prompt: "Each row in orders_sample represents one order. How should you query order counts and amounts by date with a consistent sort order?"
+  explanation: "The FE receives the SQL, manages the metadata, and plans and coordinates the query, while the BE stores the tables' data and scans, filters, and aggregates it; in the integrated storage and compute architecture the BE does both storing and computing. The FE manages metadata but does not scan the data. The client only sends SQL: the FE builds the distributed plan. The tables' data lives on the BE, not on the FE."
+- id: what_the_mysql_protocol_gives
+  objective: "Explain what connecting with the MySQL protocol gives you, and what it does not."
+  prompt: "A team connects its MySQL client and a BI tool with a MySQL driver to Doris, and both work. SELECT VERSION() returns 5.7.99. Which conclusion is right?"
   options:
+  - id: tools_send_sql_only
+    text: "The tools can send SQL to Doris; data still has to be loaded, and Doris's SQL is its own"
+  - id: doris_mirrors_mysql
+    text: "Doris now mirrors the team's MySQL database and keeps its tables up to date on its own"
+  - id: everything_like_mysql_57
+    text: "Doris behaves like MySQL 5.7 in every statement and setting, as its version number says"
+  - id: mysql_server_retired
+    text: "The team's MySQL server now keeps its tables in Doris, so that it can be shut down"
+  answer: tools_send_sql_only
+  explanation: "The MySQL protocol lets MySQL clients and drivers connect and send SQL; loading or synchronization still has to bring the data in, and Doris's SQL, table models, and settings are its own. A connection copies no data, so nothing is mirrored. 5.7.99 is the protocol version that Doris reports to MySQL clients, not a promise of MySQL 5.7 behavior; the Doris version is in SHOW FRONTENDS and SHOW BACKENDS. Connecting to Doris changes nothing about the MySQL server or its tables."
+- id: filter_and_group_by_date
+  objective: "Write SQL that filters orders and summarizes them by date."
+  prompt: "Each row of orders_sample is one order. Which query returns, for each date, the number of orders of at least 300 and their total amount, sorted by date?"
+  options:
+  - id: where_then_group_by_date
+    text: "WHERE order_amount >= 300, GROUP BY order_date, with COUNT(*) and SUM(order_amount), ORDER BY order_date"
   - id: group_by_order_id
-    text: "Group by order_id, calculate COUNT(*) and SUM(order_amount), then sort by date"
-  - id: group_by_date_count_sum
-    text: "Group by order_date, calculate COUNT(*) and SUM(order_amount), then sort by date"
-  - id: sort_without_grouping
-    text: "Sort directly by order_date and output each order ID and amount row by row"
-  - id: group_by_date_average
-    text: "Group by order_date, calculate COUNT(*) and AVG(order_amount), then sort by date"
-  answer: group_by_date_count_sum
-  explanation: "GROUP BY order_date sets date-level granularity, COUNT and SUM calculate the metrics, and ORDER BY ensures display order; the count relies on one row per order. Grouping by order ID keeps order-level granularity rather than producing daily summaries. ORDER BY alone only sorts; it does not combine orders from the same day into one row. AVG gives the average order amount and cannot replace the daily total."
-- id: q5
-  objective: "Validate data using details, row counts, and amounts, and distinguish pre-tax order amounts from payments received."
-  prompt: "A store exports 20 sample orders with a pre-tax total of 8600 yuan. The exported fields contain no payment information. Which conclusion is supported by the data?"
+    text: "WHERE order_amount >= 300, GROUP BY order_id, with COUNT(*) and SUM(order_amount), ORDER BY order_date"
+  - id: order_by_without_group
+    text: "WHERE order_amount >= 300 and ORDER BY order_date, listing each order's ID and amount, one row per order"
+  - id: average_instead_of_sum
+    text: "WHERE order_amount >= 300, GROUP BY order_date, with COUNT(*) and AVG(order_amount), ORDER BY order_date"
+  answer: where_then_group_by_date
+  explanation: "WHERE keeps the orders of at least 300 before grouping, GROUP BY order_date makes one row per date, COUNT(*) counts the orders because the table has one row per order, SUM totals their amounts, and ORDER BY sorts the dates. Grouping by order_id keeps one row per order, not per date. ORDER BY alone only sorts; it does not combine a day's orders into one row. AVG gives the average order amount, not the total."
+- id: what_an_amount_shows
+  objective: "Tell what an order's pre-tax amount measures, and what the total of a sample can and cannot show."
+  prompt: "A store exports 20 sampled orders whose pre-tax amounts total 8,600.00. The export has no payment fields. Which conclusion does the data support?"
   options:
-  - id: whole_day_total
-    text: "All orders at this store that day total 8600 yuan"
-  - id: all_unpaid
-    text: "All 20 orders are unpaid, and payments received total zero"
   - id: sample_pre_tax_total
-    text: "This sample's pre-tax order amount is 8600 yuan"
-  - id: every_amount_correct
-    text: "Every amount in this sample is correct because the total is 8600 yuan"
+    text: "The 20 sampled orders amount to 8,600.00 before tax"
+  - id: whole_day_total
+    text: "All the store's orders that day amount to 8,600.00 before tax"
+  - id: all_unpaid
+    text: "None of the 20 orders is paid, since the export shows no payments"
+  - id: amount_received
+    text: "The store received 8,600.00 from these customers for the orders"
   answer: sample_pre_tax_total
-  explanation: "The supported conclusion is limited to the sample and its pre-tax order amount. The sample does not represent all of the store's transactions for the entire day. The absence of payment fields does not imply that the orders are unpaid. A matching total can still hide offsetting errors in individual records."
+  explanation: "The data supports a statement about the sample and about its pre-tax order amounts: what was ordered, before tax. A sample of 20 orders says nothing about the store's other orders that day. A missing payment field does not mean that the orders are unpaid: the export simply holds no payment data. An order amount is what was ordered, not money received; payments need payment or account data."

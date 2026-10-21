@@ -52,20 +52,21 @@ class LearningFlowTest(unittest.TestCase):
                          "Lightweight Schema Change", "Heavyweight Schema Change"):
             self.assertIn(fragment, quality)
 
-    def test_profile_example_restores_session_and_explains_fields(self):
-        reading = self.reading("module02-architecture")
-        source = re.search(r"```python\n(.*?)```", reading, re.DOTALL)[1]
+    def test_profile_step_restores_session_and_lesson_explains_fields(self):
+        source = self.notebook_cells("module02-architecture")["profile"]
         lab = Mock()
-        for previous in (True, False):
+        for previous in ((1, 0), (0, 1)):
             lab.reset_mock()
-            lab.query.return_value = [(previous,)]
-            exec(compile(source, "profile-reading", "exec"), {"lab": lab})
-            lab.execute.assert_any_call("SET enable_profile = %s", (previous,))
-        lab.sql.side_effect = RuntimeError("query failed")
+            lab.query.return_value = [previous]
+            exec(compile(source, "lab2-profile", "exec"), {"lab": lab, "show_records": Mock()})
+            lab.execute.assert_any_call("SET enable_profile = true, enable_sql_cache = false")
+            self.assertEqual(lab.execute.call_args.args, ("SET enable_profile = %s, enable_sql_cache = %s", previous))
+        lab.scan_profile.side_effect = RuntimeError("query failed")
         with self.assertRaisesRegex(RuntimeError, "query failed"):
-            exec(compile(source, "profile-reading", "exec"), {"lab": lab})
-        self.assertEqual(lab.execute.call_args.args, ("SET enable_profile = %s", (False,)))
-        for field in ("VersionCount", "CompactionStatus", "TabletId", "SHOW QUERY PROFILE"):
+            exec(compile(source, "lab2-profile", "exec"), {"lab": lab, "show_records": Mock()})
+        self.assertEqual(lab.execute.call_args.args, ("SET enable_profile = %s, enable_sql_cache = %s", (0, 1)))
+        reading = self.reading("module02-architecture")
+        for field in ("VersionCount", "CompactionStatus", "TabletId", "last_query_id()", "RowsKeyRangeFiltered"):
             self.assertIn(field, reading)
 
     def test_catalog_reading_matches_fixture_properties(self):
@@ -75,12 +76,10 @@ class LearningFlowTest(unittest.TestCase):
                          '"use_path_style"="true"', '"iceberg.rest.view-enabled"="false"'):
             self.assertIn(fragment, reading)
             self.assertIn(fragment, fixture_source)
-        self.assertIn("External environment example; do not rerun it alongside the lab", reading)
+        self.assertIn("External environment example; do not run it alongside the Lab", reading)
 
-    def test_ingestion_keeps_cdc_boundary_and_optional_accounting(self):
+    def test_ingestion_keeps_the_optional_accounting_reading(self):
         reading = self.reading("module05-ingestion")
-        cdc = reading.split("## 5.8 Streaming Job and CDC_STREAM", 1)[1].split("## 5.9", 1)[0]
-        self.assertIn("Experimental", cdc.split("###", 1)[0])
         self.assertIn('DEFAULT "CREATED"', reading)
         self.assertIn("optional05_invoice_and_receipts.md", reading)
         cells = self.notebook_cells("module05-ingestion")
@@ -226,39 +225,51 @@ class LearningFlowTest(unittest.TestCase):
             lab.query.assert_called_with(
                 "SELECT COUNT(*) - COUNT(DISTINCT order_id) FROM orders_clean")
 
-    def test_external_examples_have_explicit_scope_and_observation(self):
-        path = next((ROOT / "level1/module05-ingestion").glob("course*.md"))
-        content = path.read_text()
-        examples = re.findall(r"### Reading example:(.*?)(?=\n## |\Z)", content, re.DOTALL)
-        self.assertEqual(len(examples), 4)
-        for example in examples:
-            self.assertIn("External-environment example; not executed in the lab", example)
-            self.assertIn("<!-- external-service-example -->\n```sql", example)
-            self.assertIn("SELECT", example)
-            self.assertRegex(example, "[Ee]xpect|should (?:become|contain|show)")
-        self.assertIn("SHOW ROUTINE LOAD FOR orders_kafka_job", content)
-        self.assertIn("Name = 'orders_mysql_job'", content)
-        self.assertIn("Name = 'orders_files_job'", content)
+    def test_group_commit_step_sends_single_rows_without_labels(self):
+        source = self.notebook_cells("module05-ingestion")["group-commit"]
+        self.assertIn('if mode == "off_mode":\n        headers["label"]', source)
+        self.assertIn('("orders_group_commit", "async_mode")', source)
+        self.assertIn('"group_commit_interval_ms" = "2000"', source)
+        reading = self.reading("module05-ingestion")
+        self.assertIn("label and group_commit can't be set at the same time", reading)
 
     def test_every_module_has_blank_exercise_and_folded_executable_solution(self):
         paths = list((ROOT / "level1").glob("*/lab*.ipynb"))
         self.assertEqual(len(paths), 7)
         for path in paths:
             cells = json.loads(path.read_text())["cells"]
-            work = [c for c in cells if "course_exercise" in c.get("metadata", {}).get("tags", [])]
-            solutions = [c for c in cells if "course_solution" in c.get("metadata", {}).get("tags", [])]
-            self.assertEqual(len(work), 1, path)
-            self.assertEqual(ast.parse("".join(work[0]["source"])).body, [], path)
-            self.assertEqual(len(solutions), 1, path)
-            source = "".join(solutions[0]["source"])
-            self.assertIn("<details>", source)
-            self.assertNotIn("<details open", source)
-            blocks = re.findall(r"```python\n(.*?)```", source, re.DOTALL)
-            self.assertEqual(len(blocks), 1, path)
-            tree = ast.parse(blocks[0])
-            self.assertTrue(any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
-                                and n.func.id == "expect" for n in ast.walk(tree)), path)
-            self.assertLess(cells.index(work[0]), cells.index(solutions[0]))
+            solutions = [c for c in cells if "reference-solution" in c.get("metadata", {}).get("tags", [])]
+            self.assertTrue(solutions, path)
+            for solution in solutions:
+                # The form of the other courses: a blank cell, a pointer, then a collapsed
+                # solution that runs with Run All and checks its result.
+                index = cells.index(solution)
+                work, pointer = cells[index - 2], cells[index - 1]
+                self.assertEqual(work["cell_type"], "code", path)
+                self.assertEqual(ast.parse("".join(work["source"])).body, [], path)  # comments only
+                self.assertEqual("".join(pointer["source"]),
+                                 "The next cell is a reference solution; it is collapsed. Expand it to compare, or run it.")
+                self.assertEqual(solution["cell_type"], "code", path)
+                self.assertTrue(solution["metadata"]["jupyter"]["source_hidden"], path)
+                tree = ast.parse("".join(solution["source"]))
+                self.assertTrue(any(isinstance(n, ast.Call) and isinstance(n.func, ast.Name)
+                                    and n.func.id == "expect" for n in ast.walk(tree)), (path, solution["id"]))
+                # Each practice ends with what a run shows.
+                self.assertTrue("".join(cells[index + 1]["source"]).startswith("**Expected result"), (path, solution["id"]))
+            # No answer sits in plain sight in a Markdown cell.
+            for cell in cells:
+                if cell["cell_type"] == "markdown":
+                    self.assertNotIn("<details>", "".join(cell["source"]), path)
+
+    def test_every_lab_step_ends_with_an_expected_result(self):
+        for path in (ROOT / "level1").glob("*/lab*.ipynb"):
+            cells = json.loads(path.read_text())["cells"]
+            for index, cell in enumerate(cells[:-1]):
+                if cell["cell_type"] != "code" or index < 3 or not ast.parse("".join(cell["source"])).body:
+                    continue  # the setup cell, and the blank practice cells
+                following = "".join(cells[index + 1]["source"])
+                with self.subTest(lab=path.name, cell=cell["id"]):
+                    self.assertTrue(following.startswith("**Expected result"), following[:80])
 
     def test_ingestion_progresses_from_one_file_to_history(self):
         path = next((ROOT / "level1/module05-ingestion").glob("lab*.ipynb"))

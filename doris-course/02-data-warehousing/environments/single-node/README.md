@@ -41,12 +41,17 @@ Read the reset notice before starting a Lab; running the connection and lab code
 | Image | apache/doris:all-in-one-4.1.3 |
 | Compose project | doris-warehousing-course |
 | Service count | One doris service, containing one FE and one BE in the container |
-| FE query port | Host 52030 → container 9030 |
-| FE HTTP port | Host 51030 → container 8030 |
-| BE HTTP port | Host 51040 → container 8040 |
+| FE query port | Host 52030 → container 9030; variable `DW_FE_QUERY_PORT` |
+| FE HTTP port | Host 51030 → container 8030; variable `DW_FE_HTTP_PORT` |
+| BE HTTP port | Host 51040 → container 8040; variable `DW_BE_HTTP_PORT` |
 | Default lab database | dw_course_l1_demo |
 | Data retention | Project-specific FE metadata volume and BE storage volume |
 | Network exposure | Bound only to host 127.0.0.1 |
+
+To use other host ports, set the three variables before starting Jupyter, for example
+`DW_FE_QUERY_PORT=62030 DW_FE_HTTP_PORT=61030 DW_BE_HTTP_PORT=61040 .venv/bin/jupyter lab`.
+Every Lab reads them when it connects, and Compose reads the same names, so start Jupyter with the same values each time.
+The startup cell checks the three ports before it starts anything.
 
 Passwordless root is used only for this local teaching sandbox, not as an example for remote deployment.
 The course uses a separate project, ports, and data volumes, and will not reuse or stop other services' containers.
@@ -73,7 +78,7 @@ The path refers to the machine running the Jupyter kernel. Module 5 validates al
 | Connection refused | Verify the FE query port and check whether the service is ready |
 | Access denied | Verify the user, password, connection source, and permissions to create databases and tables |
 | BE is not alive, or tables cannot be created or written to | Check SHOW BACKENDS and the BE logs |
-| Docker port is in use | Ask the instructor to coordinate the course environment; do not stop services you do not own |
+| A port is in use | The startup cell stops before starting anything and names the port and its variable. Run `lsof -nP -iTCP:<port> -sTCP:LISTEN` to find the program; stop it if it is yours, or restart Jupyter with the variable set to a free port |
 | Module 1 succeeds but the next Lab cannot connect | Confirm that the kernel is on the same machine and the sandbox is still running; run the initialization and connection steps in the current Notebook |
 
 To troubleshoot your own sandbox, run the following in the course directory:

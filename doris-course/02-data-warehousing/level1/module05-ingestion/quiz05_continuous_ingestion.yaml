@@ -1,0 +1,87 @@
+title: "Module 5 Quiz: Continuous Ingestion (Optional Reading)"
+description: "Six single-choice questions on the optional reading; no database connection required. View explanations after submitting."
+questions:
+- id: progress_or_version
+  objective: "Explain why a continuous load job keeps its own progress, and how that progress differs from a business version."
+  prompt: "A Routine Load job reads order events from one Kafka partition. At offset 120 it loads order 701 DELIVERED at version 4; at offset 121, a late event for order 701, PAID at version 2. What should each number decide?"
+  options:
+  - id: offsets_resume_versions_decide
+    text: "The offsets decide where the job resumes; the versions keep order 701 DELIVERED"
+  - id: later_offset_wins
+    text: "The later offset decides: order 701 becomes PAID, because the job read that event last"
+  - id: version_is_the_resume_point
+    text: "The higher version decides where the job resumes after a restart, which is offset 4"
+  - id: offset_orders_partitions
+    text: "The offsets order these events against the events of every other partition of the topic"
+  answer: offsets_resume_versions_decide
+  explanation: "An offset is a position in the stream: the job's progress, which says where it continues after a pause or a restart. A business version says which state of an order is newer, so the late PAID event must not undo DELIVERED. Reading an event later does not make it newer. A version is not a position in Kafka. Offsets count within one partition and say nothing about the order of events in other partitions."
+- id: pause_resume_or_stop
+  objective: "Read a Routine Load job's state and progress, and choose between pausing, resuming, and stopping it."
+  prompt: "A Routine Load job must not load for an hour while the target table is being checked, then continue without loading any message twice. What should the team run?"
+  options:
+  - id: pause_then_resume
+    text: "PAUSE ROUTINE LOAD now and RESUME ROUTINE LOAD after the hour; the job keeps its progress"
+  - id: stop_then_recreate
+    text: "STOP ROUTINE LOAD now, and after the hour create the same job again with OFFSET_BEGINNING"
+  - id: stop_then_resume
+    text: "STOP ROUTINE LOAD now, and after the hour RESUME ROUTINE LOAD, which reads on from the progress"
+  - id: pause_then_recreate
+    text: "PAUSE ROUTINE LOAD now, and after the hour drop the job and create it again from OFFSET_END"
+  answer: pause_then_resume
+  explanation: "A paused job keeps its progress, and RESUME continues from it, so no message is skipped or loaded twice. A recreated job starts from its configured offsets: from OFFSET_BEGINNING it loads old messages again. A stopped job is ended for good and cannot be resumed. Recreating from OFFSET_END skips every message that arrived during the hour."
+- id: what_a_savepoint_keeps
+  objective: "Explain how a CDC pipeline moves from a snapshot to incremental changes, and what a checkpoint or a savepoint saves."
+  prompt: "A Flink CDC job that started with a snapshot of a MySQL table is stopped with a savepoint while MySQL keeps changing, and restored from it an hour later. What lets it catch up without gaps or repeats?"
+  options:
+  - id: position_state_and_binlog
+    text: "The savepoint's binlog position and operator state, and a binlog that still holds the changes"
+  - id: snapshot_again
+    text: "A new snapshot of the table, read again on restore, of which Doris keeps the newest row for each key"
+  - id: master_status
+    text: "SHOW MASTER STATUS in MySQL, which tells the restored job how far it had read before it was stopped"
+  - id: latest_update_time
+    text: "The latest update time in the Doris table, which tells the restored job which binlog events are new"
+  answer: position_state_and_binlog
+  explanation: "A savepoint records where the job was in the binlog and the state of its operators, so the restored job reads on from exactly there; it needs the binlog to still hold those changes. A new snapshot would not bring back deletes made in the meantime. SHOW MASTER STATUS shows how far MySQL has written, not how far a reader has read. A time in the target does not identify a binlog position: changes share seconds, and deleted rows leave no time behind."
+- id: where_a_new_job_starts
+  objective: "Choose where a new continuous job starts reading: from the beginning, from now, or from a saved position."
+  prompt: "A new Doris table must hold every order that exists in a MySQL table today and every later change. Which start fits a new Flink CDC job?"
+  options:
+  - id: initial_snapshot_then_binlog
+    text: "scan.startup.mode = initial: a snapshot of the existing rows, then the changes from the binlog"
+  - id: latest_offset
+    text: "scan.startup.mode = latest-offset: the changes made after the job starts, read from the binlog"
+  - id: timestamp_of_oldest_order
+    text: "scan.startup.mode = timestamp, set to the creation time of the oldest order in the MySQL table"
+  - id: export_then_latest_offset
+    text: "A one-time export loaded today, then a new job at latest-offset that starts an hour after the export"
+  answer: initial_snapshot_then_binlog
+  explanation: "initial reads the rows that exist and then switches to the binlog, so the table gets everything that exists and every change after it. latest-offset leaves out every row that did not change after the start. A timestamp mode reads only the binlog, which seldom reaches back to the oldest order, and skips the snapshot. An export followed an hour later by latest-offset misses every change made during that hour."
+- id: deletes_reach_doris
+  objective: "Explain how a delete in the source database reaches a Unique Key table in Doris."
+  prompt: "An order is deleted in MySQL. A Flink CDC job writes the table into a Doris Unique Key table. When does the order disappear from Doris?"
+  options:
+  - id: connector_sends_delete
+    text: "When the connector sends it as a row marked for deletion, with sink.enable-delete on"
+  - id: nightly_cleanup
+    text: "Not through the job: it passes on inserts and updates, and a nightly cleanup removes the deletes"
+  - id: next_snapshot
+    text: "At the job's next snapshot, which reads the whole MySQL table again once a day by default"
+  - id: compaction_removes_keys
+    text: "When compaction runs, because compaction drops the keys that the source table no longer has"
+  answer: connector_sends_delete
+  explanation: "The binlog records the delete, the CDC source passes it on, and the Doris connector, with sink.enable-delete on, writes it as a row marked for deletion, so the Unique Key table drops the key. Deletes are part of the change stream, not a separate cleanup. A CDC job reads its snapshot once, at the start. Compaction reorganizes files and never decides which keys exist in the source."
+- id: files_found_by_name
+  objective: "Explain how a continuous file job finds new files, and why a file that arrives with an older name is skipped."
+  prompt: "A continuous file job has loaded orders-007.parquet. Then orders-006.parquet arrives late, followed by orders-008.parquet. What does the job load?"
+  options:
+  - id: only_008
+    text: "Only orders-008: a file named before the job's progress is skipped"
+  - id: both_by_arrival
+    text: "Both, in the order they arrived, since the job watches for any new file"
+  - id: only_006
+    text: "Only orders-006, because the job first goes back for the names that it missed"
+  - id: neither_without_insert
+    text: "Neither, until someone runs the job's INSERT INTO SELECT statement again"
+  answer: only_008
+  explanation: "The job finds new files by name: a file is new when its name sorts after the last file that it loaded, so orders-008 is loaded and orders-006 is skipped and needs a separate load. Arrival time does not matter to it. It does not look back for gaps. The job runs its INSERT INTO SELECT continuously on its own."

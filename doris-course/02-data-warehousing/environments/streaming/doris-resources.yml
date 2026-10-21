@@ -1,5 +1,9 @@
 # Opt-in overlay for streaming labs; keep the base project and named volumes.
+# With a memory limit, the BE measures free memory inside its own container, so
+# Kafka, MySQL, and Flink cannot push it below its low water mark. The image sets
+# the BE limit to 40% of the container's: 2.4 GiB here, where the Labs need about
+# 1.8 GiB; at 4 GiB (1.6 GiB for the BE) its queries fail with MEM_ALLOC_FAILED.
 services:
   doris:
-    mem_limit: 12g
-    memswap_limit: 12g
+    mem_limit: 6g
+    memswap_limit: 6g

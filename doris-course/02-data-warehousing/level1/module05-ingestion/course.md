@@ -1,169 +1,89 @@
 # Module 5: Batch and Continuous Data Ingestion
 
-| Course Information | Details |
+| Course information | Value |
 | --- | --- |
 | Course | Data Warehousing with Apache Doris · Level 1 |
-| Product Version | Apache Doris 4.x |
-| Lab Version | Apache Doris 4.1.3 |
-| Estimated Time | About 110 minutes, including reading, hands-on work, and the quiz |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox from Module 1 |
+| Estimated time | About 90 minutes: reading 35, Lab 45, quiz 10 |
 
-[Course contents](../README.md) · [Open Lab 5](lab05_stream_load.ipynb) · [Open Quiz 5](quiz05_load_methods_and_retry_safety.ipynb)
+[Course README](../../README.md) · [Open Lab 5](lab05_stream_load.ipynb) · [Open Quiz 5](quiz05_load_methods_and_retry_safety.ipynb)
 
-## Module Goal
+## Module goal
 
-This module introduces common data ingestion methods and the basics of checking load results and retrying loads.
+Load files into Doris in batches, check that each load did what it reports, and retry a load without loading anything twice.
 
-After completing this module, you will be able to load order files with Stream Load, verify the results, and check how data changes after failures and retries.
+## Learning objectives
 
-**Scope:** Sections 5.6–5.9 are introductions taught through architecture diagrams, configuration examples, and the quiz. You do not need to set up Kafka, Flink, or real CDC/continuous-file pipelines. The main hands-on lab uses Stream Load; the existing object-storage batch and Group Commit extensions remain optional. Understanding the principles of recovery from actual source positions is required, but continuous concurrency validation is not a completion requirement. External configuration examples in the reading are not directly runnable labs.
+After completing this module, you will be able to:
 
-**Optional labs:** [Lab 5A: Kafka / Routine Load](optional05_kafka_routine_load.ipynb) and [Lab 5B: MySQL / Flink CDC](optional05_flink_mysql_cdc.ipynb) provide isolated Docker environments and result checks. The latter practices snapshots, inserts, updates, deletes, and controlled savepoint restoration for a single table with a fixed schema; it is not whole-database synchronization, automatic schema evolution, or crash recovery. See the [continuous ingestion environment](../../environments/streaming/README.md) for prerequisites.
+1. Choose a load method for a local file, files in object storage, a message stream, a database's changes, or many small writes.
+2. Map CSV positions, Parquet fields, and default values to the columns of a target table.
+3. Judge a load from its response and from the rows, relationships, and amounts in the target table.
+4. Retry a load batch safely with its label, and tell a batch retry from business deduplication.
+5. Explain what Group Commit changes for many small loads, and when their rows become visible.
+6. Distinguish the grain and amount definitions of WWI historical orders, account receipts, and the simulated new orders.
 
-## Learning Objectives
+## Module structure
 
-After completing this module, you should be able to:
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 5.1 Choose a load method | 5 min | Match the way data arrives to a load method |
+| 5.2 Types, columns, and defaults | 6 min | Map the fields of a file to the columns of a table |
+| 5.3 Stream Load: request, response, and retries | 15 min | Read what a load reports, and retry it safely |
+| 5.4 Many small loads: Group Commit | 4 min | Fewer transactions, and when their rows become visible |
+| 5.5 Files in object storage | 3 min | INSERT INTO SELECT from the S3 table function, and Broker Load |
+| 5.6 Two kinds of data, two grains | 2 min | WWI history, account receipts, and the simulated orders |
+| Lab 5 | 45 min | Load a CSV, retry it, reject a bad batch, merge small loads, and load ten WWI tables |
+| Quiz 5 | 10 min | Six questions on these objectives |
 
-1. Choose ingestion paths for local files, object storage, message streams, and database changes.
-2. Explain the roles of CSV column mappings, Parquet fields, and default values.
-3. Judge correctness using load responses, loaded row counts, relationships, and amounts.
-4. Distinguish load-batch retries, business-event deduplication, and continuous-job recovery.
-5. Distinguish the grain and measurement definitions of WWI historical orders, account receipts, and new orders simulated for the course.
+Continuous ingestion, where data keeps arriving, is optional in this course: Kafka with Routine Load, database changes with Flink CDC, and Doris's own Streaming Jobs are in the reading [Continuous Ingestion](optional05_continuous_ingestion.md), with its own quiz and the optional Labs 5A and 5B. Nothing in Modules 6 and 7 depends on them.
 
-## Module Schedule
+## 5.1 Choose a load method
 
-| Section | Learning Format | Suggested Time | Learning Outcome |
-| --- | --- | --- | --- |
-| 5.1 Decide whether to access or load | Ingestion selection table | 5 minutes | Choose an ingestion path by source and completion method |
-| 5.2 Data types and schema | Field comparison | 5 minutes | Distinguish parseable data from valid business records |
-| 5.3 Defaults and column mappings | Mapping and default examples | 8 minutes | Determine field order and the meaning of omitted fields |
-| 5.4 Stream Load, result checks, and retries | Requests and responses | 5 minutes | Identify success, rejection, and uncertain states |
-| 5.5 Object-storage batches and INSERT SELECT | SQL and workflow comparison | 8 minutes | Distinguish querying, persistence, and asynchronous loading |
-| 5.6 Kafka and Routine Load | SQL and job workflow | 10 minutes | Explain consumption progress versus business state |
-| 5.7 Flink CDC and Doris Connector | Change-flow diagram | 5 minutes | Explain snapshots, incremental changes, and recovery |
-| 5.8 Streaming Job and CDC_STREAM | Synchronization SQL and mode selection | 8 minutes | Explain how Streaming Job, CDC_STREAM, and target tables work together |
-| 5.9 Incremental files in object storage | Job SQL and file progress | 6 minutes | Identify duplicate-file and late-data issues |
-| Lab 5 | Hands-on work | 45 minutes | Load ten WWI tables and check retries and rejection of simulated CSV data |
-| Quiz 5 | Interactive quiz | 5 minutes | Check path selection, mappings, results, retries, and amount definitions |
+A warehouse usually starts with history that already exists, then receives what keeps changing. The file format alone does not decide how to load: a Parquet file on your machine, a fixed set of Parquet files in object storage, and a directory of Parquet files that keeps growing need different methods.
 
-## 5.1 Decide whether to access or load
-
-### Choose an entry point by data source
-
-Building a warehouse usually starts with historical data, followed by continuous changes. The file extension alone cannot determine the solution:
-even for Parquet, local files, fixed file sets in object storage, and continually growing directories
-require different transfer methods and progress management.
-
-| Where data resides and how it is produced | Ingestion choice | Main checks |
+| Where the data is and how it arrives | Load method | What to check |
 | --- | --- | --- |
-| Local CSV, JSON, or Parquet; one finite batch | Stream Load | Request results, loaded row counts, and target table |
-| Fixed file set in object storage to inspect with SQL first | S3 TVF; combine with INSERT INTO SELECT when persisting to a table | Whether querying and writing each completed |
-| Large file batches in object storage using asynchronous load jobs | Broker Load | Final load-job state and target data |
-| Kafka continuously produces messages | Routine Load | Job state, committed progress, and target data |
-| Business database with ongoing inserts, updates, and deletes | CDC path, such as Flink CDC + Doris Connector | Initial snapshot, incremental changes, and recovery position |
-| Many very small write requests | Evaluate Group Commit for compatible write methods | Acknowledgment mode, response, and visibility |
+| A local CSV, JSON, or Parquet file; one finite batch | Stream Load: an HTTP request carries the file | The response, then the target table |
+| A fixed set of files in object storage, to inspect with SQL first | The `S3` table function, with `INSERT INTO ... SELECT` to keep the rows | The query's result, then the target table |
+| Large batches of files in object storage, as asynchronous jobs | Broker Load | The job's final state, then the target table |
+| Many small writes from an application | Stream Load or INSERT with Group Commit | When the rows become visible |
+| A message stream, such as Kafka | Routine Load (optional reading) | The job's state and progress |
+| A business database's inserts, updates, and deletes | CDC, such as Flink CDC (optional reading) | The snapshot, the changes, and the position to resume from |
 
-These are paths to choose by need, not six steps that must run in sequence.
-Direct queries in Module 4 can also avoid persisting data; whether to refresh a persisted table continuously is a separate decision.
+These are choices, not steps of one pipeline. Module 4 also showed a choice that loads nothing: querying the lake table where it is.
 
-### Historical business data and new orders
+Lab 5 practices Stream Load on two kinds of data, ten simulated new orders in a CSV file and the ten tables of the WWI history in Parquet, and Group Commit on the same ten orders sent one at a time.
 
-```text
-WWI historical Parquet ─ Stream Load → wwi_* (10 business tables)
-Simulated new-order CSV ─ Stream Load → orders_imported (10 teaching orders)
-                                      │
-                                      └─ Later: Module 6 admission checks, Module 7 state changes
-```
+## 5.2 Types, columns, and defaults
 
-The historical package retains orders, lines, customers, products, invoices, account transactions, and lookup tables, totaling 701,846 rows.
-The “total row count” is the sum across ten tables, not the number of orders.
-Simulated order IDs 900001–900010 reference WWI customers and products, but the course defines their prices, regions, and event times.
+A table's **schema** is its columns, their types, and whether they accept NULL. Choose each type from what the column is used for: `DECIMAL(18, 2)` for an amount with two decimal places, 18 digits in all; `BIGINT` for an ID; `DATE` for a calendar day; `DATETIME` for the moment an event happened. Decide what NULL means in a column, such as "payment time unknown", so that nobody reads it as zero. See [Data types](https://doris.apache.org/docs/4.x/table-design/data-type/).
 
-**Learning sequence:** Learn file loading, field mappings, and retries first, then continuous jobs and their progress.
-This section explains three ingestion paths: files, messages, and database changes.
-The lab starts with one CSV to practice Stream Load, load verification, and retries, then extends to ten historical Parquet tables.
-The Kafka, Flink, and object-storage sections explain continuous ingestion choices and workflows.
+A value that converts is not yet a valid business value. The text `not-a-number` cannot become an amount: that is a type error. The customer ID `999999` converts to an integer, yet there may be no such customer: that needs a business check against the customer dimension, which Module 6 builds.
 
-## 5.2 Data types and schema
+### Tell the load which column each value fills
 
-A schema defines a table's structure, including column names, types, and nullability.
-Before loading, align file fields with this definition: order IDs identify orders, amounts support calculations,
-and dates support daily summaries. Choose a field's type according to how it will be used.
-
-For example, a pre-tax amount requiring two decimal places can use `DECIMAL(18, 2)`: 18 is the total number of digits,
-and 2 is the number of decimal places. Both amount range and precision must meet business requirements. Order IDs can use integers;
-fields that only need a calendar date can use DATE, while fields recording when an event occurred use DATETIME.
-For nullable fields, define what NULL means, such as “payment time unknown,” to avoid confusing it with zero.
-See [Data types](https://doris.apache.org/docs/4.x/table-design/data-type/) for range and precision rules.
-
-### Convertible does not necessarily mean business-valid
-
-| Field | Technical requirement | Business requirement |
-| --- | --- | --- |
-| order_id | Representable as an integer | Must exist, with one order as the grain |
-| order_amount | Representable as a decimal with defined precision | Sign and business definition must be appropriate |
-| customer_id | Representable as an integer | Customer must exist in the customer dimension table |
-| event_time | Representable as a datetime | Represents business event time, not ingestion time |
-| data_source | Representable as a string | Distinguishes WWI from COURSE_SIMULATION |
-
-`not-a-number` cannot be loaded as an amount; customer ID `999999` can be converted to an integer,
-yet may have no matching customer. The former is a type issue; the latter requires business relationship validation.
-Module 6 retains the raw text and routes invalid records separately.
-
-### When loading multiple tables, check orders and lines first
-
-Each Orders row is an order; each OrderLines row is a product line.
-Using COUNT(*) directly after a JOIN counts lines, not orders.
-The main path in this module checks only the row counts, relationships, and amounts for orders, lines, customers, and products.
-All ten tables are still loaded for later use; mastering the complete accounting model is not required here.
-WWI customer transactions are at account level and cannot be directly allocated as per-order payments;
-detailed SQL is in [Further reading: Invoices and account receipts](optional05_invoice_and_receipts.md), which is not a required lab in this section.
-
-After loading the historical tables, you can run the lab's date analysis:
-
-```sql
-SELECT o.OrderDate,
-       COUNT(DISTINCT o.OrderID) AS orders,
-       SUM(l.Quantity * l.UnitPrice) AS order_amount
-FROM wwi_orders o
-JOIN wwi_order_lines l ON o.OrderID = l.OrderID
-GROUP BY o.OrderDate
-ORDER BY o.OrderDate
-LIMIT 10;
-```
-
-COUNT(DISTINCT) counts orders, while SUM calculates pre-tax amounts from lines.
-This historical daily report does not cover the same scope as the ten-order subset in Module 1.
-
-## 5.3 Defaults and column mappings
-
-A CSV may put the customer ID before the order ID, while the Doris table defines fields in a different order.
-Column mapping explicitly tells the load process what each input position means and which column receives it.
-When all values convert successfully, an incorrect column order can silently swap order and customer IDs,
-so also spot-check fields of individual orders after loading.
-
-### Specify CSV order and align Parquet fields
-
-The simulated CSV has no header. The lab explicitly supplies this column order:
+The simulated new orders come as a CSV file without a header, one order per line, eleven values separated by commas:
 
 ```text
 order_id,customer_id,order_amount,status,event_version,event_id,
 event_time,paid_amount,refund_amount,region,data_source
 ```
 
-`columns` describes how input values map to target columns; it does not ask Doris to guess each value's business meaning.
-For this course's Parquet files, target tables use the field definitions in the manifest, not CSV comma-separator settings.
+The `columns` parameter of a load names, in the file's order, the table column that each value fills. If a file puts the customer ID before the order ID and `columns` does not say so, every value still converts, and the two IDs are silently swapped; spot-check a few orders after a load for this reason.
 
-| Input | Format settings | Field interpretation |
+| Input | Format settings | How fields reach columns |
 | --- | --- | --- |
-| Simulated orders.csv | format=csv, column_separator=comma | Explicit columns matching file order |
-| WWI orders.parquet and others | format=parquet | File fields aligned with course DDL |
+| The simulated `orders.csv` | `format=csv`, `column_separator=,` | By position, as `columns` lists them |
+| A JSON array, such as Module 6's raw orders | `format=json`, `strip_outer_array=true` | By key name |
+| The WWI `orders.parquet` and the other history files | `format=parquet` | By field name; the course's table definitions use the files' names |
 
-### Define defaults for omitted fields
+A `columns` entry can also compute a value, such as `order_amount = amount_cents / 100.0` for a source that sends cents: 18000 becomes 180.00. That belongs to the load, because the rule is about one source's format. A rule that belongs to the table, whatever loads it, can be a generated column in the table definition instead; the [files and Group Commit extension](../extensions/extension45_files_and_group_commit.ipynb) compares the two.
 
-A default specifies what to fill in when a write omits a column. For example, an entry point dedicated to new orders can define
-CREATED as the initial state; an entry point receiving multiple order states should retain the source state.
-A data-source field can also use the source identifier defined for that ingestion job.
-Business facts such as payment success and actual payment amount must come from the source system.
+### Defaults fill only what a load leaves out
+
+A default is the value that a column gets when a write does not supply it. A table that only ever receives new orders can default `status` to `CREATED`; a table that receives orders in every state should take the state from the source. Facts such as a payment must come from the source, never from a default.
 
 **SQL reading example: not executed in the lab.** To try it, use an orders_defaults_reading table that does not yet exist
 in an isolated lab database, and run it only once; do not write this example into orders_imported.
@@ -181,55 +101,35 @@ INSERT INTO orders_defaults_reading (order_id, status) VALUES (901002, 'PAID');
 SELECT order_id, status FROM orders_defaults_reading ORDER BY order_id;
 ```
 
-The first row omits status and produces `(901001, CREATED)`; the second explicitly supplies it and produces `(901002, PAID)`.
-A default handles “this column was not supplied”; it does not correct arbitrary invalid values to CREATED.
-This table only illustrates defaults and does not indicate that payment has been verified.
+The first row leaves out `status` and gets `(901001, CREATED)`; the second supplies it and keeps `(901002, PAID)`. A default handles a missing column; it does not repair a wrong value.
 
-Column mappings can also transform values through expressions, for example by formatting source fields for target columns;
-generated columns place calculation expressions in the table definition for the table to compute, with supported expressions depending on the target version.
-Choose according to where the rule belongs: source-specific format conversion belongs in load mappings,
-while derived fields maintained consistently with the table may suit generated columns. For example, if a source file records amounts in cents,
-the load mapping can use `order_amount=amount_cents/100.0`; 18000 cents should produce 180.00 yuan,
-with the target decimal type also configured. In contrast, a generated column is an expression in the table definition, independent of a particular CSV's column order.
-This lab practices explicit field mappings; generated columns are not part of the lab operations.
-See the [Stream Load documentation](https://doris.apache.org/docs/4.x/data-operate/import/import-way/stream-load-manual/) for configuration details and limits.
+## 5.3 Stream Load: request, response, and retries
 
-## 5.4 Stream Load, result checks, and retries
+Stream Load sends a file to Doris in one HTTP `PUT` request. Doris parses it, checks each row against the table and the request's settings, and commits all accepted rows in one load transaction. See the [Stream Load manual](https://doris.apache.org/docs/4.x/data-operate/import/import-way/stream-load-manual/).
 
-Stream Load sends file contents to Doris through an HTTP request.
-Prepare the target table and file, send the request, and check the results using the returned load status.
-It suits the local files in this section: the client pushes data, and Doris parses fields, checks data, and commits the load transaction.
+### The request
 
-### Understand the request components
-
-This lab sends files directly to the course sandbox's BE HTTP address, where the BE receives data and participates in the load transaction.
-Below, `DW_BE_HTTP_URL` is that address and `DW_DATABASE` is the target database.
-
-The following placeholders illustrate the lab request structure:
+Lab 5's first load writes the request out in Python, so that you see every part; the later loads use `lab.stream_load()`, which sends the same request.
 
 ```text
-PUT <DW_BE_HTTP_URL>/api/<DW_DATABASE>/orders_imported/_stream_load
-label: <unique identifier for this batch, retained for retries>
+PUT <BE HTTP address>/api/<database>/orders_imported/_stream_load
+label: <a name for this batch, kept for retries>
 format: csv
 column_separator: ,
-columns: <column order from the previous section>
+columns: <the column order of 5.2>
 strict_mode: true
 max_filter_ratio: 0
 group_commit: off_mode
-Request body: raw bytes of orders.csv
+Request body: the bytes of orders.csv
 ```
 
-Historical Parquet uses format=parquet without a CSV separator.
-Parameters determine parsing and data-quality handling; check the returned JSON for every request, not just the HTTP status.
+`strict_mode` = true rejects a row whose value does not convert to its column's type, instead of loading NULL; `max_filter_ratio` = 0 fails the whole batch if any row is rejected. `group_commit` = off_mode commits this request on its own (5.4).
 
-The lab's first load shows the complete Python HTTP request: the URL selects the target table, headers correspond to the parameters above,
-`requests.put(..., data=payload)` sends file bytes, and `response.json()` obtains the load result.
-Later, `lab.stream_load()` wraps the repeated operations. The independent exercise uses the same request structure,
-changing only the file, target table, batch label, and column mapping, without having to work out the HTTP request from scratch.
+Usually a client sends Stream Load to the FE, which answers with a redirect to a BE, and the client follows it, as `curl --location-trusted` does. The FE redirects to the address that the BE registered. In the course's single-container sandbox, the BE registered `127.0.0.1:8040`, its address inside the container, which from your machine is not the BE: the sandbox publishes the BE's port 8040 as 51040. So the Lab sends Stream Load straight to the BE on 51040, and refuses to follow a redirect.
 
-### Check both the response and table contents
+### The response, then the table
 
-The following illustrates fields to verify after successfully loading the ten simulated orders; it is not a complete response:
+A load answers with JSON. An HTTP status of 200 only says that the request was received; the JSON says what happened to the rows:
 
 ```json
 {
@@ -239,377 +139,135 @@ The following illustrates fields to verify after successfully loading the ten si
 }
 ```
 
-Then verify the business results:
+Then query the table, because a load can succeed and still be wrong, with swapped columns for example:
 
 ```sql
 SELECT COUNT(*) AS orders, SUM(order_amount) AS amount
 FROM orders_imported;
 ```
 
-Expect ten orders and 1400.00. For historical data, also check duplicate primary keys, customer/product relationships, and amounts,
-because successful loads of all ten tables may still involve incorrect relationship definitions.
+Expect ten orders and 1400.00. For the WWI history, check also that keys are unique and that order lines, orders, customers, and products join without losing or doubling rows.
 
-| Response scenario | Interpretation and next step |
+| `Status` | What it means, and what to do |
 | --- | --- |
-| Success | Check loaded/filtered row counts, then verify the target table |
-| Label Already Exists | Check the original batch's state; this does not mean another batch was successfully written |
-| Fail | Retain error details, determine the rejection cause, and do not count the failed batch as business data |
-| Publish Timeout or uncertain request result | Retain the label and transaction details and confirm the original transaction's outcome; do not blindly append with a new label |
+| `Success` | Read `NumberLoadedRows` and `NumberFilteredRows`, then check the table |
+| `Label Already Exists` | A batch with this label exists: look at that batch's outcome. Nothing new was loaded |
+| `Fail` | Nothing was loaded. Keep the response and read `ErrorURL` to find the rejected rows |
+| `Publish Timeout`, or no answer at all | The outcome is unknown. Keep the label and check the original transaction before you retry |
 
-### Retry protection is not permanent deduplication
+### A label makes a retry safe, for a while
 
-The lab resends the same file with the same label within the label's retention period, expecting no additional ten rows.
-A new label appends another batch to a Duplicate Key table; business deduplication still requires stable keys and versions.
+A **label** names a load batch in its database. If a request fails or its answer is lost, resend it with the same label: when the first attempt committed, Doris answers `Label Already Exists` and loads nothing; when it did not, the retry loads the batch once. Lab 5 resends its first file with the same label and checks that the table still holds ten orders.
 
-The bad-data experiment uses a new label and two input rows, one with an amount that cannot be converted.
-With this course's strict_mode=true and max_filter_ratio=0 settings, the entire batch should be rejected,
-leaving the original ten rows and 1400.00 unchanged. ErrorURL is a troubleshooting clue, not a long-term rejection table.
+A label is kept for a limited time. Doris remembers the label of a Stream Load or an INSERT for 12 hours after it finishes (the FE setting `streaming_label_keep_max_second`), and drops the oldest labels earlier when a database holds more than 2,000 finished loads (`label_num_threshold`). A retry after that, or with a new label, loads the batch again, and a Duplicate Key table keeps both copies. Retrying a load is therefore not deduplication: removing duplicates of business events needs stable business keys and versions, which Module 7 builds.
 
-If an application writes only a few rows at a time, frequent commits increase transaction and storage-version overhead.
-Group Commit can combine compatible small writes into larger batches to reduce fixed per-batch overhead.
-When choosing a mode, focus on when the application receives acknowledgment: `sync_mode` returns after the grouped load completes,
-while `async_mode` returns after data is written to the WAL (write-ahead log); query visibility still waits for a subsequent commit.
-This lab uses `off_mode` to make per-batch transaction results and label retry behavior easier to observe.
-Before enabling grouped commits, check the parameters and label-support conditions for the interface used; see the [Group Commit documentation](https://doris.apache.org/docs/4.x/data-operate/import/load-best-practices/group-commit-manual/).
+### A bad row fails the whole batch
 
-## 5.5 Object-storage batches and INSERT SELECT
+Lab 5 then sends two rows with a new label, one with the amount `not-a-number`. With `strict_mode` and `max_filter_ratio` = 0, the response is `Fail`, `NumberFilteredRows` is 1, and the table keeps its ten orders and 1400.00: the good row of that batch is not loaded either. `ErrorURL` points to the rejected row and the reason, for a while; it is a clue for troubleshooting, not a record that you can query later. Module 6 keeps rejected rows in a table.
 
-If historical orders are already in S3 or compatible object storage, Doris can read the files directly.
-Prepare file paths, formats, and read permissions, then decide whether to query and inspect first or submit a batch load job.
+## 5.4 Many small loads: Group Commit
 
-### Querying files and saving results are separate actions
+Each load transaction has a fixed cost: a commit, and a new version in every tablet it writes, which compaction later has to merge (Module 2). An application that sends one order at a time pays that cost for every order. **Group Commit** lets Doris collect small loads that arrive close together and commit them as one transaction.
 
-```text
-Fixed file set in object storage → S3 TVF → SELECT results
-                                  │
-                                  └─ INSERT INTO SELECT → Internal table
-Fixed file set in object storage → Broker Load job ── Verify after completion → Internal table
-```
-
-A TVF (table-valued function) exposes files as a relation readable by SQL.
-SELECT alone does not create a persistent internal table; INSERT INTO SELECT writes selected results into the target table.
-Broker Load is asynchronous: acceptance of a submission does not mean the job has completed.
-
-For example, with a month's order files, first use a TVF to inspect fields, date ranges, and total amounts,
-then use INSERT INTO SELECT to select target columns and write them to an internal table. This SQL expresses reading, transformation, and persistence together.
-With Broker Load, submit a job specifying paths, format, and target table, check that it reaches FINISHED,
-then verify target data. The former expresses processing conveniently in SQL; the latter organizes batch loading as asynchronous jobs.
-
-Before repeating an operation, determine whether the batch should be appended, updated by key, or used to rebuild a specified range.
-For example, appending the same month's files to a detail table again double-counts sales;
-the retry strategy must consider both the load job and the target table model.
-See [Broker Load](https://doris.apache.org/docs/4.x/data-operate/import/import-way/broker-load-manual/) for operations.
-
-### Reading example: inspect files, then persist to a table
-
-**External-environment example; not executed in the lab.** This section and the later Kafka and CDC examples use separate demonstration tables,
-not the main orders_imported table. Before running them, switch to an isolated lab database, prepare external services,
-and replace angle-bracket placeholders. Addresses must be reachable by Doris nodes; do not simply copy localhost from the notebook's machine.
-Use credentials supplied by the lab environment; do not save real secrets in the reading or notebooks.
-
-Assume a Parquet file you prepare has only order_id and order_amount, containing
-`(901001, 180.00)` and `(901002, 80.00)`. This is not the complete WWI file in the repository.
-First create an empty detail table, then write from the file:
-
-<!-- external-service-example -->
-```sql
-CREATE TABLE orders_s3_demo (
-    order_id BIGINT, order_amount DECIMAL(18,2)
-) DUPLICATE KEY(order_id)
-DISTRIBUTED BY HASH(order_id) BUCKETS 1
-PROPERTIES("replication_num"="1");
-
-INSERT INTO orders_s3_demo (order_id, order_amount)
-SELECT order_id, order_amount FROM S3(
-    "uri"="s3://<bucket>/batch/orders.parquet",
-    "s3.endpoint"="<endpoint>", "s3.region"="<region>",
-    "s3.access_key"="<access_key>", "s3.secret_key"="<secret_key>",
-    "format"="parquet"
-);
-SELECT COUNT(*) AS orders, SUM(order_amount) AS amount FROM orders_s3_demo;
-```
-
-Read and perform this in three steps:
-
-1. First run `SELECT ... FROM S3(...)` alone. Expect two file records, while the internal table remains empty.
-2. Then run the complete INSERT INTO SELECT to write these two columns into the internal table; uri selects the file and format specifies how to parse it.
-3. Expect 2 and 260.00 from the final query. Do not run INSERT again to “confirm success,” or the detail table will append the same records again.
-
-For S3 TVF parameters, see
-[S3 TVF](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/s3/)。
-
-## 5.6 Kafka and Routine Load
-
-When upstream systems continually produce order messages, you cannot wait for “the entire file to be ready” before loading.
-Kafka stores continuously arriving messages; Routine Load is a continuous consumption job created in Doris:
-it reads from a specified Topic, writes batches into the target table, and maintains consumption progress.
-
-### Continuous jobs must save progress
-
-```text
-Business producer → Kafka Topic / Partition
-                         │ Continuous consumption
-                         ▼
-                  Routine Load Job
-                         │ Write batches and advance consumption progress
-                         ▼
-                    Doris target table
-```
-
-A Topic is a collection of messages; Partitions divide it, and offsets identify positions within each partition.
-For example, if a partition has order messages at positions 100 and 101, after the job writes this batch and commits progress,
-it continues with subsequent messages. If Kafka has produced many new messages at the next check but job progress has stalled for a long time,
-inspect pause reasons, error records, or processing capacity.
-Each Partition has its own position numbering; offsets from different partitions cannot establish business-event order.
-The job consumes continuously; monitor job state and pause reasons along with committed progress, error rows, and target data.
-Pausing, resuming, and stopping a job concern its lifecycle, not starting or stopping the Doris cluster.
-
-offset answers “how far has consumption reached,” while business event_version answers “which version of the same order is newer.”
-For example, consuming a delivery-confirmation event before a late payment event advances consumption progress but should not roll back the order state.
-Module 7 further explains version resolution using order events. For job parameters and management, see
-[Routine Load](https://doris.apache.org/docs/4.x/data-operate/import/import-way/routine-load-manual/)。
-
-### Reading example: after creating a job, check consumption results
-
-**External-environment example; not executed in the lab.** Prepare a dedicated Kafka Topic and send only two headerless CSV messages:
-`901001,180.00` and `901002,80.00`. The following maps the first and second columns to order ID and amount:
-
-<!-- external-service-example -->
-```sql
-CREATE TABLE orders_kafka_demo (
-    order_id BIGINT, order_amount DECIMAL(18,2)
-) DUPLICATE KEY(order_id)
-DISTRIBUTED BY HASH(order_id) BUCKETS 1
-PROPERTIES("replication_num"="1");
-
-CREATE ROUTINE LOAD orders_kafka_job ON orders_kafka_demo
-COLUMNS TERMINATED BY ",",
-COLUMNS(order_id, order_amount)
-PROPERTIES("strict_mode"="true", "max_filter_ratio"="0", "max_error_number"="0")
-FROM KAFKA(
-    "kafka_broker_list"="<broker>:9092",
-    "kafka_topic"="<dedicated_topic>",
-    "property.kafka_default_offsets"="OFFSET_BEGINNING"
-);
-SHOW ROUTINE LOAD FOR orders_kafka_job;
-SELECT COUNT(*) AS orders, SUM(order_amount) AS amount FROM orders_kafka_demo;
-```
-
-`OFFSET_BEGINNING` makes a new job start at the beginning of each partition; it does not restart every batch from the beginning.
-After both messages are committed, the empty table should contain 2 rows totaling 260.00; the job continues waiting for new messages rather than ending when the current Topic is exhausted.
-Inspect State, Progress, and Statistic in SHOW results; if paused, check ReasonOfStateChanged and ErrorLogUrls.
-Do not recreate the job instead of resuming normally, as that may consume old messages again. See the official Routine Load documentation above for operational fields.
-After observing, pause with `PAUSE ROUTINE LOAD FOR orders_kafka_job`,
-and resume with `RESUME ROUTINE LOAD FOR orders_kafka_job` when continuing.
-
-## 5.7 Flink CDC and Doris Connector
-
-### From business database logs to the warehouse
-
-CDC (Change Data Capture) reads committed inserts, updates, and deletes from a business database.
-For example, when an order changes from CREATED to PAID, CDC sends the change downstream so the warehouse can update that order.
-Flink CDC reads source data and changes, which a Flink job can further process;
-Doris Connector writes the processed results into Doris.
-
-```text
-Source business database: initial snapshot + subsequent change logs
-                 │
-                 ▼
-            Flink CDC
-       Process changes and maintain recovery state
-                 │ Doris Connector
-                 ▼
-              Doris table
-```
-
-When connecting an existing order database, typically read an initial snapshot to establish existing order states, then transition to subsequent change logs.
-During execution, the job records checkpoints that save read positions and processing state for recovery.
-After a failure, the job recovers from a checkpoint; source logs must also be retained back to the position needed for recovery.
-
-An UPDATE in the source usually becomes a new state for the same primary key in Doris;
-the connector must also convey DELETE semantics so the target table correctly removes the corresponding logical row.
-Therefore, verify the source primary key, target Unique Key, and connector update/delete configuration together,
-and check synchronization using changes to the same order, such as creation, payment, and cancellation.
-
-When choosing this path, check Flink, CDC, Connector, and database versions together,
-then test inserts, updates, deletes, and recovery after interruption.
-For configuration, see [Flink Doris Connector](https://doris.apache.org/docs/4.x/connection-integration/data-integration/flink-doris-connector/).
-
-## 5.8 Streaming Job and CDC_STREAM
-
-**Version and scope:** This section introduces continuous synchronization available from Doris 4.1; the official documentation marks MySQL and PostgreSQL
-capabilities as Experimental. The following single-table MySQL example is not executed in the lab;
-before running it, prepare the source database, driver, and synchronization permissions for the target patch version.
-[MySQL SQL-mapped synchronization](https://doris.apache.org/docs/4.x/data-operate/import/import-way/streaming-job/continuous-load-mysql-table/)
-
-### How does this differ from the Flink path?
-
-Both paths handle the previous section's “snapshot → incremental changes → recovery.” The difference is what orchestrates synchronization:
-the Flink path runs as an external Flink job; here, a Streaming Job is created in Doris,
-reading the source through the CDC_STREAM table-valued function and writing to the target through SQL mappings.
-
-```text
-MySQL existing orders and Binlog → CDC_STREAM → SELECT field mappings → Doris Unique Key table
-                         └──── Streaming Job orchestrates continuous execution and records progress ────┘
-```
-
-| Component | Responsibility | What to provide in this example |
+| `group_commit` | When the client gets its answer | When the rows become visible |
 | --- | --- | --- |
-| CDC_STREAM | Read source data and changes | JDBC URL, driver, account, source database, and source table |
-| SELECT / INSERT INTO | Map fields and select the target | order_id, status, and the pre-created target table |
-| Streaming Job | Orchestrate continuous execution and save progress | Job name, starting position, and runtime configuration |
+| `off_mode` | After its own commit | With that commit |
+| `sync_mode` | After the group commit that contains its rows | With that commit |
+| `async_mode` | As soon as its rows are in the write-ahead log (WAL) | At the group's commit, by default up to 10 seconds later |
 
-`CREATE JOB ... ON STREAMING` creates a continuous job;
-`INSERT INTO ... SELECT ... FROM CDC_STREAM(...)` describes how read results are persisted.
-SQL mapping mode requires a pre-created Unique Key target table; verify source-delete propagation and primary-key mappings as well.
-[CDC_STREAM](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/cdc-stream/)
+A group commits when it has waited `group_commit_interval_ms`, a table property of 10,000 ms by default, or when it holds `group_commit_data_bytes`, 128 MB by default. Lab 5 sets the interval of its table to 2 seconds and sends the ten orders as ten single-row loads, once with `off_mode` and once with `async_mode`. With `off_mode`, ten loads make ten transactions and the tablet's version reaches 11. With `async_mode`, all ten responses carry the same transaction ID, the tablet reaches version 2, and right after the last response a query still finds none of the ten rows: they appear when the group commits, about 2 seconds later.
 
-### How should you choose the starting position and synchronization scope?
+Two consequences. First, `sync_mode` merges only loads that are in flight at the same time: one client that waits for each answer before sending the next gets a commit per load, each taking up to the interval. Second, a Group Commit request cannot carry your label; Doris answers `label and group_commit can't be set at the same time`. Retrying such a load by label is therefore not possible, and the response's `GroupCommit` field and its generated label tell you which path the load took. See [Group Commit](https://doris.apache.org/docs/4.x/data-operate/import/load-best-practices/group-commit-manual/).
 
-- `offset="initial"`: read existing orders first, then transition to incremental changes.
-- `offset="latest"`: receive only changes after startup, without backfilling earlier orders.
-- Use this example's SQL mapping mode when a single table requires column selection, renaming, or type conversion.
-- For a group of tables following the source structure, evaluate automatic table-creation synchronization with `FROM MYSQL (...) TO DATABASE ...`.
-  Initial table creation and subsequent schema changes are separate concerns; do not assume every change is automatically compatible.
-  [Automatic table-creation synchronization](https://doris.apache.org/docs/4.x/data-operate/import/import-way/streaming-job/continuous-load-mysql-database/)
+## 5.5 Files in object storage
 
-Before starting, verify MySQL row-based Binlog, the synchronization account, JDBC driver, source table, and target primary key;
-source logs must be retained back to the position needed for recovery. Job progress answers “how far synchronization has reached,”
-while Module 7's business-version rules answer “which state of the same order is newer.” Check both against target data.
+When the files are already in S3 or another S3-compatible store, Doris can read them there, in two ways:
 
-### Reading example: relate the configuration to one order
+```text
+Fixed files in object storage ── S3 table function ── SELECT: look at the rows
+                                                    └─ INSERT INTO ... SELECT: keep them
+Fixed files in object storage ── Broker Load job ─── wait for FINISHED, then check the table
+```
 
-**External-environment example; not executed in the lab.** Prepare MySQL and the driver as described above; source table demo.orders
-contains primary key order_id and status, initially holding only `(901001, 'CREATED')`.
-First create a target table at the same grain in Doris, then create the synchronization job:
+The `S3` table function reads the files you name as rows of a query; `SELECT` alone stores nothing, and `INSERT INTO ... SELECT` writes the rows into a table in the same statement. Lab 4 does exactly this with the lake table's data file. Broker Load submits an asynchronous job: the statement returns at once, and the load is done only when `SHOW LOAD` reports `FINISHED`.
+
+**External environment example; not executed in the lab.** Placeholders in angle brackets stand for your own store; the [files and Group Commit extension](../extensions/extension45_files_and_group_commit.ipynb) runs the same job against the course's Silo.
 
 <!-- external-service-example -->
 ```sql
-CREATE TABLE orders_cdc_demo (
-    order_id BIGINT NOT NULL, status VARCHAR(20)
-) UNIQUE KEY(order_id)
-DISTRIBUTED BY HASH(order_id) BUCKETS 1
-PROPERTIES("replication_num"="1", "enable_unique_key_merge_on_write"="true");
-
-CREATE JOB orders_mysql_job ON STREAMING DO
-INSERT INTO orders_cdc_demo (order_id, status)
-SELECT order_id, status FROM CDC_STREAM(
-    "type"="mysql", "jdbc_url"="jdbc:mysql://<mysql_host>:3306",
-    "driver_url"="<driver_jar_url>", "driver_class"="com.mysql.cj.jdbc.Driver",
-    "user"="<sync_user>", "password"="<sync_password>",
-    "database"="demo", "table"="orders", "offset"="initial"
-);
-SELECT * FROM jobs("type"="insert")
-WHERE ExecuteType = 'STREAMING' AND Name = 'orders_mysql_job';
-SELECT order_id, status FROM orders_cdc_demo ORDER BY order_id;
+LOAD LABEL <database>.orders_files_202601 (
+    DATA INFILE("s3://<bucket>/orders/2026-01/*.parquet")
+    INTO TABLE <target_table>
+    FORMAT AS "parquet"
+)
+WITH S3 (
+    "AWS_ENDPOINT" = "<endpoint>", "AWS_REGION" = "<region>",
+    "AWS_ACCESS_KEY" = "<access_key>", "AWS_SECRET_KEY" = "<secret_key>"
+)
+PROPERTIES ("timeout" = "3600", "max_filter_ratio" = "0");
+SHOW LOAD WHERE Label = 'orders_files_202601';
 ```
 
-Observe “initialize → generate changes → verify results”: first wait for CREATED to appear in the target table,
-then change the same order to PAID in MySQL, wait for synchronization, and query Doris. Expect one row still, now with status PAID.
-`offset=initial` determines the snapshot-to-incremental transition, the two SELECT columns determine the mapping, and Unique Key determines target-row identity.
-Observe state and progress in jobs(), but use the final order query to confirm that the business change has arrived.
-For this reading example's version prerequisites and configuration, see
-[MySQL SQL-mapped synchronization](https://doris.apache.org/docs/4.x/data-operate/import/import-way/streaming-job/continuous-load-mysql-table/).
-After observing, pause with `PAUSE JOB WHERE jobName = 'orders_mysql_job'`,
-and resume with `RESUME JOB WHERE jobName = 'orders_mysql_job'` when continuing.
-For operation syntax, see [Continuous load job management](https://doris.apache.org/docs/4.x/data-operate/import/import-way/streaming-job/continuous-load-overview/).
+Before loading the same files again, decide what a second load should do: append, update by key, or replace a range. Appending a month's files to a Duplicate Key table twice counts that month twice. See [Broker Load](https://doris.apache.org/docs/4.x/data-operate/import/import-way/broker-load-manual/) and the [S3 table function](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/s3/).
 
-## 5.9 Incremental files in object storage
+## 5.6 Two kinds of data, two grains
 
-### Discovering new files is also a progress problem
+```text
+WWI history in Parquet ── Stream Load ──> wwi_* (ten business tables, 701,846 rows)
+Simulated new orders (CSV) ── Stream Load ──> orders_imported (ten orders, practice target)
+Raw new orders (JSON, with three errors) ── Stream Load in Module 6 ──> orders_raw ──> orders_clean ──> Module 7
+```
 
-A fixed file set is finished once loaded; a continuous directory keeps gaining files.
-The official Streaming Job + S3 TVF path addresses the latter need;
-a regular S3 query alone is not a continuous job.
+`orders_imported` is where Lab 5 practices loading, retrying, and rejecting; Level 2 starts from it. Module 6 loads the same new orders again, this time with three wrong inputs, into its own raw table, and Modules 6 and 7 continue from there. The WWI tables are the history: Module 6 reads its customer dimension from `wwi_customers` and Module 7 its products from `wwi_products`.
 
-| Scenario | Handling |
-| --- | --- |
-| orders-001.parquet appears at 09:00 | Read the file and record file-processing progress |
-| orders-002.parquet appears at 09:05 | Its filename is greater than the processed position; read it as a new file |
-| orders-000.parquet appears only at 09:10 | Its filename is less than the processed position; arrange a separate backfill |
+The history package keeps orders, order lines, customers, products, invoices, account transactions, and lookup tables: 701,846 rows in ten tables, which is not a number of orders. Each WWI order line is one product of an order, so `COUNT(*)` after joining lines to orders counts lines, and a daily report counts orders with `COUNT(DISTINCT o.OrderID)`:
 
-This path identifies new files by lexicographic filename order: a new filename must be greater than the last loaded filename.
-Upstream systems can use fixed-width, increasing batch numbers to keep publication order aligned with filename order.
-A late order's business date may be yesterday, but its new file should still use an increasing publication number.
-
-The job's `CurrentOffset` indicates the file processed so far, and `EndOffset` indicates the end position of this batch.
-When investigating “the file arrived but is not in the table,” first compare its filename with these two positions, then check path matching, job errors, and target orders.
-Overwriting a file with the same name should not be treated as a new publication batch. For rules and parameters, see
-[Continuous loading from object storage](https://doris.apache.org/docs/4.x/data-operate/import/import-way/streaming-job/continuous-load-s3/).
-
-### Reading example: add a continuous job to a file query
-
-**External-environment example; not executed in the lab.** Reuse the two-column file structure from 5.5, create another empty table,
-and use a dedicated directory containing only incremental files; do not point to a historical directory already batch-loaded.
-
-<!-- external-service-example -->
 ```sql
-CREATE TABLE orders_files_demo LIKE orders_s3_demo;
-CREATE JOB orders_files_job ON STREAMING DO
-INSERT INTO orders_files_demo (order_id, order_amount)
-SELECT order_id, order_amount FROM S3(
-    "uri"="s3://<bucket>/incremental/orders-*.parquet",
-    "s3.endpoint"="<endpoint>", "s3.region"="<region>",
-    "s3.access_key"="<access_key>", "s3.secret_key"="<secret_key>",
-    "format"="parquet"
-);
-SELECT * FROM jobs("type"="insert")
-WHERE ExecuteType = 'STREAMING' AND Name = 'orders_files_job';
-SELECT order_id, order_amount FROM orders_files_demo ORDER BY order_id;
+SELECT o.OrderDate,
+       COUNT(DISTINCT o.OrderID) AS orders,
+       SUM(l.Quantity * l.UnitPrice) AS order_amount
+FROM wwi_orders o
+JOIN wwi_order_lines l ON o.OrderID = l.OrderID
+GROUP BY o.OrderDate
+ORDER BY o.OrderDate
+LIMIT 10;
 ```
 
-First publish orders-001.parquet containing only `(901001, 180.00)`, then wait for CurrentOffset to advance and the row to appear;
-next publish orders-002.parquet containing only `(901002, 80.00)`. Expect two rows totaling 260.00.
-Unlike 5.5, CREATE JOB keeps the file query running continuously; there is no need to repeat INSERT manually.
-If orders-000.parquet is published afterward, it will not be read as a new file under this section's rules; arrange a separate backfill.
-See the object-storage continuous-loading documentation above for job syntax and progress fields.
-After observing, also pause this job with `PAUSE JOB WHERE jobName = 'orders_files_job'` to avoid consuming subsequent files.
+WWI's customer transactions are payments and invoices on a customer's account, not on an order: they cannot be split into per-order payments. The [further reading on invoices and account receipts](optional05_invoice_and_receipts.md) compares the three kinds of amounts; it is not part of the Lab. The simulated orders 900001–900010 use WWI's customers and products but their own prices, regions, and times, marked `COURSE_SIMULATION`.
 
-## Hands-on Lab 5: Batch loading, failures, and retries
+## Lab 5: Batch Loading, Failures, and Retries
 
-Before starting, complete the relevant concepts from Modules 1–4 and keep the course sandbox running; the tools automatically configure the BE HTTP address in the same container, continuing to use the isolated course lab database.
+Open [Lab 5: Batch Loading, Failures, and Retries](lab05_stream_load.ipynb). You:
 
-Open [Lab 5](lab05_stream_load.ipynb) and complete these steps in order:
+1. Load the ten simulated orders with a Stream Load request written out in Python, and check the response and the table: ten orders, 1400.00.
+2. Resend the same batch with the same label, and load a batch with a bad amount; the table keeps its ten orders.
+3. Send the same ten orders as ten single-row loads, without and with Group Commit, and compare transactions, versions, and visibility.
+4. Load the ten WWI history tables from Parquet, and check their keys, relationships, and amounts.
+5. Practice: load a CSV whose first two columns are in another order.
 
-1. Load the simulated new-order CSV, inspect the response, and verify ten rows and 1400.00.
-2. Retry the same batch within the label's retention period, then observe rejection of the invalid batch.
-3. Extend the same ingestion method to ten WWI historical Parquet tables, checking primary keys, relationships, and amounts.
-4. Independently map columns for a new CSV and verify order IDs, customer IDs, and amounts.
+You need the course sandbox from Module 1. The Lab does not use the lake environment of Module 4.
 
-### Data sources and notes
+## Summary
 
-Historical data comes from Microsoft WWI; new orders and changes are marked COURSE_SIMULATION, referencing WWI customers and products without backfilling history.
-See the [Data guide](../../datasets/README.md) for fields, business definitions, and expected results.
+- Choose the load method from where the data is and how it arrives: Stream Load for a finite local file, the S3 table function or Broker Load for files in object storage, Group Commit for many small writes, and Routine Load or CDC for data that keeps arriving.
+- A CSV is mapped by position with `columns`, JSON by key, and Parquet by field name; a default fills only a column that a write leaves out, and never stands in for a business fact.
+- Read a load's JSON, not its HTTP status, and then check the table's rows, keys, relationships, and amounts; with `strict_mode` and `max_filter_ratio` = 0, one bad row fails the whole batch.
+- A label makes a retry of the same batch load nothing twice, for about 12 hours; a new label loads again, and business duplicates need business keys and versions.
+- Group Commit merges small loads into fewer transactions and versions; in `async_mode` the answer comes before the rows are visible, and a Group Commit load cannot carry a label.
+- WWI order lines, account transactions, and the simulated orders have different grains and sources: count orders, not lines, and do not force account receipts onto orders.
 
-See [Level 1 extension labs](../extensions/README.md) for additional operations, performed in separate `ext_*` tables without repeatedly modifying this lab's business results.
+## Quiz 5
 
-## Module Summary
-
-- Choose ingestion paths by source, batch versus continuous operation, and completion method; Stream Load, S3 TVF, Routine Load, and CDC are not a fixed pipeline.
-- CSV requires explicit column order and separators; Parquet requires fields aligned with DDL. Defaults cannot invent business facts such as payments.
-- Check load transactions and loaded/filtered row counts first, then query target details, relationships, and amounts; HTTP success is insufficient.
-- The same label identifies same-batch requests within a limited period, business keys identify events, and job progress supports recovery; none replaces the others.
-- Historical order lines, account receipts, and simulated orders have different grains and sources; preserve WWI history rather than forcing account receipts onto individual orders.
-
-## Knowledge Quiz 5: Batch and Continuous Data Ingestion
-
-After completing the reading and lab, open [Quiz 5](quiz05_load_methods_and_retry_safety.ipynb).
-The quiz has five single-choice questions and requires neither Doris nor external services; read the explanations after submitting.
+Open [Quiz 5: Batch and Continuous Data Ingestion](quiz05_load_methods_and_retry_safety.ipynb). It has six single-choice questions and needs no running environment. The continuous ingestion reading has its own [quiz](quiz05_continuous_ingestion.ipynb).
 
 Next module: [Module 6: Data Quality and Schema Validation](../module06-data-quality/course.md).
 
-## Official References
+## References
 
-- [Data loading overview](https://doris.apache.org/docs/4.x/data-operate/import/load-manual/)
-- [Stream Load](https://doris.apache.org/docs/4.x/data-operate/import/import-way/stream-load-manual/)
-- [S3 file table-valued function](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/s3/)
-- [INSERT INTO SELECT](https://doris.apache.org/docs/4.x/data-operate/import/import-way/insert-into-manual/)
-- [Broker Load](https://doris.apache.org/docs/4.x/data-operate/import/import-way/broker-load-manual/)
-- [Routine Load](https://doris.apache.org/docs/4.x/data-operate/import/import-way/routine-load-manual/)
-- [Group Commit](https://doris.apache.org/docs/4.x/data-operate/import/load-best-practices/group-commit-manual/)
-- [Flink Doris Connector](https://doris.apache.org/docs/4.x/connection-integration/data-integration/flink-doris-connector/)
-- [CREATE STREAMING JOB](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/job/CREATE-STREAMING-JOB/)
-- [CDC_STREAM table-valued function](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/cdc-stream/)
-- [MySQL single-table SQL-mapped synchronization](https://doris.apache.org/docs/4.x/data-operate/import/import-way/streaming-job/continuous-load-mysql-table/)
-- [MySQL automatic table-creation synchronization](https://doris.apache.org/docs/4.x/data-operate/import/import-way/streaming-job/continuous-load-mysql-database/)
-- [Continuous loading from object storage](https://doris.apache.org/docs/4.x/data-operate/import/import-way/streaming-job/continuous-load-s3/)
+- [Apache Doris: Loading overview](https://doris.apache.org/docs/4.x/data-operate/import/load-manual/)
+- [Apache Doris: Stream Load](https://doris.apache.org/docs/4.x/data-operate/import/import-way/stream-load-manual/)
+- [Apache Doris: Group Commit](https://doris.apache.org/docs/4.x/data-operate/import/load-best-practices/group-commit-manual/)
+- [Apache Doris: S3 table function](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/s3/)
+- [Apache Doris: INSERT INTO SELECT](https://doris.apache.org/docs/4.x/data-operate/import/import-way/insert-into-manual/)
+- [Apache Doris: Broker Load](https://doris.apache.org/docs/4.x/data-operate/import/import-way/broker-load-manual/)
+- [Apache Doris: Data types](https://doris.apache.org/docs/4.x/table-design/data-type/)

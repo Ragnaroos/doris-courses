@@ -4,14 +4,16 @@ Lab 4 uses the course Doris instance to query real Iceberg tables. Running the p
 
 | Service | Pinned Image | Local Port | Stored Content |
 | --- | --- | --- | --- |
-| Silo (S3-compatible object storage) | pgsty/silo:RELEASE.2026-10-18T00-00-00Z | 51900 | Iceberg metadata files and Parquet data |
-| Iceberg REST Catalog | apache/iceberg-rest-fixture:1.10.0 | 51818 | SQLite table catalog |
+| Silo (S3-compatible object storage) | pgsty/silo:RELEASE.2026-10-18T00-00-00Z | 51900 (`DW_LAKE_S3_PORT`) | Iceberg metadata files and Parquet data |
+| Iceberg REST Catalog | apache/iceberg-rest-fixture:1.10.0 | 51818 (`DW_LAKE_REST_PORT`) | SQLite table catalog |
 
 [Silo](https://github.com/pgsty/silo) is an open-source (AGPLv3) fork of the MinIO server maintained by the Pigsty project.
 It keeps MinIO's S3 API and its `MINIO_*` settings; the course uses it because MinIO no longer publishes community container images.
 
-Complete Lab 1 first, install the dependencies in the course requirements.txt, and confirm that both ports are free.
-Then run the code in Lab 4 in order; preparation displays progress and verifies the ten orders.
+Complete Lab 1 first and install the dependencies in the course requirements.txt.
+Then run the code in Lab 4 in order; preparation checks both ports, displays progress, and verifies the ten orders.
+If a port is in use, preparation stops before starting anything and names the port; free it, or restart Jupyter with
+the variable set to a free port, for example `DW_LAKE_S3_PORT=61900`.
 The first run requires network access to download images. Later runs reuse data in the named volumes and check that the sample matches the course manifest.
 
 The helper containers join the same Docker network as the course Doris instance. Each lab database uses a separate Catalog and lake table namespace;

@@ -172,10 +172,33 @@ class StreamingTest(unittest.TestCase):
         context.__exit__ = Mock(return_value=False)
         cursor.return_value.description = [("Name",), ("TableName",)]
         cursor.return_value.fetchall.side_effect = [
-            [("course_orders_" + "a" * 12, "ext_kafka_orders")], []
+            [("course_orders_" + "a" * 12, "ext_kafka_orders"),
+             ("course_practice_" + "b" * 12, "ext_kafka_practice")], []
         ]
-        self.assertEqual(streaming.cleanup_kafka_routine_load(lab), ["course_orders_" + "a" * 12])
-        lab.execute.assert_called_once_with("STOP ROUTINE LOAD FOR course_orders_aaaaaaaaaaaa")
+        self.assertEqual(streaming.cleanup_kafka_routine_load(lab),
+                         ["course_orders_" + "a" * 12, "course_practice_" + "b" * 12])
+        self.assertEqual([call.args[0] for call in lab.execute.call_args_list],
+                         ["STOP ROUTINE LOAD FOR course_orders_aaaaaaaaaaaa",
+                          "STOP ROUTINE LOAD FOR course_practice_bbbbbbbbbbbb"])
+        # A job of the right name on another table is not this lab's.
+        lab.execute.reset_mock()
+        cursor.return_value.fetchall.side_effect = [[("course_orders_" + "a" * 12, "orders")]]
+        with self.assertRaisesRegex(RuntimeError, "outside this lab"):
+            streaming.cleanup_kafka_routine_load(lab)
+        lab.execute.assert_not_called()
+
+    def test_routine_load_state_reads_one_job_by_column_name(self):
+        lab = Mock()
+        context = lab.connection.cursor.return_value
+        cursor = context.__enter__ = Mock()
+        context.__exit__ = Mock(return_value=False)
+        cursor.return_value.description = [("Name",), ("State",)]
+        cursor.return_value.fetchall.return_value = [("course_practice_abc", "PAUSED")]
+        self.assertEqual(streaming.routine_load_state(lab, "course_practice_abc")["State"], "PAUSED")
+        cursor.return_value.execute.assert_called_with("SHOW ROUTINE LOAD FOR course_practice_abc")
+        cursor.return_value.fetchall.return_value = []
+        with self.assertRaisesRegex(RuntimeError, "Expected one"):
+            streaming.routine_load_state(lab, "course_practice_abc")
 
     def test_cleanup_cancels_only_stale_course_cdc_jobs(self):
         job_id = "b" * 32
@@ -206,7 +229,7 @@ class StreamingTest(unittest.TestCase):
     def test_resource_profile_and_base_configuration(self):
         overlay = ROOT / "environments/streaming/doris-resources.yml"
         config = yaml.safe_load(overlay.read_text())
-        self.assertEqual(config["services"]["doris"], {"mem_limit": "12g", "memswap_limit": "12g"})
+        self.assertEqual(config["services"]["doris"], {"mem_limit": "6g", "memswap_limit": "6g"})
         self.assertNotIn(str(overlay), docker_runtime.compose_command("up"))
         command = docker_runtime.compose_command("up", streaming=True)
         self.assertIn(str(overlay), command)
@@ -215,8 +238,8 @@ class StreamingTest(unittest.TestCase):
 
     def test_resource_preflight_capacity(self):
         cases = [
-            ("kafka", 14, 4, True), ("kafka", 13, 4, False),
-            ("cdc", 18, 4, True), ("cdc", 17, 4, False),
+            ("kafka", 8, 4, True), ("kafka", 7, 4, False),
+            ("cdc", 10, 4, True), ("cdc", 9, 4, False),
             ("cdc", 32, 2, False),
         ]
         for profile, gib, cpus, succeeds in cases:
@@ -236,7 +259,8 @@ class StreamingTest(unittest.TestCase):
             run.assert_not_called()
 
     def test_streaming_startup_uses_overlay_for_every_compose_command(self):
-        with patch.object(streaming, "check_resources") as check, patch.object(docker_runtime, "_run") as run, patch.object(docker_runtime, "_verify_sql"), patch.object(docker_runtime, "WorkflowProgress"):
+        with patch.object(streaming, "check_resources") as check, patch.object(docker_runtime, "_run") as run, patch.object(docker_runtime, "_verify_sql"), \
+                patch.object(docker_runtime, "check_host_ports"), patch.object(docker_runtime, "WorkflowProgress"):
             docker_runtime.prepare_environment(start=True, streaming=True)
             check.assert_called_once()
             commands = [call.args[0] for call in run.call_args_list if call.args[0][:2] == ["docker", "compose"] and "--project-name" in call.args[0]]
@@ -302,7 +326,8 @@ class StreamingTest(unittest.TestCase):
             self.assertIn('dw_course_l1_streaming', text)
             self.assertNotIn("DROP DATABASE", text)
             self.assertNotIn("down -v", text)
-            self.assertIn("lab.close()", notebook.cells[-1].source)
+            last_code = [cell for cell in notebook.cells if cell.cell_type == "code"][-1]
+            self.assertIn("lab.close()", last_code.source)
             sources.append(text)
         self.assertIn("CREATE ROUTINE LOAD", "\n".join(sources))
         self.assertIn("'connector'='mysql-cdc'", "\n".join(sources))

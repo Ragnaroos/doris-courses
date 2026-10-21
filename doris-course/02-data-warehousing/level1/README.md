@@ -30,18 +30,18 @@ Follow Modules 1–7 in order. Module 6 completes data quality validation, and M
 
 ## Completion Requirements
 
-Complete the seven main Labs, independent exercises, and Quizzes. For Kafka, Flink CDC, CDC_STREAM, continuous file ingestion, and recovery from real source positions, you only need to understand the scenarios, architecture, configuration process, and caveats; you are not required to set up external pipelines. The three existing basic extension Notebooks and the two newly added continuous ingestion Labs are all optional; continuous concurrency validation is advanced material. Configuration-reading examples in the lessons and the fixed environments of the optional Labs are managed separately.
+Complete the seven Labs with their practices, and the seven Quizzes. For Kafka, Flink CDC, CDC_STREAM, continuous file ingestion, and recovery from a source's saved position, you need to understand the scenarios, the architecture, the configuration, and the caveats; you do not have to set up a pipeline. The three extension notebooks and the continuous-ingestion Labs 5A and 5B are optional. The configuration examples in the lessons are for reading; the optional Labs bring their own environment, described below.
 
 ## Optional: Real Continuous Ingestion
 
 After completing the main sequence, you can separately start the [Continuous Ingestion Environment](../environments/streaming/README.md):
 
-| Lab | Content | Suggested Time |
-|---|---|---|
-| [Lab 5A: Kafka and Routine Load](module05-ingestion/optional05_kafka_routine_load.ipynb) | Send orders, inspect progress, pause to build a backlog, resume, and update | 25–40 minutes |
-| [Lab 5B: MySQL and Flink CDC](module05-ingestion/optional05_flink_mysql_cdc.ipynb) | Single-table snapshot, inserts/deletes/updates, Checkpoint and Savepoint recovery; reusable in Module 7 | 35–50 minutes |
+| Lab | Content | Suggested Time | Docker memory and CPUs | First download |
+|---|---|---|---|---|
+| [Lab 5A: Kafka and Routine Load](module05-ingestion/optional05_kafka_routine_load.ipynb) | Send orders, inspect progress, pause to build a backlog, resume, update, and a message that the table rejects | 30 minutes | 8 GiB, 4 CPUs | About 640 MB |
+| [Lab 5B: MySQL and Flink CDC](module05-ingestion/optional05_flink_mysql_cdc.ipynb) | Single-table snapshot, inserts/deletes/updates, Checkpoint and Savepoint recovery; reusable in Module 7 | 40 minutes | 10 GiB, 4 CPUs | About 1.6 GB |
 
-These two Labs use separate demonstration databases, do not change the main sequence's data baseline, and do not increase the video count. CDC_STREAM and continuous file ingestion remain introductory topics only.
+These two Labs use separate demonstration databases and do not change the main sequence's data baseline. Each step shows its Expected result, so you can read a Lab that your machine cannot run. CDC_STREAM and continuous file ingestion remain introductory topics only.
 
 ## How Does Data Carry Through Level 1?
 
@@ -66,7 +66,7 @@ For example, sample means a small sample, current means current state, and raw m
 | orders_batch, orders_rowwise | Comparison tables holding the same orders written in batches and row by row, respectively |
 | orders_duplicate, orders_unique, orders_aggregate | Lab tables for comparing the three table models |
 | orders_partitioned | Order table for observing date partitioning and bucket pruning |
-| orders_from_lake, customers_sample | Lake table import results and customer sample for joins |
+| orders_from_lake, orders_from_file, customers_sample | Orders loaded from the lake table and from its data file, and the customer sample for joins |
 | wwi_orders, wwi_customers, and other wwi_ tables | Ten complete historical business tables retaining their WWI provenance |
 | orders_imported | Simulated new orders imported through Stream Load |
 | orders_raw, orders_classified | Raw order inputs and a classification view with validation results |
@@ -93,7 +93,7 @@ without modifying the current orders table. Each Lab rebuilds only the tables it
 1. Read each step's purpose and expected results, then run the code immediately following it.
 2. Compare the actual results and explain what the amounts, states, and row counts each represent.
 3. If results differ, inspect the details and execution order first; do not directly change the expected values.
-4. Complete the tasks in the blank code cells under “Independent Exercise,” then expand the reference answers to check your work. Running all code does not complete the independent exercises for you.
+4. Each Lab ends with one or two practices: write your code in the blank cell under the practice, then expand the collapsed reference solution after it to compare. Run All runs the reference solutions too, so run the cells one by one when you want to try first.
 5. Complete the five quiz questions to check your conceptual understanding and practical choices.
 
 After restarting the kernel, rerun that Notebook's initialization and connection cells.
@@ -104,15 +104,15 @@ Course Labs rebuild only their own tables; the exact scope is stated at the begi
 Running the Module 4 Lab starts two helper containers on demand to prepare real Iceberg lake tables.
 The first start requires image downloads; see [Lake Table Environment](../environments/lakehouse/README.md) for ports and shutdown instructions.
 
-The Module 5 Lab practices Stream Load using files in the repository; the historical package is automatically extracted and validated on first read.
-The Kafka, CDC, object storage, and Group Commit sections in the lesson teach ingestion choices and operating mechanisms.
+The Module 5 Lab practices Stream Load and Group Commit using files in the repository; the historical package is automatically extracted and validated on first read.
+Kafka, CDC, and Streaming Jobs are in the optional reading [Continuous Ingestion](module05-ingestion/optional05_continuous_ingestion.md), with its own quiz and the optional Labs 5A and 5B.
 Modules 2 and 3 use ten orders to explain storage and models; performance evaluation requires separately prepared data volumes and workloads appropriate to the evaluation.
 
 Connections remain available after you finish a Lab, so you can continue querying. When you finish studying, shut down that Notebook's kernel to release the connections; course data in the database is retained.
 
 ## Supplementary Activities
 
-After completing the main sequence, you can continue with the [Level 1 Extension Labs](extensions/README.md): scaling up data and Profile, batch file ingestion, defaults/generated columns, batch commit acknowledgment, schema changes, and deletes through ingestion. Extensions do not increase the video count; their dependencies and reset scopes are documented separately.
+After completing the main sequence, you can continue with the [Level 1 Extension Labs](extensions/README.md): scaling up data and Profile, batch file ingestion, defaults/generated columns, batch commit acknowledgment, schema changes, and deletes through ingestion. The extensions README lists what each one needs and which tables it resets.
 
 ## Next: Level 2
 

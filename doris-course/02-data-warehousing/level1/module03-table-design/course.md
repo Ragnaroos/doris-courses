@@ -1,59 +1,54 @@
 # Module 3: Doris Table Models, Partitioning, and Bucketing
 
-| Course Information | Details |
+| Course information | Value |
 | --- | --- |
 | Course | Data Warehousing with Apache Doris · Level 1 |
-| Product Version | Apache Doris 4.x |
-| Lab Version | Apache Doris 4.1.3 |
-| Estimated Time | About 55 minutes, including reading, the hands-on lab, and quiz |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox from Module 1 |
+| Estimated time | About 60 minutes: reading 25, Lab 25, quiz 10 |
 
-[Course contents](../README.md) · [Open Lab 3](lab03_models_and_pruning.ipynb) · [Open Quiz 3](quiz03_models_and_data_distribution.ipynb)
+[Course README](../../README.md) · [Open Lab 3](lab03_models_and_pruning.ipynb) · [Open Quiz 3](quiz03_models_and_data_distribution.ipynb)
 
-## Module Goal
+## Module goal
 
-This module introduces the three Doris table models and the roles of partitioning and bucketing.
+Choose how a table treats rows with the same key, and where it stores its rows, so that writes keep the right business result and queries read only what they need.
 
-After completing this module, you will be able to compare how different models handle duplicate keys and use EXPLAIN to inspect query scan ranges.
+## Learning objectives
 
-## Learning Objectives
+After completing this module, you will be able to:
 
-After completing this module, you should be able to:
+1. Predict the results of the same input in the Duplicate, Unique, and Aggregate Key models.
+2. Choose a key model and key columns for detail records, current state, or additive metrics.
+3. Distinguish partitions, buckets, sort keys, and business unique keys.
+4. Read EXPLAIN to tell partition pruning from bucket pruning.
+5. Explain what Merge-on-Write does for a Unique Key table.
+6. Tell a smaller plan from a measured speedup.
 
-1. Predict the results of the same input in the Duplicate, Unique, and Aggregate models.
-2. Choose logical keys and table models for detail records, current state, or aggregate metrics.
-3. Distinguish the roles of partitions, buckets, sort keys, and business unique keys.
-4. Use EXPLAIN to compare scan ranges with date filters and bucket-key filters.
-5. Verify results using both detail records and amounts, without equating plan pruning with performance gains.
+## Module structure
 
-## Module Schedule
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 3.1 Three Key Models | 7 min | What the same writes leave in each model |
+| 3.2 Choose a Model by What a Row Means | 4 min | Keys for details, current state, and metrics |
+| 3.3 Merge-on-Write | 3 min | How a Unique Key table keeps only the latest row |
+| 3.4 Partitions, Buckets, and Sort Keys | 6 min | Where rows are stored, and why that is not uniqueness |
+| 3.5 Read the Plan | 5 min | Partition pruning, bucket pruning, and what a plan does not prove |
+| Lab 3 | 25 min | Compare the three models, and three plans of a partitioned table |
+| Quiz 3 | 10 min | Six questions on these objectives |
 
-| Section | Learning Format | Suggested Time | Learning Outcome |
-| --- | --- | --- | --- |
-| 3.1 Doris Key Model | Compare input and results | 10 minutes | Choose models for detail records, current state, and aggregates |
-| 3.2 Partitioning, bucketing, and data distribution | DDL and query plans | 15 minutes | Distinguish physical organization from logical uniqueness |
-| Lab 3 | Hands-on practice | 25 minutes | Verify results for three models and compare three filter plans |
-| Quiz 3 | Interactive quiz | 5 minutes | Check model selection, keys, and plan evidence |
+## 3.1 Three Key Models
 
-## 3.1 Doris Key Model
+The key model chosen when a table is created decides what happens to rows with the same key. A raw input table must keep every input, a current-order table the latest amount, and a sales summary must add up its metrics: keeping details, updating by key, and aggregating by function. Decide first what one row means, then choose the model.
 
-The Key Model selected when creating a table determines how data with identical keys is handled.
-A raw ingestion table needs to retain every input, a current-order table needs to reflect the latest amounts, and a sales summary table needs to accumulate metrics.
-These three needs correspond to retaining detail records, updating by key, and aggregating by function. First determine the business meaning of a row,
-then choose a model so that write behavior matches the report's metric definitions.
+WWI order 1 has an amount of 2300.00, and order 2 one of 405.00. In separate Lab tables, simulate correcting order 1 to 2250.00, writing three rows in this order and waiting for each write to finish:
 
-### Why does the same input produce different results?
-
-WWI order 1 has an amount of 2300.00, and order 2 has an amount of 405.00. Now, in isolated lab tables,
-simulate correcting the amount of order 1 to 2250.00.
-Submit three writes in the order below, waiting for each write to complete:
-
-| Write order | id | amount | Meaning |
+| Write | id | amount | Meaning |
 | --- | ---: | ---: | --- |
-| 1 | 1 | 2300.00 | Original amount of order 1 |
-| 2 | 1 | 2250.00 | Corrected amount of order 1 |
-| 3 | 2 | 405.00 | Amount of order 2 |
+| 1 | 1 | 2300.00 | The original amount of order 1 |
+| 2 | 1 | 2250.00 | The corrected amount of order 1 |
+| 3 | 2 | 405.00 | The amount of order 2 |
 
-**Duplicate Key: retain every detail record.** The key determines sorting; it is not a uniqueness constraint.
+**Duplicate Key keeps every row.** Its key decides the sort order; it is not a uniqueness constraint.
 
 | id | amount |
 | ---: | ---: |
@@ -61,25 +56,23 @@ Submit three writes in the order below, waiting for each write to complete:
 | 1 | 2300.00 |
 | 2 | 405.00 |
 
-**Unique Key: retain the current value for each key.** With sequential submissions and no Sequence column in this example,
-a later write replaces the earlier value with the same key; handling out-of-order business versions also requires the version rules in Module 7.
+**Unique Key keeps the current value of each key.** Written one after another, and without a Sequence column, a later row replaces the earlier one with the same key; Module 7 adds versions for events that arrive out of order.
 
 | id | amount |
 | ---: | ---: |
 | 1 | 2250.00 |
 | 2 | 405.00 |
 
-**Aggregate Key: merge values using the declared function.** In this example, amount is declared as SUM:
+**Aggregate Key merges values with the declared function**, here `SUM`:
 
 | id | amount |
 | ---: | ---: |
 | 1 | 4550.00 |
 | 2 | 405.00 |
 
-4550.00 is 2300.00 + 2250.00. The engine performed SUM correctly,
-but this is not the current amount of order 1: two snapshots cannot be added together as two sales.
+4550.00 is 2300.00 + 2250.00. Doris computed the sum correctly, but it is not an amount that order 1 ever had: two versions of one amount are not two sales.
 
-After completing Lab 3, you can verify each result:
+After Lab 3, check each result:
 
 ```sql
 SELECT id, amount FROM orders_duplicate ORDER BY id, amount;
@@ -87,42 +80,43 @@ SELECT id, amount FROM orders_unique ORDER BY id;
 SELECT id, amount FROM orders_aggregate ORDER BY id;
 ```
 
-### Ask "what does one row represent?" before choosing a model
+## 3.2 Choose a Model by What a Row Means
 
-| What to retain | Logical identifier | Model used in this course |
+| What to keep | Its identifier | Model in this course |
 | --- | --- | --- |
-| Every raw delivery | Delivery ID | Duplicate Key retains every record |
-| The current state of an order | order_id | Unique Key, with business versions added in Module 7 |
-| Each distinct business event | event_id | Unique Key deduplicates redeliveries of identical content |
-| Additive metrics accumulated by dimension | A combination of dimensions such as date and product | Aggregate Key, with explicit functions such as SUM |
+| Every raw delivery | A delivery ID | Duplicate Key keeps every row |
+| The current state of an order | order_id | Unique Key, with business versions in Module 7 |
+| Each distinct business event | event_id | Unique Key keeps a redelivered event once |
+| Additive metrics by dimension | A combination such as date and product | Aggregate Key, with an explicit function such as SUM |
 
-Both current-state and history tables can use Unique Key, but their keys and purposes differ.
-Using order_id in a history table would overwrite distinct events for the same order.
-See the official references for the three models at the end for their precise semantics.
+Current state and history can both use Unique Key, with different keys: a history keyed by `order_id` would overwrite the different events of one order. The References give each model's exact rules.
 
-## 3.2 Partitioning, bucketing, and data distribution
+## 3.3 Merge-on-Write
 
-### Do not confuse these four design choices
+A Unique Key table must answer queries with only the latest row of each key, although older rows of the same key are still in earlier rowsets (Module 2). **Merge-on-Write** (MoW) settles this when a row is written: Doris finds the older row of the same key and marks it as replaced, so a query reads each key's latest row without merging at read time. It is the default for new Unique Key tables in Doris 4.x, and Lab 3 sets it explicitly:
 
-After deciding "how to handle the same order," you also need to decide "where to store the data." For example, for daily order reports,
-partition by date so that a query for yesterday focuses on yesterday's data; then bucket each day's data by order ID,
-distributing it across multiple Tablets to provide shards for parallel processing.
+```text
+UNIQUE KEY(id)
+"enable_unique_key_merge_on_write" = "true"
+```
 
-| Design | Question answered | Example in this section |
+Marked rows are not removed from the files at once: compaction removes them later. Merge-on-Write changes when the merging happens, not which row wins: here, without a Sequence column, the last write. Module 7 uses it for current order state, with a version column that decides which row is newer.
+
+## 3.4 Partitions, Buckets, and Sort Keys
+
+After deciding how to treat rows with the same key, decide where to store them. For daily order reports, partition by date, so that a query for yesterday reads yesterday's data; then bucket each day by order ID, spreading it over several tablets that can be scanned in parallel.
+
+| Design | The question it answers | Example in Lab 3 |
 | --- | --- | --- |
-| Partitioning | Which data belongs to the same range, and which ranges can be skipped? | Two days partitioned by order_date |
-| Bucketing | How is data within a partition distributed across Tablets? | HASH(order_id), four buckets per partition |
-| Sort key | How is data sorted in storage? | order_date, order_id |
-| Business unique key | What identifies the same business object? | The current state of an order is identified by order_id |
+| Partitioning | Which rows belong to one range, and which ranges a query can skip | One partition per day, by order_date |
+| Bucketing | How a partition's rows are spread over tablets | HASH(order_id), four buckets per partition |
+| Sort key | How rows are sorted in storage | order_date, order_id |
+| Business unique key | What identifies one business object | An order's current state by order_id |
 
-The lab's partitioned table uses Duplicate Key to retain historical detail records, with date and order ID used for sorting.
-When creating a separate current-order table, recheck the business unique key: if an order's date can be corrected,
-including the date in the unique key would identify the records before and after correction as two different keys.
+The partitioned table is a Duplicate Key table that keeps historical details, sorted by date and order ID. A current-order table needs its own business key: if an order's date can be corrected, a key that includes the date would treat the order before and after the correction as two orders.
 
-### Specify partitioning and bucketing in the CREATE TABLE statement
-
-**SQL reading example: corresponds to the table creation step in Lab 3. Do not rerun it after completing the lab.**
-Initialization and resets are still performed in the lab. First read the statement below to understand the layout:
+**SQL reading example: the table that Lab 3 creates. Do not rerun it after the Lab.**
+The Lab creates and resets it; read it first to understand the layout:
 
 <!-- reading-only-example -->
 ```sql
@@ -137,31 +131,26 @@ DISTRIBUTED BY HASH(order_id) BUCKETS 4
 PROPERTIES("replication_num"="1");
 ```
 
-- The date and order ID in DUPLICATE KEY organize sorting; they do not guarantee unique order IDs.
-- PARTITION BY RANGE partitions by date; each range includes its left endpoint and excludes its right endpoint.
-- DISTRIBUTED BY HASH buckets by order ID; BUCKETS 4 means four buckets per partition, not four BEs.
-- replication_num=1 is a single-replica setting for the teaching sandbox, not a production disaster recovery solution.
+- `DUPLICATE KEY(order_date, order_id)` sorts the rows by date and order ID; it does not make order IDs unique.
+- `PARTITION BY RANGE` partitions by date; each range includes its left end and excludes its right end.
+- `DISTRIBUTED BY HASH(order_id) BUCKETS 4` gives each partition four buckets, by a hash of the order ID: four tablets per partition, not four BEs.
+- `replication_num=1` keeps one copy, which suits the one-BE sandbox, not production.
 
-Therefore, orders dated 2013-01-02 belong to p_day2; the target bucket within the partition is then calculated from the order ID.
-This example has only a base index, with the following physical layout:
+So the orders of 2013-01-02 belong to `p_day2`, and the hash of each order ID picks one of that partition's buckets. The table has only its own data, its **base index**, with no rollup or synchronous materialized view that would store another copy in more tablets:
 
 ```text
 orders_partitioned
 ├── p_day1: 2013-01-01 ≤ order_date < 2013-01-02
-│   └── HASH(order_id), 4 Tablets
+│   └── HASH(order_id), 4 tablets
 └── p_day2: 2013-01-02 ≤ order_date < 2013-01-03
-    └── HASH(order_id), 4 Tablets
+    └── HASH(order_id), 4 tablets
 ```
 
-### Compare three query plans
+More buckets give more shards to scan in parallel, and more tablets to manage: choose the number from the data's size. See [Partitioning and bucketing](https://doris.apache.org/docs/4.x/table-design/data-partitioning/basic-concepts/).
 
-Hash bucketing calculates the target bucket from the bucket column's value. Within a partition, identical order IDs go into the same bucket;
-the bucket number is calculated by Hash, so the order ID itself is not the bucket number. When a query specifies equality conditions on both date and order ID,
-Doris can potentially narrow the scan to one day and then to the bucket containing that order.
-The bucket count determines the number of shards. More buckets also mean more management overhead, so choose the count based on data volume.
-For the relevant rules, see [Partitioning and bucketing](https://doris.apache.org/docs/4.x/table-design/data-partitioning/basic-concepts/).
+## 3.5 Read the Plan
 
-Run after initializing the lab:
+A hash bucket is computed from the bucketing column's value, so within a partition the same order ID always lands in the same bucket. A query that fixes both the date and the order ID can therefore read one partition, and in it one bucket. Lab 3 compares three plans:
 
 ```sql
 EXPLAIN SELECT * FROM orders_partitioned;
@@ -170,17 +159,15 @@ EXPLAIN SELECT * FROM orders_partitioned
 WHERE order_date = '2013-01-01' AND order_id = 1;
 ```
 
-| Query | Changes to observe | Reason |
-| --- | --- | --- |
-| No filter | Both partitions and their Tablets | No dates or orders are excluded |
-| Date filter | Only the first day's partition is needed | The second day's data does not meet the date condition |
-| Date + order ID | Further narrows the Tablet range within the first day | A Hash-key equality condition can be used for bucket pruning |
+| Query | `partitions=` | `tablets=` | Why |
+| --- | --- | --- | --- |
+| No filter | 2/2 | 8/8 | Nothing rules out a day or an order |
+| Date | 1/2 | 4/4 | The second day cannot match: **partition pruning** |
+| Date and order ID | 1/2 | 1/4 | Only one bucket can hold order 1: **bucket pruning** |
 
-Find the selected partition and Tablet counts in the scan node; exact field names vary by version.
-EXPLAIN shows the planned scan range. Actual query duration also depends on scan volume, caching, and computation overhead;
-analyze it alongside execution results and the Query Profile.
+In the scan node `VOlapScanNode`, `tablets=` counts the tablets of the partitions that remain, so the denominator drops from 8 to 4. Field names can change between versions; look for the scan node and these two lines.
 
-### Pruning must not change the answer
+### Pruning must not change the answer, and is not yet a speedup
 
 ```sql
 SELECT COUNT(*) AS sample_orders, SUM(amount) AS order_amount
@@ -188,47 +175,40 @@ FROM orders_partitioned
 WHERE order_date = '2013-01-01';
 ```
 
-The result should be five orders and 3944.20. Adding order_id=1 should return the original amount of 2300.00 for order 1,
-not the corrected value of 2250.00 in the isolated model experiment; the data in these two sets of tables serves different purposes.
-This section only verifies model semantics and plan pruning; it does not use a ten-order sample to compare production performance.
+Expect five orders and 3944.20, with or without the order ID filter; adding `order_id = 1` returns order 1's original 2300.00, not the 2250.00 of the model experiment, which used separate tables.
 
-## Hands-on Lab 3: Model semantics, partitioning, and bucketing
+A plan that reads a quarter of the tablets will not necessarily run four times faster: the time also depends on how much each tablet holds, caching, and fixed costs, and on ten orders all three queries take about the same time. A smaller plan is a reason to expect less work; a speedup is something you measure, with the same data and machine, and the Query Profile of Module 2 shows what each scan read.
 
-Before starting, complete Module 1 and Module 2 to understand the order fields and basic storage structure, and use the course's isolated lab database.
+## Lab 3: Model Semantics, Partitioning, and Bucketing
 
-Open [Lab 3](lab03_models_and_pruning.ipynb) and complete these steps in order:
+Open [Lab 3: Model Semantics, Partitioning, and Bucketing](lab03_models_and_pruning.ipynb). You:
 
-1. Write different amounts with the same key to the three models and verify the results row by row.
-2. Create a separate date-partitioned detail table and prepare different filters for the same query.
-3. Compare plans and results with no filter, a date filter, and a date plus order ID filter.
+1. Write the same three rows into a Duplicate, a Unique, and an Aggregate Key table and compare what each keeps.
+2. Create the partitioned table and compare the plans of a query without a filter, with a date filter, and with a date and an order ID.
+3. Practice: decide which model answers "what is order 1's amount now", then choose a model for two orders' current amounts.
 
-### Data sources and notes
+You need the course sandbox from Module 1. The [Level 1 extension labs](../extensions/README.md) compare the same designs on 100,000 rows.
 
-The lab uses a historical subset of Microsoft's official WWI simulated wholesale business, retaining the original customer and product identifiers.
-See the [data notes](../../datasets/README.md) for fields, business definitions, and expected results.
+## Summary
 
-See the [Level 1 extension labs](../extensions/README.md) for additional exercises, run in separate `ext_*` tables without rewriting this lab's business results.
+- From the same three writes, Duplicate Key keeps three rows, Unique Key the current value of each key, and Aggregate Key with SUM 4550.00 for order 1, which is not an amount the order ever had.
+- Decide what one row means before choosing a model: order_id for current state, event_id for distinct events, a dimension combination for additive metrics.
+- Partitions divide rows into ranges, buckets spread a partition over tablets, and the sort key orders rows; none of them makes a business key unique.
+- In EXPLAIN, a date filter cuts `partitions=` to 1/2, and an equality filter on the bucketing column cuts `tablets=` to 1/4.
+- Merge-on-Write marks an older row of the same key as replaced when the new row is written, so queries read only the latest row.
+- A plan that reads fewer tablets predicts less work, not a measured speedup: check the result first, then measure on the same data and machine.
 
-## Module Summary
+## Quiz 3
 
-- Duplicate retains three rows, Unique retains the current values for two orders, and Aggregate SUM produces 4550.00 for order 1; identical input does not imply identical business semantics.
-- Determine the row grain and logical key before choosing a model; order_id maintains current state, while event_id preserves distinct events.
-- Partitions manage ranges, buckets manage distribution, and sort keys manage ordering; these physical design choices must not silently change business uniqueness.
-- Date conditions and Hash-key conditions can prune at different levels; use EXPLAIN to inspect the partitions and Tablets actually selected.
-- Verify detail records and amounts before discussing efficiency; a correctly executed SUM does not mean the metric definition is correct, and a smaller plan does not mean a speedup has been measured.
-
-## Knowledge Quiz 3: Doris Table Models, Partitioning, and Bucketing
-
-After completing the reading and lab, open [Quiz 3](quiz03_models_and_data_distribution.ipynb).
-The quiz contains five single-choice questions and does not require Doris or external services; read the answer explanations after submitting.
+Open [Quiz 3: Doris Table Models, Partitioning, and Bucketing](quiz03_models_and_data_distribution.ipynb). It has six single-choice questions and needs no running environment.
 
 Next module: [Module 4: Querying External Data and Joining Lake Tables](../module04-external-access/course.md).
 
-## Official References
+## References
 
-- [Duplicate Key detail model](https://doris.apache.org/docs/4.x/table-design/data-model/duplicate/)
-- [Unique Key primary key model](https://doris.apache.org/docs/4.x/table-design/data-model/unique/)
-- [Aggregate Key aggregate model](https://doris.apache.org/docs/4.x/table-design/data-model/aggregate/)
-- [Partitioning and bucketing basics](https://doris.apache.org/docs/4.x/table-design/data-partitioning/basic-concepts/)
-- [Data bucketing](https://doris.apache.org/docs/4.x/table-design/data-partitioning/data-bucketing/)
-- [EXPLAIN](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-query/EXPLAIN/)
+- [Apache Doris: Duplicate Key model](https://doris.apache.org/docs/4.x/table-design/data-model/duplicate/)
+- [Apache Doris: Unique Key model](https://doris.apache.org/docs/4.x/table-design/data-model/unique/)
+- [Apache Doris: Aggregate Key model](https://doris.apache.org/docs/4.x/table-design/data-model/aggregate/)
+- [Apache Doris: Partitioning and bucketing basics](https://doris.apache.org/docs/4.x/table-design/data-partitioning/basic-concepts/)
+- [Apache Doris: Data bucketing](https://doris.apache.org/docs/4.x/table-design/data-partitioning/data-bucketing/)
+- [Apache Doris: EXPLAIN](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-query/EXPLAIN/)

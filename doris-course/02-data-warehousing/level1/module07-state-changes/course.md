@@ -1,96 +1,74 @@
 # Module 7: Data Updates, Deletion, and Event Replay
 
-| Course Information | Details |
+| Course information | Value |
 | --- | --- |
 | Course | Data Warehousing with Apache Doris · Level 1 |
-| Product Version | Apache Doris 4.x |
-| Lab Version | Apache Doris 4.1.3 |
-| Estimated Time | About 75 minutes, including course notes, hands-on lab, and quiz |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox from Module 1; `orders_clean` and `customers` from Lab 6 |
+| Estimated time | About 90 minutes: reading 35, Lab 45, quiz 10 |
 
-[Course contents](../README.md) · [Open Lab 7](lab07_current_state_and_replay.ipynb) · [Open Quiz 7](quiz07_state_changes_and_replay.ipynb)
+[Course README](../../README.md) · [Open Lab 7](lab07_current_state_and_replay.ipynb) · [Open Quiz 7](quiz07_state_changes_and_replay.ipynb)
 
-## Module Goal
+## Module goal
 
-This module introduces order state updates, duplicate and out-of-order event handling, and methods for retaining history and replaying events.
+Keep the current state of each order correct while its events arrive twice, out of order, and after an interruption, keep its history, and check both against an independent ledger.
 
-After completing this module, you will be able to maintain current order state and history using simulated events and verify replay results after an interruption.
+## Learning objectives
 
-## Learning Objectives
+After completing this module, you will be able to:
 
-After completing this module, you should be able to:
-
-1. Distinguish the keys and purposes of current order state, event history, and raw deliveries.
-2. Use business versions to explain the handling of duplicate and out-of-order events.
+1. Distinguish the keys and purposes of current state, event history, and raw deliveries.
+2. Use business versions to resolve duplicate and out-of-order events.
 3. Distinguish partial column updates from full-row writes that omit fields.
-4. Distinguish soft deletion, SQL deletion, and physical file reclamation.
-5. Verify recovery through repeated replay, row-by-row comparison, and independent business transaction records.
+4. Distinguish soft deletion, SQL DELETE, a load's delete mark, and physical reclamation.
+5. Recover from an interrupted multi-table write by replaying the whole batch.
+6. Reconcile current state with independent payment, refund, and shipment records.
 
-## Module Schedule
+## Module structure
 
-| Section | Learning Format | Suggested Time | Learning Outcome |
-| --- | --- | --- | --- |
-| 7.1 Current State and Updates | Compare table granularities | 5 minutes | Choose keys for current state, history, and deliveries |
-| 7.2 Idempotency and Out-of-Order Events | Event timeline | 10 minutes | Explain why late old events do not overwrite newer states |
-| 7.3 Merge-on-Write and Partial Column Updates | Compare before and after updates | 10 minutes | Check whether omitted business fields are preserved |
-| 7.4 Soft Deletion, SQL Deletion, and Reclamation | Compare visibility | 5 minutes | Distinguish hiding, deletion, and physical reclamation |
-| 7.5 History, Replay, and Recovery | Interruption examples and reconciliation | 10 minutes | Explain recovery after an interruption between steps |
-| Lab 7 | Hands-on practice | 30 minutes | Verify 11 current orders, 18 history records, and 19 deliveries |
-| Quiz 7 | Interactive quiz | 5 minutes | Check states, versions, partial updates, deletion, and recovery |
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 7.1 Current State, History, and Deliveries | 5 min | Three tables, three keys, three questions |
+| 7.2 Versions Against Arrival Order | 8 min | Why a late event does not undo a newer state |
+| 7.3 Partial Column Updates | 6 min | Change a few columns and keep the others |
+| 7.4 Four Kinds of Deletion | 6 min | Soft deletion, DELETE, a load's delete mark, and reclamation |
+| 7.5 Replay After an Interruption | 5 min | Recover a write that stopped halfway |
+| 7.6 Reconcile With an Independent Ledger | 5 min | Prove the amounts with records kept elsewhere |
+| Lab 7 | 45 min | Replay events, keep history, reconcile, update one column, and delete on copies |
+| Quiz 7 | 10 min | Six questions on these objectives |
 
-## 7.1 Current State and Updates
+## 7.1 Current State, History, and Deliveries
 
-### Business Users Need Both "What Is True Now" and "What Happened"
+A dashboard needs what is true now; a refund investigation needs what happened. Keeping only the current state loses the story; keeping only the history makes every query find the right version. Lab 7 keeps both, plus the raw deliveries:
 
-Operational dashboards need current state, while refund investigations need the historical process.
-Keeping only current state loses that process; keeping only history requires selecting the correct version on every query.
-This lab separates these two needs:
-
-| Table | What one row represents | Key and purpose |
+| Table | What one row is | Key and purpose |
 | --- | --- | --- |
-| orders_current | The current state of one order | UNIQUE KEY(order_id), resolved by event_version |
-| order_events | One distinct business event | UNIQUE KEY(event_id); redelivering the same event does not add logical history |
-| event_deliveries | One delivery within an attempt | Records attempt_id, delivery_id, and raw content, preserving redeliveries |
+| orders_current | The current state of one order | UNIQUE KEY(order_id), resolved by `event_version` |
+| order_events | One distinct business event | UNIQUE KEY(event_id): a redelivered event adds no history |
+| event_deliveries | One delivery in one attempt | `attempt_id`, `delivery_id`, and the raw content: every redelivery is kept |
 
-One order_id can have multiple event_id values, and one event_id may be delivered multiple times.
-Here, delivery_id is a delivery identifier, not a shipment tracking number.
+One order has several events, and one event can be delivered several times; `delivery_id` identifies a delivery of a message, not a parcel. Module 6's `orders_clean` gives the ten accepted orders, the first current state and the first history; all are `COURSE_SIMULATION`, and the `wwi_*` tables are not changed.
 
-### Build Current-State and History Tables from Accepted New Orders
+## 7.2 Versions Against Arrival Order
 
-Module 6's `orders_clean` provides ten accepted simulated orders; Module 7 initializes them as
-current state and initial history. All have source COURSE_SIMULATION, and the `wwi_*` history tables are not updated.
-
-A Unique Key update changes the logical current value for the same key; it does not mean old physical files are immediately reclaimed.
-The current table uses Merge-on-Write (MoW) to handle visibility among versions of the same key on the write side,
-making current results easy to read in business queries.
-
-## 7.2 Idempotency and Out-of-Order Events
-
-### Business Order Is Not Arrival Order
-
-The business flow for order 900001 is:
+The business flow of order 900001 is:
 
 ```text
-Version 1 CREATED → Version 2 PAID → Version 3 SHIPPED → Version 4 DELIVERED
+Version 1 CREATED → version 2 PAID → version 3 SHIPPED → version 4 DELIVERED
 ```
 
-In this lab, however, version 1 is already initialized and subsequent events deliberately arrive out of order:
+Version 1 is the starting state; the later events arrive deliberately out of order, and one twice:
 
-| Position in first delivery round | event_id | event_version | Event status | Current status after processing |
+| Position in the first delivery round | event_id | event_version | Event status | Current status after it |
 | --- | --- | ---: | --- | --- |
 | 1 | E08 | 4 | DELIVERED | DELIVERED, version 4 |
 | 2 | E02 | 3 | SHIPPED | Still DELIVERED, version 4 |
 | 3 | E01 | 2 | PAID | Still DELIVERED, version 4 |
-| 9 | E02 | 3 | SHIPPED, duplicate delivery | Still DELIVERED, version 4 |
+| 9 | E02 | 3 | SHIPPED, a redelivery | Still DELIVERED, version 4 |
 
-These events carry complete updated states (after-images), not patches containing only changed fields.
-The current table configures `event_version` as the Sequence column, comparing business versions for the same order
-rather than overwriting with the last message to arrive. The history table still retains all three distinct events.
+Each event carries the complete state of the order after it (an after-image), not just the fields that changed: version 4 holds DELIVERED and also the amount, the customer, and the payment at that moment, so it can build the current row even before versions 2 and 3 arrive. An event that carries only the changed fields needs a partial update instead (7.3).
 
-A complete updated state means version 4 carries not just DELIVERED, but also the amount, customer, payment, and other fields at that time.
-Even before versions 2 and 3 arrive, version 4 is sufficient to build the current row. If a message contains only a changed field,
-it must be handled with partial-update semantics rather than directly applying the full-row state write method.
-
-The lab displays the actual DDL before the first write. First locate the following key and property fragments:
+The current table names `event_version` as its **Sequence column**: among rows with the same key, Doris keeps the one with the highest sequence value, not the one that arrived last. Find these three settings in the table definition that Lab 7 shows:
 
 ```text
 UNIQUE KEY(order_id)
@@ -98,16 +76,9 @@ UNIQUE KEY(order_id)
 "function_column.sequence_col"="event_version"
 ```
 
-The first identifies the order, the second enables merge-on-write, and the third specifies the business version column.
-Merely naming an ordinary field event_version does not enable version resolution.
-Include these settings in the table creation statement for the current order table. The following example uses this configuration and provides the complete order state on each write.
+The first identifies the order, the second turns on Merge-on-Write (Module 3), and the third names the version column. A column that is merely called `event_version` decides nothing. Versions need only be comparable within one order; two different events with the same version would need a rule of their own, which this course does not cover. See [Sequence columns and concurrent update control](https://doris.apache.org/docs/4.x/data-operate/update/unique-update-concurrent-control/).
 
-The Sequence column is how Doris compares which record is newer under the same Key.
-For order 900001, if version 4 already exists, a late version 2 will not revert the current status to PAID.
-This requires upstream to provide comparable versions that express business order for each order;
-versions need not be compared across different orders, while same-version conflicts need additional handling rules.
-
-After completing the lab, verify in the same lab database:
+After Lab 7:
 
 ```sql
 SELECT order_id, status, event_version, paid_amount, refund_amount
@@ -121,44 +92,23 @@ ORDER BY order_id;
 | 900001 | DELIVERED | 4 | 100.00 | 0.00 |
 | 900003 | REFUNDED | 4 | 150.00 | 150.00 |
 
-### What Counts as a Safe Duplicate?
+### What counts as a safe duplicate
 
-Idempotency means processing the same thing repeatedly does not change an already correct business result.
-This course requires redeliveries with the same event_id to carry identical business content; the same ID with different content is a conflict
-and cannot be explained as "overwrite duplicates."
+Processing something **idempotently** means that processing it again leaves a correct result unchanged. The course requires a redelivered `event_id` to carry the same content; the same ID with different content is a conflict, not a duplicate to overwrite. `event_version` is the business's own counter per order, not a Kafka offset or a binlog position: those positions say how far a reader got, not which state is newer.
 
-event_version is a teaching version that increases monotonically for each order, not a Kafka offset or Binlog position.
-Different content at the same version requires source-defined conflict rules; this lab does not verify automatic resolution of such conflicts.
-For specific Sequence column behavior, see [Concurrent update control](https://doris.apache.org/docs/4.x/data-operate/update/unique-update-concurrent-control/).
+## 7.3 Partial Column Updates
 
-## 7.3 Merge-on-Write and Partial Column Updates
+Suppose order 900001 must be cancelled, and the message carries only its key, the new status, and a version. Whether the other columns keep their values or become defaults or NULL depends on how the row is written, not on leaving columns out of an `INSERT`. A **partial column update** merges the supplied columns into the existing row and keeps the others; it needs a Merge-on-Write Unique Key table and the session setting `enable_unique_key_partial_update`.
 
-Merge-on-Write handles visibility between old and new versions of the same key during writes.
-For example, when an order changes from CREATED to PAID, ordinary queries read the new logical row directly once the new state is visible;
-background compaction gradually consolidates the old versions' data files. Applications can query the current state directly by order ID.
-
-Partial column updates address a different issue: when a change provides only some fields,
-Doris preserves unmodified fields on eligible Unique Key tables and merges the supplied values into the current row.
-
-### If Only Three Fields Are Supplied, What Happens to the Others?
-
-Suppose you only need to cancel order 900001 and do not want to resend the entire order.
-Whether "omitted fields" means preserving old values or forming a new row using defaults/NULLs and other rules
-depends on the update method, not just on leaving a few columns out of INSERT.
-
-The lab demonstrates this on the independent `orders_partial_update` table without changing the main current table:
+Lab 7 tries it on its own copy, `orders_partial_update`, not on the current table:
 
 | Stage | status | event_version | order_amount | region |
 | --- | --- | ---: | ---: | --- |
-| Initial row | CREATED | 1 | 100.00 | EAST |
-| Partial update submits only status and version | CANCELLED | 2 | 100.00 | EAST |
+| The starting row | CREATED | 1 | 100.00 | EAST |
+| After the partial update of status and version | CANCELLED | 2 | 100.00 | EAST |
 
-This step temporarily enables `enable_unique_key_partial_update`, writes the order ID, status, and new version,
-then restores session settings. The order ID locates the current row, the new version participates in version resolution, and the status is the field to change;
-the amount and region are preserved from the existing row. Before using this method, explicitly enable partial updates and understand the target table's support requirements.
-
-**SQL reading example: corresponds to the partial-update step in Lab 7. Do not rerun it on a completed lab.**
-The lab first writes the initial row above to the independent table, then runs the following in the same connection:
+**SQL reading example: the partial-update step of Lab 7. Do not rerun it after the Lab.**
+The Lab first writes the starting row into its own copy, then runs in the same connection:
 
 <!-- reading-only-example -->
 ```sql
@@ -167,9 +117,7 @@ INSERT INTO orders_partial_update (order_id, status, event_version)
 VALUES (900001, 'CANCELLED', 2);
 ```
 
-SET enables partial-update semantics for this session; INSERT supplies the primary key and the two columns to change.
-The lab saves the original setting before execution and uses Python's try/finally to restore it after success or failure;
-do not enable the setting in another connection or omit the restoration step.
+`SET` turns on partial updates for this session; the `INSERT` gives the key and the two columns to change. The Lab saves the setting's earlier value and restores it with Python's try/finally, whether the write succeeds or fails; never leave it on in a connection that writes full rows.
 
 ```sql
 SELECT order_id, status, event_version, order_amount, region
@@ -177,39 +125,23 @@ FROM orders_partial_update
 ORDER BY order_id;
 ```
 
-The result should match the second row in the table. Seeing CANCELLED alone is insufficient; the amount and region must not be cleared.
-For applicable table models and configuration requirements, see [Partial column updates](https://doris.apache.org/docs/4.x/data-operate/update/partial-column-update/).
+The result is the second row of the table: CANCELLED is not enough on its own; the amount and the region must not be cleared. See [Partial column updates](https://doris.apache.org/docs/4.x/data-operate/update/partial-column-update/).
 
-## 7.4 Soft Deletion, SQL Deletion, and Reclamation
+## 7.4 Four Kinds of Deletion
 
-### Distinguish Business Markers, Load Markers, and Internal Bitmaps First
-
-| Name | Used by | Meaning |
+| Kind | Who uses it | What it does |
 | --- | --- | --- |
-| is_deleted | Business tables and query SQL | Custom soft-delete field that queries must explicitly filter |
-| __DORIS_DELETE_SIGN__ | Unique Key load-based deletion path | Expresses deletion for a key; supply the marker according to the load method, rather than assuming that an ordinary business column with the same name completes the configuration |
-| Delete Bitmap | Internal MoW engine | Marks physical rows that are no longer visible to queries; also involved when ordinary Upsert overwrites old rows, not only in business deletion |
+| A business flag such as `is_deleted` | The business tables and their queries | Keeps the row; every query must filter on the flag |
+| SQL `DELETE` | A statement | Removes rows from every later query |
+| A load's delete mark, `__DORIS_DELETE_SIGN__` | A load into a Unique Key table: Stream Load with `merge_type` MERGE and a `delete` condition, or a CDC connector | Deletes the key that the loaded row names, as a CDC pipeline does for a source DELETE |
+| Physical reclamation | Compaction, inside Doris | Later frees the space of rows that queries no longer see, such as the rows that a Delete Bitmap marks |
 
-For example, if the source database deletes order 900002, the synchronization pipeline must convey deletion semantics rather than simply write the order again.
-The load deletion marker expresses this operation; the business is_deleted field means "retain the record, but do not display it in the application."
-With either method, an ordinary query no longer returning an old row does not prove that the underlying files have been reclaimed.
-This lab compares soft deletion and SQL DELETE below; it does not run a load deletion marker experiment.
-[Update and deletion mechanisms](https://doris.apache.org/docs/4.x/data-operate/update/update-overview/)
+A **Delete Bitmap** is how Merge-on-Write marks rows that queries no longer see; it is used for every overwritten row, not only for deletions. Whichever kind you use, a row that queries no longer return does not prove that its space is free. A refund is not a deletion either: order 900003 keeps its payment and its refund, REFUNDED; deleting the payment to show zero net receipts would erase a fact. See [Update and deletion](https://doris.apache.org/docs/4.x/data-operate/update/update-overview/).
 
-### Three Operations Answer Different Questions
+Lab 7's copy `orders_delete_demo` starts with orders 900001 and 900002. First a soft delete of 900001: the table still has two rows, and only `WHERE is_deleted=false` hides 900001. Then `DELETE` removes 900002: ordinary queries return only 900001, still flagged.
 
-| Operation | Query result | Data meaning |
-| --- | --- | --- |
-| Set business field is_deleted=true | Ordinary SELECT still sees it; explicit filtering is required | The application decides not to display it anymore |
-| SQL DELETE | Ordinary queries no longer return deleted rows | The database changes logical visibility |
-| Background physical reclamation | Not a business query condition | Storage files are released when reclamation conditions are met |
-
-The lab's independent copy starts with two rows: 900001 and 900002.
-First soft-delete 900001. The table still has two rows, but `WHERE is_deleted=false` returns only 900002.
-Then use SQL DELETE to delete 900002; ordinary queries return only 900001 with its soft-delete marker set to true.
-
-**SQL reading example: corresponds to the deletion step in Lab 7. Do not rerun it on a completed lab.**
-First let the lab rebuild the independent copy containing only 900001 and 900002, then observe in order:
+**SQL reading example: the deletion step of Lab 7. Do not rerun it after the Lab.**
+The Lab first rebuilds the copy with 900001 and 900002:
 
 <!-- reading-only-example -->
 ```sql
@@ -218,8 +150,7 @@ SELECT order_id FROM orders_delete_demo WHERE is_deleted=false ORDER BY order_id
 DELETE FROM orders_delete_demo WHERE order_id=900002;
 ```
 
-UPDATE changes only the business marker; the second query needs an explicit filter to see only 900002.
-DELETE removes the other order, so subsequent ordinary queries no longer return 900002.
+`UPDATE` works only on a Unique Key table such as this copy: on a Duplicate or Aggregate Key table, Doris refuses it with `Only unique table could be updated`. `DELETE` with a condition also works on a Duplicate Key table.
 
 ```sql
 SELECT order_id, is_deleted, status
@@ -227,41 +158,29 @@ FROM orders_delete_demo
 ORDER BY order_id;
 ```
 
-The final query result is 900001, true, CREATED. Background mechanisms release disk space when reclamation conditions are met.
-Business soft-delete fields, load deletion markers, and the internal Delete Bitmap operate at different levels;
-this lab runs only soft deletion and SQL DELETE.
+The last query returns 900001, true, CREATED. Lab 7 does not run a load deletion marker experiment: the [schema and deletion extension](../extensions/extension67_schema_and_delete.ipynb) does, in its second section: after a delete at version 2, a replayed version 1 does not bring the order back, and only a new version 3 does.
 
-A refund is not a deletion: order 900003 in the main workflow should retain its payment and refund amounts with status REFUNDED;
-do not delete payment facts simply to make net receipts zero.
+## 7.5 Replay After an Interruption
 
-## 7.5 History, Replay, and Recovery
-
-### An Interruption Can Occur Between Two Writes
-
-This lab simulates an interruption by stopping a course step, not the database process:
+Lab 7 interrupts its own steps, not the database:
 
 ```text
-Record first delivery → Write history → [Simulated interruption] → Current table not yet written
-                                          │
-                 Redeliver the entire event batch ←────────┘
-                      │
-                      ├─ Continue recording raw deliveries
-                      ├─ Deduplicate history by event_id
-                      └─ Resolve current state by order_id + version
+Record the first delivery → write it to the history → [interruption] → the current table is not written yet
+                                              │
+                    Redeliver the whole batch ←┘
+                         │
+                         ├─ record every delivery again
+                         ├─ the history keeps each event_id once
+                         └─ the current table keeps the highest version per order_id
 ```
 
-Code maintains these tables in separate steps; it does not assume automatic atomic commits across all three.
-Recovery must not check only whether "event_id already exists in history," or it could skip an unfinished current-state write.
+The three tables are written in separate steps, not in one transaction. So recovery must not skip events that are already in the history: that would also skip the current-table writes that never happened. Replaying the whole batch is safe because each table is written idempotently. The three counts after two replays:
 
-### Why Are the Three Row Counts Different?
-
-| Check target | Expected count | Derivation |
+| Table | Rows | Why |
 | --- | ---: | --- |
-| Current orders | 11 | Ten initial orders＋one new order |
-| Logical history | 18 | Ten initial snapshots＋eight distinct events |
-| Raw deliveries | 19 | One before interruption＋two rounds of nine deliveries each |
-
-Duplicate deliveries should add delivery records, not distinct events or changes to the correct current state.
+| orders_current | 11 | Ten starting orders and one new order |
+| order_events | 18 | Ten starting events and eight distinct new events |
+| event_deliveries | 19 | One before the interruption and two rounds of nine |
 
 ```sql
 SELECT 'current' AS record_type, COUNT(*) AS rows_count FROM orders_current
@@ -272,10 +191,13 @@ SELECT 'deliveries' AS record_type, COUNT(*) AS rows_count FROM event_deliveries
 ORDER BY record_type;
 ```
 
-### Verify Amounts with an Independent Set of Business Facts
+Redeliveries add deliveries, not events, and leave the current state as it was.
 
-Use the separately recorded items, payments, refunds, and shipment records in `business_events.json` to verify current order state.
-Refunds should link to original payments, shipments to orders, and customers and products should exist in the WWI dimensions loaded in Module 5.
+Lab 7 uses simulated events from a file, replayed after its own steps were interrupted, so it does not require real CDC setup. A CDC pipeline also needs the source's log position, the switch from snapshot to changes, and the connector's own recovery, so that the needed changes can still be read; the [optional reading on continuous ingestion](../module05-ingestion/optional05_continuous_ingestion.md) explains them, and the optional [Lab 5B](../module05-ingestion/optional05_flink_mysql_cdc.ipynb) runs a controlled Savepoint stop and restore with a real MySQL binlog. Neither covers a failed source database or a binlog that was purged.
+
+## 7.6 Reconcile With an Independent Ledger
+
+A replay that leaves the expected counts can still have wrong amounts. `business_events.json` keeps the items, payments, refunds, and shipments separately, as another system would; Lab 7 loads them into their own tables and checks the current state against them: each order's amount equals its items, its paid amount its payments, and its refunded amount its refunds. Each refund must belong to a payment of the same order, each shipment to an order, and every customer and product to the WWI dimensions.
 
 ```sql
 SELECT SUM(order_amount) AS orders_amount,
@@ -285,52 +207,41 @@ SELECT SUM(order_amount) AS orders_amount,
 FROM orders_current;
 ```
 
-The expected results, in order, are 1510.00, 250.00, 150.00, and 100.00.
-Order 900003 still has cumulative payments of 150.00 and cumulative refunds of 150.00; only net receipts are zero.
-These are simulated business transactions for teaching, separate from WWI's original account receipts.
+Expect 1510.00, 250.00, 150.00, and 100.00. Order 900003 keeps 150.00 paid and 150.00 refunded; only its net receipts are zero. These are simulated business records, separate from WWI's account receipts.
 
-This lab uses simulated events from files to practice replay after an interruption in application steps.
-Applying this approach to a CDC pipeline also requires source log positions, snapshot transitions, and connector recovery mechanisms
-to ensure the required events can be retrieved during recovery. The main course only introduces these prerequisites for real log-position recovery; Lab 7 uses simulated events to verify replay after interrupted application steps and does not require real CDC setup or source-side failure recovery. Optional [Lab 5B](../module05-ingestion/optional05_flink_mysql_cdc.ipynb) uses a real MySQL Binlog to practice controlled Savepoint stop and recovery; it does not cover source database failures, recovery after Binlog loss, or business history retention.
+## Lab 7: Resolve Out-of-Order Events, Preserve History, and Replay Recoverably
 
-## Hands-on Lab 7: Resolve Out-of-Order Events, Preserve History, and Replay Recoverably
+Open [Lab 7: Resolve Out-of-Order Events, Preserve History, and Replay Recoverably](lab07_current_state_and_replay.ipynb). You:
 
-Before starting, complete Module 6 and use the same dedicated course lab database; this lab reads its orders_clean accepted-orders table.
+1. Watch a normal update, a duplicate, and a late event on a small table of its own.
+2. Build the current, history, and delivery tables from Module 6's accepted orders.
+3. Interrupt the steps, replay the whole batch twice, and check 11 orders, 18 events, and 19 deliveries.
+4. Reconcile the current state with the independent ledger of items, payments, refunds, and shipments.
+5. Update one column of an order, and delete orders, on separate copies.
+6. Practice: read the history of the refunded order 900003, and replay a late event twice.
 
-Open [Lab 7](lab07_current_state_and_replay.ipynb). First observe normal updates, duplicates of the same event, and late old versions in an independent table, then proceed to the complete order workflow:
+You need the course sandbox from Module 1, and `orders_clean` and `customers` from Lab 6; if `wwi_products` is missing, the Lab loads it from the bundled package. Level 2 starts with [Module 8: Views and Materialized Views](../../level2/module08-views-materialized-views/course.md).
 
-1. Initialize current-state, history, and delivery tables from Module 6's accepted orders.
-2. Simulate one interrupted step, then redeliver events in the specified order and replay the entire batch.
-3. Verify 11 current order rows, 18 logical history rows, and order statuses and amounts.
-4. Use independent business transaction records to verify amounts and customer, product, and event relationships.
-5. Perform partial column updates, soft deletion, and SQL DELETE on independent copies, then check the main data.
+## Summary
 
-### Data Sources and Notes
+- Keep the current state by `order_id`, the history by `event_id`, and every delivery per attempt: three grains for three questions.
+- A Sequence column keeps the highest business version of each order, whatever order the events arrive in; a redelivered event must carry the same content, and a reader's position is not a version.
+- A partial column update needs a Merge-on-Write Unique Key table and its session setting; check the changed columns and the kept ones, and restore the setting.
+- A business flag hides rows only from queries that filter on it, `DELETE` removes rows from every query, a load's delete mark deletes a key, and reclamation frees space later; a refund keeps its payment.
+- After an interruption between writes, replay the whole batch: idempotent tables leave 11 orders, 18 events, and 19 deliveries.
+- Reconcile with records kept elsewhere: 1510.00 ordered, 250.00 paid, 150.00 refunded, and 100.00 net.
 
-The historical portion uses Microsoft WWI; new orders and changes are marked COURSE_SIMULATION and reference WWI customers and products without backfilling history.
-See [Data notes](../../datasets/README.md) for fields, business definitions, and expected results.
+## Quiz 7
 
-For additional operations, see [Level 1 Extension Labs](../extensions/README.md). They run on separate `ext_*` tables without repeatedly rewriting this lab's business results.
-
-## Module Summary
-
-- Store current state by order_id, event history by event_id, and delivery records per attempt; do not mix these three granularities.
-- The Sequence column resolves out-of-order events by business version, and redeliveries require identical content; arrival order cannot replace business versions, while log positions locate consumption progress.
-- Partial column updates require the appropriate model and configuration. Check both new state and omitted fields, and restore session settings after the lab.
-- Soft deletion, SQL DELETE, and physical reclamation differ; retain business facts for refunds rather than deleting orders as a substitute.
-- After recovery, verify the 11/18/19 row counts, complete records, and independent business transactions: payments 250.00, refunds 150.00, and net receipts 100.00.
-
-## Knowledge Quiz 7: Data Updates, Deletion, and Event Replay
-
-After completing the course notes and lab, open [Quiz 7](quiz07_state_changes_and_replay.ipynb).
-The quiz contains five single-choice questions and requires no Doris or external services; read the explanations after submitting.
+Open [Quiz 7: Data Updates, Deletion, and Event Replay](quiz07_state_changes_and_replay.ipynb). It has six single-choice questions and needs no running environment.
 
 Next: this is the last module of Level 1. Level 2 starts with [Module 8: Views and Materialized Views](../../level2/module08-views-materialized-views/course.md).
 
-## Official References
+## References
 
-- [Unique Key primary key model](https://doris.apache.org/docs/4.x/table-design/data-model/unique/)
-- [Sequence columns and concurrent update control](https://doris.apache.org/docs/4.x/data-operate/update/unique-update-concurrent-control/)
-- [Partial column updates](https://doris.apache.org/docs/4.x/data-operate/update/partial-column-update/)
-- [DELETE](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-modification/DML/DELETE/)
-- [Compaction principles](https://doris.apache.org/docs/4.x/admin-manual/trouble-shooting/compaction-principles/)
+- [Apache Doris: Unique Key model](https://doris.apache.org/docs/4.x/table-design/data-model/unique/)
+- [Apache Doris: Sequence columns and concurrent update control](https://doris.apache.org/docs/4.x/data-operate/update/unique-update-concurrent-control/)
+- [Apache Doris: Partial column updates](https://doris.apache.org/docs/4.x/data-operate/update/partial-column-update/)
+- [Apache Doris: Update and deletion overview](https://doris.apache.org/docs/4.x/data-operate/update/update-overview/)
+- [Apache Doris: DELETE](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-modification/DML/DELETE/)
+- [Apache Doris: Compaction principles](https://doris.apache.org/docs/4.x/admin-manual/trouble-shooting/compaction-principles/)
