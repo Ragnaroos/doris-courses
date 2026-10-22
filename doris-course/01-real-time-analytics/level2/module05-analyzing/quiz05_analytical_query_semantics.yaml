@@ -1,114 +1,143 @@
 title: "Module 5 Quiz: Analyzing Data in Apache Doris"
-description: Apply Module 5 concepts to small, independent business scenarios. Read the explanation
-  and revise any answer before continuing.
+description: >-
+  Six independent business scenarios check the analytical decisions of Module
+  5, one question for each learning objective. Read the explanation and revise
+  any answer before continuing.
 questions:
-- id: m5_q1
-  objective: Choose by result shape
-  prompt: One operation converts each email to lowercase; another exposes a source as rows and columns
-    in FROM. Which function categories match these two contracts, in order?
-  options:
-  - id: aggregate_then_window
-    text: Aggregate function; window function.
-  - id: scalar_then_tvf
-    text: Scalar function; table-valued function (TVF).
-  - id: window_then_scalar
-    text: Window function; scalar function.
-  - id: tvf_then_aggregate
-    text: Table-valued function (TVF); aggregate function.
-  answer: scalar_then_tvf
-  explanation: A scalar function transforms a value for each input row. A TVF supplies a relation
-    that a query can read. Aggregates combine input rows, while window functions add calculations
-    over related rows without supplying a new FROM relation.
-- id: m5_q2
-  objective: Filter rows before groups
-  prompt: 'Rows are (store, status, amount): (A, paid, 60), (A, pending, 70), (B, paid, 110). A query
-    uses WHERE status = ''paid'', GROUP BY store, and HAVING SUM(amount) > 100. Which result remains?'
-  options:
-  - id: both_with_pending
-    text: A with 130 and B with 110.
-  - id: both_paid_only
-    text: A with 60 and B with 110.
-  - id: store_a_only
-    text: A with 130 only.
-  - id: store_b_only
-    text: B with 110 only.
-  answer: store_b_only
-  explanation: WHERE removes the pending row before aggregation. A therefore totals 60 and fails
-    HAVING; B totals 110 and passes. HAVING filters grouped totals, not individual purchases, and
-    the pending amount cannot enter the paid population.
-- id: m5_q3
-  objective: Preserve rows with a window
-  prompt: 'A filtered relation contains six payments: four for store A and two for store B. Query
-    G groups by store and selects SUM(amount). Query W selects each payment plus SUM(amount) OVER
-    (PARTITION BY store), with no DISTINCT or further filter. How many rows do G and W return?'
-  options:
-  - id: two_and_six
-    text: G returns 2; W returns 6.
-  - id: two_and_two
-    text: G returns 2; W returns 2.
-  - id: six_and_six
-    text: G returns 6; W returns 6.
-  - id: six_and_two
-    text: G returns 6; W returns 2.
-  answer: two_and_six
-  explanation: GROUP BY folds the six payments into two store groups. The window calculation annotates
-    all six payment rows with their store total. PARTITION BY defines a window grouping, but does
-    not collapse the output into one row per store.
-- id: m5_q4
-  objective: Give representative values a meaning
-  prompt: A report groups sales by store across several days. It selects ANY_VALUE(sale_date) and
-    labels that column latest_sale_date. Each store may have several distinct non-NULL dates. Is
-    that label justified?
-  options:
-  - id: last_inserted
-    text: Yes, because Doris takes the last date inserted into each group.
-  - id: total_decides
-    text: Yes, because the group total determines its latest date.
-  - id: use_max
-    text: No. Use MAX(sale_date) for the latest date; ANY_VALUE does not promise that choice.
-  - id: group_by_every_date
-    text: No. Every date must be added to GROUP BY even when the required grain is one store.
-  answer: use_max
-  explanation: ANY_VALUE can choose an arbitrary non-NULL value; it does not mean latest. MAX matches
-    the requested representative date while retaining one row per store. Adding date to GROUP BY
-    changes the report grain. ANY_VALUE is meaningful when any representative really is acceptable
-    or all eligible values are equivalent.
-- id: m5_q5
-  objective: Reason about analytical stages
-  prompt: A Common Table Expression (CTE) named daily groups observed sales by date. It produces
-    July 1 and July 3, with no row for July 2. The outer query adds LAG(revenue) OVER (ORDER BY day).
-    What does July 3 compare with?
-  options:
-  - id: generated_zero_row
-    text: An automatically generated zero-revenue row for July 2.
-  - id: previous_available_row
-    text: July 1, the previous available row; calendar-day comparison requires an explicit calendar
-      stage.
-  - id: null_without_july_2
-    text: NULL, because LAG only matches exactly one calendar day earlier.
-  - id: cte_fills_dates
-    text: July 2, because naming the CTE daily fills missing dates.
-  answer: previous_available_row
-  explanation: The CTE names a query stage; it does not generate absent dates. LAG moves by rows
-    in the specified ordering, so the previous available row is July 1. A calendar relation and an
-    explicit missing-value policy are needed before a previous-calendar-day comparison.
-- id: m5_q6
-  objective: Choose the scope of reusable logic
-  prompt: A team wants to double each element of an array in one query, and separately reuse a named
-    expression composed entirely of existing SQL functions. A third requirement needs an external
-    Java algorithm. Which distinction is sound?
-  options:
-  - id: all_java_udf
-    text: All three require deploying a Java user-defined function (UDF).
-  - id: lambda_registers_function
-    text: An array Lambda automatically registers a reusable database function for all queries.
-  - id: cte_is_permanent
-    text: A CTE registers the SQL expression permanently, and a Lambda deploys the Java algorithm.
-  - id: lambda_alias_and_java_udf
-    text: Use an array higher-order function with a Lambda; consider an SQL Alias Function for the
-      named expression; deploy a Java UDF for the external algorithm.
-  answer: lambda_alias_and_java_udf
-  explanation: A Lambda supplies local element logic to a higher-order function. An Alias Function
-    can give an existing SQL expression a reusable signature. A Java UDF needs an external implementation
-    and deployment. A CTE exists within its statement, and neither a CTE nor a Lambda deploys external
-    code.
+  - id: table_function_and_tvf
+    objective: "Choose a function category, such as scalar, aggregate, window, Table Function, or TVF, from its inputs, outputs, and row-count behavior."
+    prompt: >-
+      Query A uses LATERAL VIEW EXPLODE(tags) on an events table. Query B
+      selects FROM NUMBERS("number" = "4"). Which statement describes the two
+      functions correctly?
+    options:
+      - id: table_function_and_tvf
+        text: "EXPLODE is a Table Function that expands each input row; NUMBERS is a TVF"
+      - id: both_aggregate
+        text: "Both are aggregate functions, because each of them returns more than one row"
+      - id: explode_is_tvf
+        text: "EXPLODE is a TVF that reads a relation; NUMBERS expands the tags of each row"
+      - id: both_scalar
+        text: "Both are scalar functions, because each produces one value for every input row"
+    answer: table_function_and_tvf
+    explanation: >-
+      EXPLODE expands a value of each current input row into zero or more
+      rows, and LATERAL VIEW keeps each new row tied to its source row; that
+      is a Table Function. NUMBERS is itself a relation in FROM and needs no
+      input row; that is a table-valued function, like S3. Aggregates combine
+      rows into groups, and scalar functions produce one value per row.
+
+  - id: where_and_having
+    objective: "Define the population of each measure with conditional aggregates, and filter input rows with `WHERE` and groups with `HAVING`."
+    prompt: >-
+      The rows (store, status, amount) are (A, paid, 60), (A, pending, 70), and
+      (B, paid, 110). A query uses WHERE status = 'paid', GROUP BY store, and
+      HAVING SUM(amount) > 100. Which result remains?
+    options:
+      - id: both_with_pending
+        text: "Store A with 130 and store B with 110"
+      - id: both_paid_only
+        text: "Store A with 60 and store B with 110"
+      - id: store_a_only
+        text: "Store A with 130 only"
+      - id: store_b_only
+        text: "Store B with 110 only"
+    answer: store_b_only
+    explanation: >-
+      WHERE removes the pending row before the grouping, so store A totals 60
+      and fails HAVING, while store B totals 110 and passes. HAVING filters
+      group totals, not single payments, and the pending amount cannot enter
+      the paid population.
+
+  - id: any_value_meaning
+    objective: "Use `ANY_VALUE` only when any representative value satisfies the meaning of the group."
+    prompt: >-
+      A report groups sales by store across several days. It selects
+      ANY_VALUE(sale_date) and labels that column latest_sale_date. Each store
+      has several different dates. Is the label justified?
+    options:
+      - id: last_inserted
+        text: "Yes, because ANY_VALUE returns the date of the row inserted last into each group"
+      - id: total_decides
+        text: "Yes, because the group's total revenue determines which date ANY_VALUE returns"
+      - id: use_max
+        text: "No; ANY_VALUE may return any date of the group, so use MAX(sale_date)"
+      - id: group_by_every_date
+        text: "No; add sale_date to GROUP BY, even though the report needs one row per store"
+    answer: use_max
+    explanation: >-
+      ANY_VALUE returns some non-NULL value of the group, with no promise
+      about which one, so it cannot mean "latest". MAX(sale_date) answers the
+      question and keeps one row per store, while adding the date to GROUP BY
+      changes the report's grain. ANY_VALUE fits when every candidate means
+      the same thing, such as the date after a one-day filter.
+
+  - id: cte_and_missing_dates
+    objective: "Name each stage of an analysis with a CTE and state the grain of its result."
+    prompt: >-
+      A CTE named daily groups sales by date. It returns rows for July 1 and
+      July 3 and no row for July 2, which had no sales. The outer query adds
+      LAG(revenue) OVER (ORDER BY day). What does the July 3 row compare with?
+    options:
+      - id: generated_zero_row
+        text: "A zero-revenue row for July 2 that the CTE generates for the missing date"
+      - id: previous_available_row
+        text: "July 1, the previous row of the CTE's result, because July 2 has no row at all"
+      - id: null_without_july_2
+        text: "NULL, because LAG reads only a row that is exactly one calendar day earlier"
+      - id: cte_fills_dates
+        text: "July 2, because naming the CTE daily makes it contain every calendar day"
+    answer: previous_available_row
+    explanation: >-
+      The CTE names a stage whose grain is one row per date that has sales; it
+      does not create rows for absent dates. LAG moves by rows in the window's
+      order, so the previous row is July 1. A previous-calendar-day comparison
+      needs a calendar relation and an explicit rule for days without sales.
+
+  - id: rank_and_row_number
+    objective: "Choose window partitions, ordering, frames, and ranking functions for previous-value, cumulative, and ranking questions."
+    prompt: >-
+      On one date, East and West both have revenue 100 and North has 80. A
+      query computes ROW_NUMBER() OVER (PARTITION BY event_date ORDER BY
+      revenue DESC, region) and RANK() OVER (PARTITION BY event_date ORDER BY
+      revenue DESC). What does North receive?
+    options:
+      - id: three_and_three
+        text: "ROW_NUMBER gives North 3, and RANK gives North 3 after the tie at 1"
+      - id: three_and_two
+        text: "ROW_NUMBER gives North 3, and RANK gives North 2, the next rank after the tie"
+      - id: two_and_two
+        text: "Both give North 2, because the two tied regions share the first position"
+      - id: one_and_one
+        text: "Both give North 1, because every region is its own window partition"
+    answer: three_and_three
+    explanation: >-
+      ROW_NUMBER numbers every row: East 1 and West 2, ordered by the region
+      tie-breaker, then North 3. RANK gives tied rows the same rank and skips
+      the positions they use: East 1, West 1, North 3. DENSE_RANK would give
+      North 2. The window is partitioned by date, so the three regions compete
+      in one partition.
+
+  - id: reusable_logic
+    objective: "Choose between built-in functions, Lambda expressions, Alias Functions, and user-defined functions for missing reusable logic."
+    prompt: >-
+      A team needs three things: double each element of an array in one
+      query, reuse a named expression built only from existing SQL functions,
+      and call an external Java algorithm. Which choice fits all three?
+    options:
+      - id: lambda_alias_udf
+        text: "A Lambda in ARRAY_MAP, an Alias Function, and a Java UDF"
+      - id: all_java_udf
+        text: "A Java UDF for each of the three, deployed as JAR files to the BEs"
+      - id: lambda_registers
+        text: "One Lambda, which registers itself as a reusable function for every query"
+      - id: cte_permanent
+        text: "A CTE, which registers the expression permanently, and a Lambda for the Java code"
+    answer: lambda_alias_udf
+    explanation: >-
+      A Lambda passes element logic to a higher-order function such as
+      ARRAY_MAP inside one query, an Alias Function gives an existing SQL
+      expression a reusable name, and only the external algorithm needs a
+      Java UDF with its deployment. A Lambda registers nothing, a CTE lasts
+      one statement, and deploying UDFs for built-in work adds cost for
+      nothing.

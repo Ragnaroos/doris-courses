@@ -10,7 +10,7 @@ Level 2 延续 Level 1 创建的 `doris_course` Database 和 `events` baseline d
 
 ## 模块 4：在 Apache Doris 中建模数据
 
-英文正文：[Module 4: Modeling Data in Apache Doris](module04-modeling/course.md)
+英文正文：[Module 4: Modeling Data in Apache Doris](../../../../doris-course/01-real-time-analytics/level2/module04-modeling/course.md)
 
 ### 模块目标
 
@@ -157,7 +157,7 @@ Lab 4 重建前只清空自身四张 target tables，保留 `events` baseline。
 
 ## 模块 5：使用 Apache Doris 分析数据
 
-英文正文：[Module 5: Analyzing Data in Apache Doris](module05-analyzing/course.md)
+英文正文：[Module 5: Analyzing Data in Apache Doris](../../../../doris-course/01-real-time-analytics/level2/module05-analyzing/course.md)
 
 ### 模块目标
 
@@ -326,7 +326,7 @@ Module 3 已详细执行 S3 TVF，本 Lab 不再次读取完整 remote dataset�
 
 ## 模块 6：在 Apache Doris 中连接数据
 
-英文正文：[Module 6: Joining Data in Apache Doris](module06-joining/course.md)
+英文正文：[Module 6: Joining Data in Apache Doris](../../../../doris-course/01-real-time-analytics/level2/module06-joining/course.md)
 
 ### 模块目标
 
@@ -495,7 +495,7 @@ Course 与 Lab 的职责边界如下：
 
 ## 模块 7：在 Apache Doris 中更新和删除数据
 
-英文正文：[Module 7: Updating and Deleting Data in Apache Doris](module07-updating-deleting/course.md)
+英文正文：[Module 7: Updating and Deleting Data in Apache Doris](../../../../doris-course/01-real-time-analytics/level2/module07-updating-deleting/course.md)
 
 ### 模块目标
 
@@ -637,9 +637,9 @@ Course 与 Lab 的职责边界如下：
 
 Each quiz contains six independent English single-choice questions and uses the shared `doris_course.quiz` interface. No running Lab or external service is required.
 
-- Module 4: [Notebook](module04-modeling/quiz04_schema_and_modeling_choices.ipynb) · [Question YAML](module04-modeling/quiz04_schema_and_modeling_choices.yaml)
-- Module 5: [Notebook](module05-analyzing/quiz05_analytical_query_semantics.ipynb) · [Question YAML](module05-analyzing/quiz05_analytical_query_semantics.yaml)
-- Module 6: [Notebook](module06-joining/quiz06_join_semantics_and_execution.ipynb) · [Question YAML](module06-joining/quiz06_join_semantics_and_execution.yaml)
-- Module 7: [Notebook](module07-updating-deleting/quiz07_state_changes_and_deletion.ipynb) · [Question YAML](module07-updating-deleting/quiz07_state_changes_and_deletion.yaml)
+- Module 4: [Notebook](../../../../doris-course/01-real-time-analytics/level2/module04-modeling/quiz04_schema_and_modeling_choices.ipynb) · [Question YAML](../../../../doris-course/01-real-time-analytics/level2/module04-modeling/quiz04_schema_and_modeling_choices.yaml)
+- Module 5: [Notebook](../../../../doris-course/01-real-time-analytics/level2/module05-analyzing/quiz05_analytical_query_semantics.ipynb) · [Question YAML](../../../../doris-course/01-real-time-analytics/level2/module05-analyzing/quiz05_analytical_query_semantics.yaml)
+- Module 6: [Notebook](../../../../doris-course/01-real-time-analytics/level2/module06-joining/quiz06_join_semantics_and_execution.ipynb) · [Question YAML](../../../../doris-course/01-real-time-analytics/level2/module06-joining/quiz06_join_semantics_and_execution.yaml)
+- Module 7: [Notebook](../../../../doris-course/01-real-time-analytics/level2/module07-updating-deleting/quiz07_state_changes_and_deletion.ipynb) · [Question YAML](../../../../doris-course/01-real-time-analytics/level2/module07-updating-deleting/quiz07_state_changes_and_deletion.yaml)
 
 [Question alignment and course review notes](quiz_alignment.md)

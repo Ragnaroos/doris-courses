@@ -2,82 +2,49 @@
 
 | Course information | Value |
 | --- | --- |
-| Course | Real-time Analytics with Apache Doris — Level 2 |
-| Product baseline | Apache Doris 4.x |
-| Lab version | Apache Doris 4.1.3 |
-| Estimated time | Approximately 80 minutes, including the guided lab |
+| Course | Real-time Analytics with Apache Doris · Level 2 |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox and `events_modelled` from Lab 4 |
+| Estimated time | About 90 minutes: reading 50, Lab 30, quiz 10 |
+
+[Course README](../../README.md) · [Open Lab 5](lab05_analyze_data.ipynb) · [Open Quiz 5](quiz05_analytical_query_semantics.ipynb)
 
 ## Module goal
 
-This module explains how to turn event detail into an analytical result whose
-meaning you can defend. You will begin with a business question, define the
-result grain and metric populations, and then choose functions by the shape of
-work they perform. You will also divide a complex analysis into stages so that
-filtering, aggregation, comparison, and presentation remain distinguishable.
+Turn event detail into an analytical result whose meaning you can defend:
+define the result first, then choose functions by the work they do to rows,
+and build the query in stages whose grain stays visible.
 
-Module 4 created `doris_course.events_modelled` from the persistent `events`
-baseline. Each row in that table represents an event. Its typed time,
-identifier, category, and revenue columns support the operational scenario in
-this module: compare daily activity and purchasing behavior across regions,
-then add trends and rankings without losing the daily-region grain.
+An operations team wants one row per date and region, with event volume,
+active users, purchasing users, purchase revenue, the previous day's revenue,
+cumulative revenue, and the region's rank on that date. Lab 5 builds that
+report from `events_modelled`, the event table of Module 4.
 
 ## Learning objectives
 
 After completing this module, you will be able to:
 
-1. Define the population, grain, measures, and ordering of an analytical
-   result, and distinguish result calculation from display or export.
-2. Choose Scalar, Aggregate, Combinator, Analytic (Window), Table, Table-Valued,
-   or Artificial Intelligence (AI) Functions from their inputs, outputs, row-count
-   behavior, and dependencies.
-3. Derive reporting periods and labels with date and string functions while
-   preserving event-detail rows.
-4. Choose counts, totals, averages, extrema, and statistical aggregates that
-   answer a stated business question.
-5. Use conditional expressions inside aggregates so that several measures at
-   one result grain can read different event populations.
-6. Distinguish `WHERE` filtering of input rows from `HAVING` filtering of
-   aggregated groups.
-7. Use `ANY_VALUE` only when any representative value satisfies the business
-   meaning of the group.
-8. Distinguish a Table Function that expands each input row from a Table-Valued
-   Function (TVF) that supplies a relation to `FROM`.
-9. Use a Common Table Expression (CTE) to name an analytical stage and make its
-   grain explicit.
-10. Distinguish aggregation, which can collapse rows, from window calculation,
-    which retains its input result rows.
-11. Choose window partitions, ordering, frames, and ranking semantics for
-    previous-value, cumulative, and ranking questions.
-12. Distinguish built-in functions, array Lambda expressions, Alias Functions,
-    and the User-Defined Function (UDF) family.
+1. Choose a function category, such as scalar, aggregate, window, Table Function, or TVF, from its inputs, outputs, and row-count behavior.
+2. Define the population of each measure with conditional aggregates, and filter input rows with `WHERE` and groups with `HAVING`.
+3. Use `ANY_VALUE` only when any representative value satisfies the meaning of the group.
+4. Name each stage of an analysis with a CTE and state the grain of its result.
+5. Choose window partitions, ordering, frames, and ranking functions for previous-value, cumulative, and ranking questions.
+6. Choose between built-in functions, Lambda expressions, Alias Functions, and user-defined functions for missing reusable logic.
 
-## Scenario-led content outline
+## Module structure
 
-An operations team wants a report with one row per date and region. Each row
-must show event volume, active users, purchasing users, purchase revenue, the
-previous observed day's revenue for that region, cumulative regional revenue,
-and the region's revenue rank for that date. The same event data may later need
-tag expansion, generated rows, or company-specific reusable logic.
-
-Each section turns one part of that requirement into an analytical decision:
-
-| Section | Requirement scenario | Decision developed in this module | Lab 5 evidence |
-| --- | --- | --- | --- |
-| **5.1 Define the analytical answer** | A request for a regional performance report leaves its population, grain, measures, date coverage, and ordering unstated. | Write a result contract before choosing functions; keep computation separate from display and export. | Inspect how every executed query states a time range, grouping grain, measures, and final ordering. |
-| **5.2 Choose a function category** | One event dataset must support row transformations, grouped metrics, trends, expansion, generated relations, and model calls. | Classify functions by input, output, row-count behavior, and external dependency; recognize categories that overlap. | Match seven function categories interactively. |
-| **5.3 Derive dimensions** | Event timestamps and codes must become reporting dates, hours, patterns, and labels without discarding the original values. | Use Scalar Functions for per-row derivation; distinguish grouping values, presentation labels, and predicates. | Compare source and derived values in eight event rows. |
-| **5.4 Define grouped measures** | Stakeholders need event counts, user counts, revenue, thresholds, and representative attributes at a declared grain. | Define each metric population, use conditional aggregation, place `WHERE` and `HAVING` correctly, and constrain `ANY_VALUE`. | Produce daily-region metrics, filter product groups, and compare rejected and valid grouped projections. |
-| **5.5 Obtain new rows** | Tags inside a row must be expanded, while a different task needs a generated or external relation. | Choose a Table Function for row-dependent expansion and a TVF for a relation source; reassess grain after expansion. | Run `EXPLODE` with `LATERAL VIEW` and query the `NUMBERS` TVF without external storage. |
-| **5.6 Name analytical stages** | A daily-region report combines input filtering, derived dates, grouped metrics, windows, and final presentation. | Give each stage one responsibility with a CTE; do not assume that a CTE is automatically materialized or faster. | Build a three-stage query that returns 24 daily-region rows. |
-| **5.7 Compare retained rows** | Each daily-region row needs its previous value, cumulative value, and rank among regions on that date. | Choose window `PARTITION BY`, `ORDER BY`, frame, and tie behavior from the question. | Use `LAG`, cumulative `SUM`, `ROW_NUMBER`, and `RANK` while retaining the aggregated rows. |
-| **5.8 Extend missing reusable behavior** | Built-in SQL cannot express a proprietary row calculation, aggregate state, window state, or parser. | Choose UDF, User-Defined Aggregate Function (UDAF), User-Defined Window Function (UDWF), or User-Defined Table Function (UDTF) only when its row behavior and deployment cost fit the requirement. | Compare the four extension families and inspect a non-executing Java UDF registration template. |
-
-The explanations in this module focus on choosing the correct operation and on
-interpreting its result. Lab 5 supplies the concrete Doris 4.1.3 behavior. It
-does not contact an external AI provider, read Amazon
-S3 again, deploy user code, or use elapsed time to compare query forms.
-
----
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 5.1 Define the Analytical Answer Before Choosing Functions | 6 min | Write the population, grain, measures, and ordering of a result |
+| 5.2 Choose a Function Category from the Required Work | 6 min | Classify functions by input, output, row count, and dependency |
+| 5.3 Use Scalar Functions to Derive Explainable Dimensions | 5 min | Derive dates, hours, and labels while keeping each event row |
+| 5.4 Use Aggregate Functions to Answer Defined Metric Questions | 9 min | Define each measure's population and filter at the right stage |
+| 5.5 Use a Table Function to Expand Values into Rows | 5 min | Tell a Table Function from a TVF, and reassess the grain after expansion |
+| 5.6 Use CTEs to Express the Stages of a Complex Analysis | 6 min | Give each stage of a query one responsibility and one grain |
+| 5.7 Use Window Functions to Compare Rows Without Losing Their Grain | 8 min | Choose partitions, ordering, frames, and tie behavior |
+| 5.8 Choose the Right Extension for Missing Reusable Logic | 5 min | Choose built-in functions first, then Lambdas, Alias Functions, or UDFs |
+| Lab 5 | 30 min | Build the daily-region report in stages and read each stage's grain |
+| Quiz 5 | 10 min | Six questions on these objectives |
 
 ## 5.1 Define the Analytical Answer Before Choosing Functions
 
@@ -370,7 +337,8 @@ corresponding positions of array values across rows.
 These are useful when the data product genuinely contains mergeable aggregate
 states or positionally meaningful arrays. They are unnecessary for an ordinary
 revenue total. Prefer the direct and readable `SUM(revenue)` until the
-specialized requirement exists. See the current [Combinators catalog](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/combinators/)
+specialized requirement exists. See [STATE](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/combinators/state/),
+[MERGE](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/combinators/merge/), and [FOREACH](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/combinators/foreach/)
 for supported combinations and type constraints.
 
 ## 5.5 Use a Table Function to Expand Values into Rows
@@ -406,7 +374,8 @@ explicit retention decision; consult the chosen Table Function's contract.
 
 Table Functions suit row-dependent parsing or expansion. Examples include
 array expansion and splitting a delimited value. Doris commonly uses them with
-`LATERAL VIEW`. See [Table Functions](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-functions/).
+`LATERAL VIEW`. See [EXPLODE](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-functions/explode/); the
+documentation lists the other Table Functions beside it.
 
 > **Table Function and TVF are different categories.** A Table Function such
 > as `EXPLODE(tags)` runs against each current input row and produces zero to
@@ -416,8 +385,8 @@ array expansion and splitting a delimited value. Doris commonly uses them with
 > already used the S3 TVF to expose external files as a temporary relation.
 > Lab 5 uses `NUMBERS("number" = "4")` only as a small, self-contained contrast
 > and does not revisit S3 access or persistence. See
-> [Table-Valued Functions](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/)
-> and [NUMBERS](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/numbers/).
+> [NUMBERS](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/numbers/)
+> and [S3](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/s3/).
 
 ## 5.6 Use CTEs to Express the Stages of a Complex Analysis
 
@@ -627,12 +596,10 @@ template and does not build a JAR or register a function. Consult
 and [CREATE FUNCTION](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/function/CREATE-FUNCTION/)
 for the current implementation contracts.
 
----
-
 ## Lab 5: Explore Doris Functions and Build Analytical Queries
 
 Open [Lab 5 — Explore Doris Functions and Build Analytical Queries](lab05_analyze_data.ipynb)
-after completing Lab 4. It uses the persistent
+after completing Lab 4, and plan about 30 minutes. It uses the persistent
 `doris_course.events_modelled` table containing 10,158,080 event rows. It reads
 that model without replacing it so Module 6 can enrich the same events.
 
@@ -664,37 +631,46 @@ what one row represents and which events contribute to the chosen metric. A
 different date grain, event filter, or measure produces a different business
 answer even when every query runs successfully.
 
-## Module summary
+The Lab ends with a practice: find the region that grew most from one day to the
+next, in stages with `LAG` and `RANK`. Predict the result first, then write the
+code in the empty cell; the collapsed reference solution after it also runs with
+Run All and leaves the Lab's tables as they were.
 
-An analytical result begins with a population, grain, measures, comparison
-rules, and output requirement. Scalar Functions derive values for rows;
-Aggregate Functions summarize groups; Combinators adapt specialized aggregate
-behavior; Table Functions expand current rows; TVFs supply relations; and
-Analytic Functions compare retained result rows. AI Functions also introduce
-an external model dependency that must be part of the design.
+## Summary
 
-CTEs make analytical stages and their grains visible. Window partitions,
-ordering, frames, and tie rules determine what previous, cumulative, and rank
-values mean. Built-in functions should remain the first choice; UDF, UDAF,
-UDWF, and UDTF add deployment cost and fit different row behaviors.
-
-In Module 6, you will enrich the event rows with product attributes. Continue
-to state the result grain before interpreting a metric, because duplicate or
-unmatched Join keys can change which rows reach the next analytical stage.
+- Scalar functions derive one value per row, aggregate functions summarize a
+  group, window functions add a value to every retained row, a Table Function
+  expands each input row into zero or more rows, and a TVF supplies a relation
+  to `FROM`; an AI Function also depends on an external model.
+- Each measure has its own population: conditional aggregates let all events
+  and purchases share one daily-region row. `WHERE` removes input rows before
+  grouping, and `HAVING` removes groups by their aggregate values.
+- `ANY_VALUE` returns any value of the group, so use it only when every
+  candidate means the same thing, as the date does after a one-day filter; for
+  "latest" or "earliest", use `MAX` or `MIN`.
+- A CTE names one stage of a query, such as the filtered events, the
+  daily-region groups, and the scored rows; it does not promise
+  materialization or speed, and an event-only aggregation creates no row for a
+  date without events.
+- `PARTITION BY` sets each window's population, its `ORDER BY` defines
+  "previous" and "cumulative", the frame decides which rows a running total
+  includes, and `ROW_NUMBER` and `RANK` differ only when values tie.
+- Start with built-in functions and SQL expressions; a Lambda passes element
+  logic to a higher-order function, an Alias Function names an existing
+  expression, and a UDF, UDAF, UDWF, or UDTF brings in external code with its
+  deployment cost.
 
 ## Quiz 5: Analyzing Data in Apache Doris
 
-Complete the interactive knowledge check after finishing the module and
-Lab 5. It runs without a Doris sandbox.
-
-[Open Quiz 5 — Analyzing Data in Apache Doris](quiz05_analytical_query_semantics.ipynb)
+Open [Quiz 5: Analyzing Data in Apache Doris](quiz05_analytical_query_semantics.ipynb).
+It has six single-choice questions and needs no running environment.
 
 Next module: [Module 6: Joining Data in Apache Doris](../module06-joining/course.md).
 
-## Official references
+## References
 
-- Function categories: [SQL Functions](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/), [Scalar Functions](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/scalar-functions/), [Aggregate Functions](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/aggregate-functions/), [Combinators](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/combinators/), and [AI Functions](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/ai-functions/overview/).
-- Row-producing functions: [Table Functions](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-functions/), [Table-Valued Functions](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/), and [NUMBERS](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/numbers/).
+- Function families: the combinators [STATE](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/combinators/state/), [MERGE](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/combinators/merge/), and [FOREACH](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/combinators/foreach/), and the [AI Functions overview](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/ai-functions/overview/). [SHOW FUNCTIONS](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/function/SHOW-FUNCTIONS/) lists a database's own functions, and `SHOW BUILTIN FUNCTIONS` the built-in ones.
+- Row-producing functions: the Table Function [EXPLODE](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-functions/explode/) and the TVFs [NUMBERS](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/numbers/) and [S3](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/s3/).
 - Analytical query structure: [SELECT](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-query/SELECT/), [Common Table Expressions](https://doris.apache.org/docs/4.x/query-data/cte/), and [Analytic (Window) Functions](https://doris.apache.org/docs/4.x/query-data/window-function/).
 - Grouping and higher-order behavior: [ANY_VALUE](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/aggregate-functions/any-value/), [ARRAY_MAP](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/scalar-functions/array-functions/array-map/), and [ARRAY_FILTER](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/scalar-functions/array-functions/array-filter/).
 - Reusable extensions: [Alias Function](https://doris.apache.org/docs/4.x/query-data/udf/alias-function/), [Java UDF, UDAF, UDWF, and UDTF](https://doris.apache.org/docs/4.x/query-data/udf/java-user-defined-function/), [Python UDF family](https://doris.apache.org/docs/4.x/query-data/udf/python-user-defined-function/), and [CREATE FUNCTION](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/function/CREATE-FUNCTION/).

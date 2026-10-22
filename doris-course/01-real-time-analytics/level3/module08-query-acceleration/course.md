@@ -2,97 +2,53 @@
 
 | Course information | Value |
 | --- | --- |
-| Course | Real-time Analytics with Apache Doris — Level 3 |
-| Product baseline | Apache Doris 4.x |
-| Lab version | Apache Doris 4.1.3 |
-| Estimated time | Approximately 90 minutes, including the guided lab |
+| Course | Real-time Analytics with Apache Doris · Level 3 |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox, `events_modelled` from Lab 4, and `dim_products` from Lab 6 |
+| Estimated time | About 120 minutes: reading 55, Lab 55, quiz 10 |
+
+[Course README](../../README.md) · [Open Lab 8](lab08_accelerate_queries.ipynb) · [Open Quiz 8](quiz08_acceleration_choices.ipynb)
 
 ## Module goal
 
+Reduce the repeated work of queries without changing their answers: choose a
+view, a materialized view, or an index from the query's shape, freshness, and
+cost, and check each one with the result, the plan, and the Query Profile.
+
 An ecommerce analytics team already has a correct regional revenue dashboard,
-but the workload is changing. More reports reuse its purchase definition, the
+but the workload is changing: more reports reuse its purchase definition, the
 same aggregations run more often, category analysis adds a product Join, and
-investigators need selective access to individual products. This module follows
-those changes and asks how to reduce repeated query work without changing the
-business answer.
-
-You will not adopt every acceleration feature at once. You will choose among a
-regular view, a stored summary, a synchronous materialized view, an
-asynchronous materialized view, and a secondary index from the query shape,
-freshness requirement, and maintenance cost at each stage of the workload.
-
-The module also establishes an evidence sequence for query acceleration. A
-correct result establishes semantics. `EXPLAIN` establishes the selected plan.
-A Query Profile establishes what one execution actually scanned and produced.
-None of those observations alone proves a universal performance improvement.
-
-Modules 4–7 built query-ready events, analytical queries, product enrichment,
-and controlled data changes. Module 8 keeps those contracts and asks a new
-question: which repeated work should Doris avoid doing again?
+investigators look up the events of single products. Each section takes one of
+these changes and asks which repeated work Doris should avoid. A correct
+result establishes the semantics, `EXPLAIN` establishes the selected plan, and
+a Query Profile establishes what one execution scanned; none of them alone
+proves a lasting speedup.
 
 ## Learning objectives
 
 After completing this module, you will be able to:
 
-1. Define the population, grain, measures, freshness target, and frequency of a
-   query before choosing an acceleration structure.
-2. Distinguish a regular view, a manually populated summary table, a
-   synchronous materialized view, and an asynchronous materialized view.
-3. Choose synchronous or asynchronous materialization from the SQL scope,
-   freshness requirement, and acceptable write or refresh cost.
-4. Determine whether a materialized result preserves enough dimensions and
-   measure state to answer another query.
-5. Verify separately that a structure was built, that the optimizer selected
-   it, and that one execution performed less relevant work.
-6. Explain how a Doris inverted index narrows rows inside a Segment and when a
-   BloomFilter or NGram BloomFilter answers a different filtering need.
-7. Distinguish a persistent table index from a Join Runtime Filter.
-8. Use statistics, `EXPLAIN`, and Query Profile evidence without treating
-   estimates, plans, and runtime counters as interchangeable.
-9. Balance read savings against storage, load, refresh, and operating costs.
+1. Distinguish a regular view, a manually populated summary table, a synchronous materialized view, and an asynchronous materialized view.
+2. Choose synchronous or asynchronous materialization from the SQL scope, the freshness requirement, and the write or refresh cost.
+3. Determine whether a materialized result preserves the dimensions and measure state needed to answer another query.
+4. Choose an inverted index, a BloomFilter index, or an NGram BloomFilter index from the predicate it must serve.
+5. Separate build state, plan selection, statistics, and runtime evidence when you check an acceleration structure.
+6. Decide whether the read savings of a structure justify its storage, write, and refresh cost.
 
-## Follow One Changing Analytics Workload
+## Module structure
 
-The team begins with a correct report, not with a preferred Doris feature. As
-the workload changes, each decision leaves one question that leads to the next:
-
-```text
-define the current answer and work
-    -> share the purchase definition
-    -> store a current single-table summary
-    -> store a refreshable multi-table result
-    -> test whether that result can answer a new query
-    -> accelerate detail lookup when it cannot
-    -> check why an eligible structure is or is not selected
-    -> decide whether the total benefit justifies its lifecycle cost
-```
-
-The regional dashboard and product investigation use the same event history,
-but they do not need the same physical structure. A dashboard repeatedly
-filters and aggregates purchases. A product investigation looks for a small
-set of detail rows by `product_id`, even though the event table is primarily
-organized for time-based analysis.
-
-Each section turns one requirement into a decision:
-
-| Section | Requirement scenario | Decision developed | Lab 8 evidence |
-| --- | --- | --- | --- |
-| **8.1 Define the answer and the work** | Several successful queries appear expensive, but their populations and grains differ. | Establish the semantic baseline and separate result, plan, and runtime evidence. | Preserve a direct-query answer, plan, and Profile before adding structures. |
-| **8.2 Reuse a definition** | Several reports must use the same purchase rule. | Use a regular view for reusable SQL, without claiming stored results. | Direct SQL and the view return the same rows and scan the base table. |
-| **8.3 Keep a single-table summary current** | A repeated aggregation must include every committed write immediately. | Use a supported synchronous materialized view and accept load maintenance cost. | The original report selects the materialized index; one committed purchase appears without manual refresh. |
-| **8.4 Store a multi-table result** | A repeated event–product report can tolerate refresh delay. | Use an asynchronous materialized view with an explicit refresh and freshness contract. | A dimension change leaves the stored result stale until a complete refresh succeeds. |
-| **8.5 Test transparent rewrite eligibility** | The view exists, but only some queries can be derived from it. | Compare requested dimensions and measure state with what the view preserved. | Additive totals rewrite; a distinct-buyer query continues to scan source tables. |
-| **8.6 Add a selective secondary index** | `product_id` is not the leading sort field, but investigations use equality predicates. | Add an inverted index without replacing the time-oriented table layout. | Indexed and unindexed copies return the same answer; the indexed scan records index filtering. |
-| **8.7 Give the optimizer usable inputs** | A suitable structure exists but is not selected. | Check query shape and statistics before forcing a plan. | Analyze only Module 8 objects and inspect the selected scan. |
-| **8.8 Decide whether the structure is worth maintaining** | Read work falls, but storage and maintenance rise. | Evaluate correctness, freshness, work reduction, and lifecycle cost together. | Compare bounded Profile counters while preserving the cache and single-node evidence limits. |
-
-Lab 8 supplies bounded Doris 4.1.3 evidence. The course explains general
-decisions; fixed row counts, object names, and one execution's counters belong
-to the Lab. The Lab does not benchmark concurrent production workloads, flush
-operating-system or storage caches, inspect Rowset or Segment files, or prove a
-fixed latency improvement.
-
----
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 8.1 Define the Answer Before Reducing the Work | 6 min | Fix the population and grain, and separate result, plan, and runtime evidence |
+| 8.2 Reuse Query Logic with a Regular View | 5 min | Reuse a definition without claiming a stored result |
+| 8.3 Keep a Supported Single-Table Summary Current | 8 min | Use a synchronous materialized view within its scope |
+| 8.4 Store a Multi-Table Result with an Asynchronous Materialized View | 8 min | Store a Join result and define its refresh and freshness |
+| 8.5 Decide Whether a Materialized Result Can Answer the Query | 7 min | Check dimensions, grain, and measure state before expecting a rewrite |
+| 8.6 Narrow Selective Detail Lookups with a Secondary Index | 9 min | Choose an index from the predicate, and test it fairly |
+| 8.7 Give the Optimizer Reliable Inputs | 6 min | Check eligibility, state, and statistics before forcing a plan |
+| 8.8 Decide Whether the Read Savings Justify the Cost | 6 min | Weigh read savings against storage, write, and refresh cost |
+| Lab 8 | 55 min | Build a view, two materialized views, and an index, and read statistics and plans |
+| Quiz 8 | 10 min | Six questions on these objectives |
 
 ## 8.1 Define the Answer Before Reducing the Work
 
@@ -298,9 +254,8 @@ After a successful build:
 6. Verify the exact business-result change and the selected index separately.
 
 The last check demonstrates the defining freshness property: supported source
-writes and the synchronous view become visible together. It does not make an
-unsupported definition valid, and it does not remove the write and storage
-cost of maintaining another representation.
+writes and the synchronous view become visible together. The price is the
+write and storage cost of maintaining a second representation.
 
 This solves the current single-table regional aggregation. The next request is
 different: category revenue needs a product attribute from another table. That
@@ -332,9 +287,9 @@ An asynchronous view has at least three contracts:
 | Refresh trigger | Manual, scheduled, or another supported trigger |
 | Refresh computation | Complete recomputation or a supported incremental/partition strategy |
 
-The Lab chooses a deferred build, manual trigger, and complete refresh because
-that combination makes every state transition visible. It is not a universal
-production recommendation.
+The Lab chooses a deferred build, a manual trigger, and complete refresh
+because that combination makes every state transition visible; a production
+view chooses them from its own freshness and cost.
 
 ### Direct query and transparent rewrite are different paths
 
@@ -541,7 +496,7 @@ matches.
 | Structure | Main role | Appropriate starting point | Important limit |
 | --- | --- | --- | --- |
 | Prefix Index | Built from the leading Key prefix | Frequent filters aligned with the sort Key | Changing Key order generally requires rebuilding the table |
-| ZoneMap | Min/max and related block metadata | Range exclusion when blocks have useful value separation | Overlapping ranges reduce pruning |
+| ZoneMap | The Min/Max metadata of Module 2: minimum, maximum, and related metadata of each block | Range exclusion when blocks have useful value separation | Overlapping ranges reduce pruning |
 | Inverted Index | Value/term to Row ID postings | Selective equality, range, `IN`, array membership, or supported full-text predicates | Adds storage and write/build work; broad matches may save little |
 | BloomFilter Index | Probabilistic block-level membership test | Selective equality or `IN`, often on high-cardinality fields | False positives can keep blocks; it does not return exact row positions |
 | NGram BloomFilter | N-gram membership for strings | Supported substring-style filtering such as leading-wildcard `LIKE` | N-gram size and false-positive settings affect cost and effectiveness |
@@ -579,9 +534,8 @@ To isolate an index, indexed and unindexed test tables should keep the same:
 - query predicate and projection.
 
 Then verify the complete answer before comparing the scan operators. In the
-indexed run, counters such as `RowsInvertedIndexFiltered` can establish that
-the index rejected rows in that execution. They do not promise a fixed latency
-ratio on a larger system.
+indexed run, counters such as `RowsInvertedIndexFiltered` establish that the
+index rejected rows in that execution, for that data.
 
 Historical coverage also matters. An index declared before loading can be built
 with new data. Adding an index to existing data may require the documented
@@ -593,10 +547,9 @@ See [Inverted Index](https://doris.apache.org/docs/4.x/key-features/inverted-ind
 and [Index Optimization](https://doris.apache.org/docs/4.x/query-acceleration/tuning/tuning-plan/optimizing-table-index/).
 
 Creating the index makes a new access path available, just as building a
-materialized view makes a stored result available. Availability still does not
-guarantee selection. If the expected path is absent from the plan, the next
-step is to check semantic eligibility and the optimizer's inputs before
-forcing a choice.
+materialized view makes a stored result available; the optimizer still decides
+whether to use it. If the expected path is absent from the plan, check
+semantic eligibility and the optimizer's inputs before forcing a choice.
 
 ## 8.7 Give the Optimizer Reliable Inputs
 
@@ -630,7 +583,18 @@ When an expected structure is not selected, check in this order:
 
 Collect statistics for the tables and columns involved in the decision. Do not
 turn a query investigation into an unbounded maintenance operation over a
-shared Database.
+shared Database. `ANALYZE TABLE ... WITH SYNC` collects them and returns when
+collection has finished; `SHOW COLUMN STATS` shows what Doris recorded for each
+column: the row count, the number of distinct values (`ndv`), `NULL` values,
+and the minimum and maximum.
+
+Statistics summarize a column; they do not describe every predicate. Lab 8
+shows a typical gap: the copied day has two event types, so `ndv` is 2, and
+without the frequency of each value the optimizer assumes that half of the
+rows are purchases. Its Join estimate is about twice the actual count. The plan
+is still sound, because the product side is small enough to broadcast either
+way, but the gap explains why an estimate in `EXPLAIN` is a hypothesis to
+compare with the Query Profile, not a measurement.
 
 Hints can be useful for a controlled comparison or emergency diagnosis, but a
 hint does not repair an ineligible definition, missing data, or stale
@@ -703,12 +667,12 @@ capacity.
 That statement is more useful than “the query is faster” because another team
 can review the evidence and decide whether the tradeoff fits its workload.
 
----
-
 ## Lab 8: Accelerate Queries with Views and Indexes
 
 Open [Lab 8 — Accelerate Queries with Views and Indexes](lab08_accelerate_queries.ipynb)
-after completing Labs 4 and 6. It reads the query-ready event table and product
+after completing Labs 4 and 6, and plan about 55 minutes: the Lab runs in a few
+minutes, but each step has several pieces of evidence to read. It reads the
+query-ready event table and product
 dimension, then creates only Module 8 objects in the `doris_course` Database.
 The source tables remain unchanged.
 
@@ -726,6 +690,7 @@ error.
 | **4. Build and refresh an asynchronous materialized view** | Store the event–product category report, reclassify one product, observe stale stored groups, and refresh again. | Source and stored results can diverge between refreshes and reconcile after the new complete refresh succeeds. |
 | **5. Test transparent rewrite** | Compare rewrite disabled and enabled for additive category totals, then request distinct buyers. | Additive totals use the async view; the missing distinct-user state keeps the second query on source tables. |
 | **6. Isolate an inverted index** | Load identical indexed and unindexed event copies and run the same selective product predicate. | Results remain equal; the indexed run records index filtering and reduced relevant scan work. |
+| **7. Read the statistics behind the chosen plan** | Collect statistics for the two tables of the category report, read their column statistics, and compare the Join's estimated rows in `EXPLAIN` with the rows that actually leave it. | Statistics feed estimates, not observations: the optimizer expects about twice as many purchases as there are and still chooses a Broadcast Join. |
 
 Read the Lab evidence in this order:
 
@@ -735,44 +700,51 @@ Read the Lab evidence in this order:
 4. Job and task tables establish that the current build or refresh completed.
 
 The Lab temporarily enables detailed Profile capture and disables selected
-session caches, restoring the settings afterward. It does not flush storage,
-operating-system, or inverted-index caches. It also runs on one BE, so it does
-not measure distributed speedup.
+session caches, restoring the settings afterward. Storage, operating-system,
+and inverted-index caches stay warm, and the sandbox has one BE, so the Lab
+compares scan work, not cold or distributed speed.
 
-The final Stop and Restart controls preserve the named Docker volumes and
-Module 8 objects. They release or restore sandbox resources; they are not a
-backup or disaster-recovery demonstration.
+The final Stop and Restart controls release and restore the sandbox's
+resources; the named Docker volumes keep the Module 8 objects.
 
-## Module summary
+The Lab ends with a practice: ask the asynchronous materialized view for a grain
+that it does not store. Predict the result first, then write the code in the
+empty cell; the collapsed reference solution after it also runs with Run All and
+leaves the Lab's tables as they were.
 
-Start query acceleration from a defined answer and a measured kind of work. A
-regular view reuses a definition. A synchronous materialized view keeps a
-supported single-table representation current with writes. An asynchronous
-materialized view stores broader computation under an explicit refresh and
-freshness contract. Transparent rewrite works only when the stored population,
-dimensions, grain, and measure state can derive the requested query.
+## Summary
 
-A secondary index narrows detail rows rather than storing another report.
-Inverted indexes return Segment-local candidate Row IDs for supported
-predicates; BloomFilters probabilistically exclude blocks. Neither replaces
-Partition, Bucket, sort-key, or Table Model design.
-
-Build success, plan selection, and runtime work are separate observations.
-Statistics help the optimizer estimate candidates; Query Profiles report one
-execution. Evaluate every structure against its storage, write, refresh, and
-operating costs. Module 9 next moves from local access choices to
-multi-BE placement, replica selection, and distributed execution.
+- A regular view reuses a definition and stores no result; a manual summary
+  stores rows that its owner must keep current; a synchronous materialized
+  view and an asynchronous materialized view store results that Doris
+  maintains or refreshes.
+- A synchronous materialized view keeps a supported single-table aggregation
+  current with every write and adds load work; an asynchronous one can store a
+  multi-table result and is as fresh as its last refresh, within the
+  `grace_period` that transparent rewrite allows.
+- A materialized result can answer a query only when it keeps the query's
+  population, dimensions, and mergeable measure state: additive totals roll up
+  to a coarser grain, while an exact distinct count needs the identifiers or a
+  mergeable state.
+- An inverted index returns candidate Row IDs inside each Segment for
+  equality, range, and term predicates; a BloomFilter index cheaply excludes
+  blocks for equality and `IN`; an NGram BloomFilter serves substring
+  matching.
+- A finished build, a selected plan, statistics, and Profile counters answer
+  different questions: statistics feed the optimizer's estimates, `EXPLAIN`
+  shows what it chose, and only the Profile reports what one execution did.
+- Keep a structure only when the repeated read savings justify its storage,
+  load, and refresh cost and the business accepts its freshness, and record
+  the evidence and its limits with the decision.
 
 ## Quiz 8: Accelerating Queries in Apache Doris
 
-Complete the interactive knowledge check after finishing the module and
-Lab 8. It runs without a Doris sandbox.
-
-[Open Quiz 8 — Accelerating Queries in Apache Doris](quiz08_acceleration_choices.ipynb)
+Open [Quiz 8: Accelerating Queries in Apache Doris](quiz08_acceleration_choices.ipynb).
+It has six single-choice questions and needs no running environment.
 
 Next module: [Module 9: Sharding, Replication, and Distributed Execution in Apache Doris](../module09-sharding-replication/course.md).
 
-## Official references
+## References
 
 - Materialized-view selection: [Materialized View](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/intro/) and [Synchronous Materialized View](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/sync-materialized-view/)
 - Async lifecycle: [Asynchronous Materialized View Overview](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/overview/), [Manage and Query Async Materialized Views](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/functions-and-demands/), and [Async Materialized View FAQ](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/faq/)

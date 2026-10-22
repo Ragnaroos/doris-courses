@@ -2,50 +2,39 @@
 
 | Course information | Value |
 | --- | --- |
-| Course | Real-time Analytics with Apache Doris — Level 1 |
-| Product baseline | Apache Doris 4.x |
-| Lab version | Apache Doris 4.1.3 |
-| Estimated time | Approximately 60 minutes, including the guided lab and quiz |
+| Course | Real-time Analytics with Apache Doris · Level 1 |
+| Doris | Apache Doris 4.1.3 |
+| Environment | Docker with 4 CPUs and 8 GB of memory; Lab 1 starts the course sandbox |
+| Estimated time | About 70 minutes: reading 30, Lab 30, quiz 10 |
+
+[Course README](../../README.md) · [Open Lab 1](lab01_start_doris_and_build_baseline.ipynb) · [Open Quiz 1](quiz01_doris_fundamentals.ipynb)
 
 ## Module goal
 
-This module explains what Apache Doris is, which problems it is designed to
-solve, how analytical workloads differ from transactional workloads, and what
-a minimal working Doris workflow looks like.
-
-By the end of the module, you will have a running Doris environment, your first
-internal table, and a successful analytical query over a baseline ecommerce
-event dataset.
+Learn what Apache Doris is and which workloads it is built for, then start a
+Doris sandbox and load the event dataset that every later module uses.
 
 ## Learning objectives
 
 After completing this module, you will be able to:
 
-1. Define Apache Doris as an open-source, real-time analytics and search
-   database built on an MPP architecture.
-2. Distinguish OLAP and OLTP by workload characteristics rather than by product
-   labels alone.
-3. Recognize workloads suited to Doris, including real-time dashboards,
-   customer-facing analytics, observability, lakehouse analytics, and
-   change data capture (CDC)-driven reporting.
-4. Summarize the responsibilities of Frontend (FE) and Backend (BE) nodes.
-5. Distinguish the integrated storage-compute architecture from the decoupled
-   storage-compute architecture.
-6. Connect to Doris through the MySQL-compatible protocol, create a basic table, load
-   sample data, and execute an aggregation query.
+1. Define Apache Doris as an open-source, real-time analytics and search database built on an MPP architecture.
+2. Distinguish OLAP from OLTP by the work that a request does, not by the product that runs it.
+3. Recognize workloads that suit Doris, such as real-time dashboards, customer-facing analytics, observability, lakehouse analytics, and CDC-driven reporting.
+4. Summarize what the Frontend (FE) and the Backend (BE) each do with a query.
+5. Distinguish the integrated storage and compute architecture from the decoupled storage and compute architecture.
+6. Connect to Doris through its MySQL-compatible protocol, create a table, load data, and check the result with an aggregation query.
 
 ## Module structure
 
-| Section | Format | Time | Outcome |
-| --- | --- | ---: | --- |
-| 1.1 What Is Apache Doris? | Reading/video | 7 min | Describe Doris in terms of workload, interface, and execution model |
-| 1.2 OLAP and OLTP Workloads | Reading/visual | 8 min | Classify workloads using query and write characteristics |
-| 1.3 Where Doris Fits | Scenario walkthrough | 7 min | Identify suitable Doris use cases and system boundaries |
-| 1.4 A First Look at Doris Architecture | Reading/visual | 9 min | Explain FE, BE, and the two deployment architectures |
-| Lab 1 | Hands-on | 25 min | Start Doris and build the persistent baseline dataset |
-| Quiz 1 | Interactive knowledge check | 5 min | Check the Module 1 workload and architecture mental models |
-
----
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 1.1 What Is Apache Doris? | 7 min | Describe Doris by its workload, interface, and execution model |
+| 1.2 OLAP and OLTP Workloads | 8 min | Classify a request by how it reads and changes data |
+| 1.3 Where Doris Fits | 7 min | Recognize workloads that suit Doris, and work it should leave to other systems |
+| 1.4 A First Look at Doris Architecture | 8 min | Explain the FE, the BE, and the two deployment architectures |
+| Lab 1 | 30 min | Start Doris, load 10,158,080 events from S3, and run a first aggregation |
+| Quiz 1 | 10 min | Six questions on these objectives |
 
 ## 1.1 What Is Apache Doris?
 
@@ -112,10 +101,8 @@ supports large scans, filtering, joins, and aggregations.
 > for analytical workloads.
 
 The [Apache Doris project README](https://github.com/apache/doris) and
-[Apache Doris overview](https://doris.apache.org/docs/4.x/gettingStarted/what-is-apache-doris/)
+[Apache Doris overview](https://doris.apache.org/docs/4.x/getting-started/what-is-apache-doris/)
 are the source of truth for the current product definition and capabilities.
-
----
 
 ## 1.2 OLAP and OLTP Workloads
 
@@ -139,13 +126,19 @@ classifying a product by name alone.
 | Example | Place order `91827` | Revenue by region during the last 24 hours |
 
 The number of result rows is not the deciding factor. An analytical query may
-return one number while scanning millions of rows:
+return one number while scanning millions of rows. On the course data, this
+query reads the 4,768,620 events of December 2019 and returns one value,
+18,134,559.98:
 
 ```sql
 SELECT SUM(revenue)
 FROM events
-WHERE event_time >= NOW() - INTERVAL 1 DAY;
+WHERE event_time >= '2019-12-01 00:00:00'
+  AND event_time <  '2020-01-01 00:00:00';
 ```
+
+The course data comes from 2019 and 2020, so the course's queries use fixed
+dates; a query relative to `NOW()` would find no rows.
 
 Conversely, returning many rows is not automatically analytical. Exporting
 1,000 orders by their known identifiers can still be an operational access
@@ -195,8 +188,6 @@ transactions, or analyze many records together?**
 
 > **Decision rule:** classify the request by how it reads and changes data—not
 > by whether it happens to use SQL.
-
----
 
 ## 1.3 Where Doris Fits
 
@@ -280,13 +271,11 @@ Doris is not normally the system that should:
 It can serve the analysis behind those systems. Good architecture gives each
 component a clear responsibility.
 
----
-
 ## 1.4 A First Look at Doris Architecture
 
 The first workflow depends on two component boundaries: FE accepts and plans
 SQL, while BE executes the assigned work and manages internal-table data in an
-integrated storage-compute deployment.
+integrated storage and compute deployment.
 
 ### Frontend (FE)
 
@@ -309,7 +298,7 @@ mean a graphical web interface.
 ### Backend (BE)
 
 The BE executes the assigned plan fragments using the vectorized execution
-engine. In the integrated storage-compute architecture, it also stores
+engine. In the integrated storage and compute architecture, it also stores
 internal-table data on local storage. Across a production cluster, multiple
 BEs can scan and aggregate different pieces of a table in parallel.
 
@@ -330,9 +319,9 @@ Backend (BE)
 The official [system architecture documentation](https://doris.apache.org/docs/4.x/features-architecture/system-architecture/)
 provides the complete FE and BE responsibility model.
 
-### Integrated storage-compute architecture
+### Integrated storage and compute architecture
 
-In the integrated storage-compute architecture, a BE is stateful: it executes
+In the integrated storage and compute architecture, a BE is stateful: it executes
 queries and stores internal-table data on local disks. Storage capacity and
 compute capacity therefore scale together as BE nodes are added.
 
@@ -346,11 +335,12 @@ The Lab 1 All-in-One environment uses this architecture, but with only one FE,
 one BE, and one replica. It is a **single-node integrated Doris sandbox**, not a
 production-ready cluster.
 
-### Decoupled storage-compute architecture
+### Decoupled storage and compute architecture
 
-In the decoupled storage-compute architecture, persistent table data lives in
-shared storage such as object storage or HDFS. BE nodes act as stateless
-compute nodes and use local storage as a cache. Compute Groups can scale and
+In the decoupled storage and compute architecture, which some Doris
+documentation calls Shared Storage, persistent table data lives in shared
+storage such as object storage or HDFS. BE nodes act as stateless compute nodes
+and use local storage as a cache. Compute Groups can scale and
 isolate workloads without creating a full independent copy of the persistent
 data.
 
@@ -366,7 +356,7 @@ This architecture is a strong fit when:
 
 ### Compare the two architectures
 
-| Question | Integrated storage-compute architecture | Decoupled storage-compute architecture |
+| Question | Integrated storage and compute architecture | Decoupled storage and compute architecture |
 | --- | --- | --- |
 | Where is persistent table data stored? | BE local storage | Shared storage layer |
 | What does a BE do? | Stores data and executes queries | Executes queries and caches hot data |
@@ -378,12 +368,12 @@ Both architectures expose the same SQL interface. They differ in where data is
 stored and whether storage and compute resources scale together or
 independently.
 
----
-
 ## Lab 1: Start Doris and Build a Baseline Dataset
 
 Lab 1 creates the persistent environment and baseline dataset used by the next
-modules.
+modules. You need Docker with at least 4 CPUs, 8 GB of memory, and 20 GiB of free
+disk; the course README lists the platforms and downloads. Plan about 30
+minutes; the first run also downloads the Doris image, about 1.9 GB.
 
 You will:
 
@@ -395,12 +385,17 @@ You will:
 5. Create `doris_course.events` as the baseline internal table.
 6. Load and validate 10,158,080 ecommerce event rows.
 7. Run a grouped event and revenue query.
-8. Stop and restart the container to confirm that Docker named volumes preserve
-   FE metadata and BE table data.
+8. Optionally, stop and restart the container to confirm that Docker named
+   volumes preserve FE metadata and BE table data.
 
 Open the notebook:
 
 [Lab 1 — Start Doris and Build a Baseline Dataset](lab01_start_doris_and_build_baseline.ipynb)
+
+The Lab ends with a practice: find the day with the most purchase revenue.
+Predict the result first, then write the code in the empty cell; the collapsed
+reference solution after it also runs with Run All and leaves the Lab's tables
+as they were.
 
 ### Dataset source and attribution
 
@@ -421,40 +416,65 @@ The course copy is 40 Parquet files (about 72 MiB, 10,158,080 rows) in the
 public bucket `doris-courses-public-dataset` in AWS `us-east-1`. The bucket
 allows anonymous reads, so the lab needs no AWS account or credentials.
 
-## Module summary
+### What the data looks like
 
-- Apache Doris is an open-source, MPP-based database for real-time analytics
-  and search.
-- OLTP and OLAP are workload patterns. Small operational transactions and large
-  analytical scans solve different problems even when both use SQL.
-- Doris is suited to fresh, interactive analytical workloads such as
-  dashboards, customer-facing analytics, observability, lakehouse analytics,
-  and CDC-driven reporting.
-- FE accepts and analyzes SQL, creates and optimizes a distributed query plan,
-  and assigns its plan fragments to BE nodes.
-- BE nodes execute the assigned plan fragments; in the integrated
-  storage-compute architecture they also store internal-table data.
-- Integrated storage-compute favors a simple stateful FE/BE deployment, while
-  decoupled storage-compute enables shared persistent storage and independently
-  scalable compute.
-- A first Doris workflow is straightforward: connect, inspect, create, load,
-  query, and validate.
+A few features of the data explain results that you will see in later
+modules:
+
+| Feature | Value |
+| --- | --- |
+| Time range | 26 days in two months: 2019-12-01 to 2019-12-15 and 2020-03-01 to 2020-03-11; January and February 2020 have no events |
+| Event types | 9,437,184 `view`, 589,824 `cart`, and 131,072 `purchase` events |
+| Days with purchases | Seven: 2019-12-01 to 2019-12-04 and 2020-03-01 to 2020-03-03; the other 19 days have a revenue of 0.00 |
+| Days with views | Thirteen: 2019-12-05 to 2019-12-11 and 2020-03-03 to 2020-03-08 |
+| Days with cart events | Fifteen: 2019-12-01 to 2019-12-04, 2019-12-12 to 2019-12-15, 2020-03-01 to 2020-03-03, and 2020-03-08 to 2020-03-11 |
+| Regions | Eight synthetic values, `region_01` to `region_08`, each with about 1.27 million events |
+| Users and products | 1,580,057 users and 204,231 products |
+
+The course copy is a subset of the original publication, so its counts are not
+those of the original dataset, and its event types barely overlap in time:
+only 2020-03-03 has views, cart events, and purchases, and the purchase days
+before it have no views. A daily ratio from views to purchases therefore
+means nothing in this data; the Labs compare event types, regions, and days
+without such a ratio.
+
+## Summary
+
+- Apache Doris is an open-source database for real-time analytics and search:
+  it makes fresh data queryable quickly and answers analytical queries with low
+  latency, using MPP execution, columnar storage, and vectorized processing.
+- OLTP and OLAP are workload patterns. A small transaction on one business
+  entity is OLTP; a scan and aggregation over many rows is OLAP, whichever
+  product runs it and however many rows it returns.
+- Doris suits fresh, interactive analysis: real-time dashboards,
+  customer-facing analytics, observability, lakehouse analytics, and
+  CDC-driven reporting. It does not replace the transactional database, raw
+  object storage, or the visualization layer.
+- The FE accepts and analyzes SQL, creates and optimizes the distributed query
+  plan, and assigns its plan fragments; the BE nodes execute those fragments
+  and, in the integrated architecture, store the table data.
+- In the integrated storage and compute architecture, BEs store the data
+  locally and storage and compute grow together; in the decoupled
+  architecture, the data lives in shared storage and compute groups scale
+  independently.
+- Lab 1 connected to the FE over the MySQL protocol, read Parquet files in S3
+  with the S3 TVF, loaded 10,158,080 events into an internal table, and checked
+  them with a count, a time range, and an aggregation.
 
 ## Quiz 1: Introduction to Apache Doris
 
-Complete the interactive knowledge check after finishing the module and
-Lab 1. It runs without a Doris sandbox.
-
-[Open Quiz 1 — Introduction to Apache Doris](quiz01_doris_fundamentals.ipynb)
+Open [Quiz 1: Introduction to Apache Doris](quiz01_doris_fundamentals.ipynb).
+It has six single-choice questions and needs no running environment.
 
 Next module: [Module 2: Deep Dive into Apache Doris Architecture](../module02-architecture/course.md).
 
-## Official references
+## References
 
 - [Apache Doris source repository and project overview](https://github.com/apache/doris)
-- [What is Apache Doris?](https://doris.apache.org/docs/4.x/gettingStarted/what-is-apache-doris/)
+- [What is Apache Doris?](https://doris.apache.org/docs/4.x/getting-started/what-is-apache-doris/)
 - [System Architecture](https://doris.apache.org/docs/4.x/features-architecture/system-architecture/)
 - [Customer-Facing Analytics](https://doris.apache.org/use-cases/customer-facing-analytics/)
 - [Observability with Doris](https://doris.apache.org/docs/4.x/observability/overview/)
 - [Load Overview](https://doris.apache.org/docs/4.x/data-operate/import/load-manual/)
+- [S3 table-valued function](https://doris.apache.org/docs/4.x/sql-manual/sql-functions/table-valued-functions/s3/)
 - [All-In-One image](https://doris.apache.org/community/developer-guide/all-in-one-image/)

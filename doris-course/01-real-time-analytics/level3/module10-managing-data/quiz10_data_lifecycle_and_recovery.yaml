@@ -1,158 +1,155 @@
 title: "Module 10 Quiz: Controlling Storage Cost and Data Lifecycle in Apache Doris"
 description: >-
   Six independent scenarios check whether you can choose compression and
-  Partition lifecycle policies, interpret time windows, and apply the correct
-  recovery boundary without relying on a running Doris environment.
+  Partition lifecycle policies, interpret time windows and their evidence, and
+  apply the correct recovery boundary, one question for each learning
+  objective.
 questions:
-  - id: m10_q1
-    objective: "Choose a compression goal from the constrained resource"
+  - id: compression_goal
+    objective: "Explain the separate roles of column encoding and Page compression, and choose a compression algorithm from the constrained resource."
     prompt: >-
       A hot event table is scanned continuously. Query CPUs are saturated, but
-      storage capacity and read bandwidth have comfortable headroom. The team
-      can accept a larger stored table if decompression uses less CPU. What
-      should the next experiment prioritize?
+      storage capacity and read bandwidth have plenty of headroom, and the
+      team accepts a larger table if decompression costs less CPU. What should
+      the next experiment test?
     options:
       - id: measure_fast_decompression
-        text: "Test a fast-decompression compression family and measure query CPU and latency together with its additional stored bytes."
+        text: "A fast-decompression algorithm, measuring query CPU, latency, and the extra bytes"
       - id: highest_ratio_unmeasured
-        text: "Select the highest compression ratio from a small storage report, without measuring query CPU."
+        text: "The algorithm with the highest ratio in a small storage report, without CPU data"
       - id: disable_encoding
-        text: "Disable all column encoding, because table compression and encoding are the same layer."
+        text: "Turning off column encoding, because encoding and Page compression are one layer"
       - id: single_fastest_run
-        text: "Choose whichever algorithm had the shortest single elapsed-time run in a shared sandbox."
+        text: "Whichever algorithm had the shortest single elapsed time in a shared sandbox"
     answer: measure_fast_decompression
     explanation: >-
-      CPU is the stated bottleneck, so the experiment should prioritize
-      decompression cost while recording the storage and I/O trade-off. A high
-      ratio may reduce bytes but consume more CPU, and a single noisy run cannot
-      rank production behavior. Doris column encoding precedes Page compression
-      and is a separate storage layer; the decision still requires
-      representative load and query measurements.
+      CPU is the constrained resource, so test an algorithm with cheap
+      decompression, such as LZ4, and measure query CPU and latency along with
+      the extra storage and I/O. A higher ratio can cost more CPU, one noisy
+      run cannot rank algorithms, and column encoding is a separate layer that
+      comes before Page compression.
 
-  - id: m10_q2
-    objective: "Interpret Doris physical layout in compression evidence"
+  - id: fair_comparison
+    objective: "Design a fair compression comparison that keeps the input, layout, loads, and replicas equal."
     prompt: >-
-      Two Doris Duplicate Key tables contain the same logical rows and columns.
-      events_lz4f has one Partition, four Buckets, and replication_num = 1.
-      events_zstd has two Partitions, eight Buckets per Partition, and
-      replication_num = 3. SHOW DATA reports that events_zstd is larger. Which
-      conclusion is justified?
+      Two Duplicate Key tables hold the same rows. events_lz4f has one
+      Partition, four Buckets, and replication_num = 1. events_zstd has two
+      Partitions, eight Buckets each, and replication_num = 3. SHOW DATA
+      reports events_zstd as larger. What does this show?
     options:
       - id: layouts_not_comparable
-        text: "The report cannot rank LZ4F and ZSTD: Partition and Bucket counts change the Tablet layout, and replication_num changes the number of physical copies included in the reported size. Compare matching layouts and replicas with the same input and load shape."
-      - id: lz4f_proved_better
-        text: "LZ4F has proved a better compression ratio because the LZ4F table is smaller even though it stores fewer replicas and uses fewer Tablets."
+        text: "Nothing about the algorithms: the layouts and the replica counts differ"
+      - id: lz4f_better
+        text: "LZ4F compresses this data better, because its table is reported smaller"
       - id: zstd_tripled_rows
-        text: "ZSTD must have duplicated the logical SQL rows three times because a three-replica table returns three copies of every row."
+        text: "ZSTD stored the rows three times, so SQL returns three copies of each row"
       - id: divide_by_three
-        text: "Dividing the reported size by three fully fixes the comparison because Tablet, Segment, index, and load-shape overhead cannot affect Doris storage reports."
+        text: "Dividing the ZSTD size by three gives a fair comparison with the LZ4F table"
     answer: layouts_not_comparable
     explanation: >-
-      In Doris, every Bucket in every Partition produces a logical Tablet, and
-      replication creates physical copies of those Tablets. SHOW DATA therefore
-      reflects replica storage and layout overhead as well as compressed data.
-      Replicas do not duplicate rows in the SQL answer, and dividing by the
-      replica count does not remove differences in Tablet, Segment, index, or
-      load-shape overhead. After matching those factors, the size comparison
-      still applies only to the tested data and cannot by itself rank query CPU
-      or latency.
+      Each Bucket of each Partition is a Tablet with its own files, and SHOW
+      DATA includes every replica, so 16 Tablets with three copies cannot be
+      compared with 4 Tablets with one. Dividing by three still leaves the
+      Tablet, Segment, and index overhead, and replicas never repeat rows in a
+      query. Load both tables with the same layout, replicas, input, and
+      batches.
 
-  - id: m10_q3
-    objective: "Keep Doris compression separate from ClickHouse codecs"
+  - id: partition_modes
+    objective: "Choose Manual, Auto, or Dynamic Partitioning from what creates and what removes Partitions."
     prompt: >-
-      A design review proposes a different T64, DoubleDelta, or ZSTD codec on
-      every Doris column because a ClickHouse example used that syntax. Which
-      correction matches the Doris 4.1.3 course scope?
-    options:
-      - id: table_level_compression
-        text: "Choose a Doris table-level compression family through the compression property; Doris may still apply internal column encodings before Page compression, but the ClickHouse per-column codec chain is not Doris DDL."
-      - id: copy_clickhouse_codecs
-        text: "Copy the ClickHouse CODEC clauses directly because both products expose identical storage syntax."
-      - id: column_ttl
-        text: "Use column-level TTL to replace values with defaults before Doris compresses them."
-      - id: no_compression
-        text: "Doris does not compress columns or Pages, so no compression setting exists."
-    answer: table_level_compression
-    explanation: >-
-      The Doris table property selects the Page-compression family for the
-      table, while the storage engine can choose internal representations such
-      as dictionary or run-length encoding for column data. ClickHouse
-      per-column codec chains and column TTL are not Doris features and should
-      not be renamed into the course. This distinction does not claim that all
-      columns contribute equally to the reported whole-table size.
-
-  - id: m10_q4
-    objective: "Choose a Partition management mode"
-    prompt: >-
-      Match three requirements to their Partition mode: (1) approved accounting
-      ranges are created only by an administrator; (2) previously unseen tenant
-      values create Partitions when data arrives; (3) the system keeps a
-      clock-driven seven-day window and removes older complete ranges.
+      Match three requirements to a Partition mode: (1) an administrator
+      creates approved accounting ranges; (2) previously unseen tenant values
+      create Partitions when their data arrives; (3) the system keeps a
+      clock-driven seven-day window and prepares tomorrow's range.
     options:
       - id: manual_auto_dynamic
-        text: "(1) Manual Partitioning; (2) Auto Partitioning; (3) Dynamic Partitioning."
+        text: "(1) Manual Partitioning; (2) Auto Partitioning; (3) Dynamic Partitioning"
       - id: dynamic_manual_auto
-        text: "(1) Dynamic Partitioning; (2) Manual Partitioning; (3) Auto Partitioning."
+        text: "(1) Dynamic Partitioning; (2) Manual Partitioning; (3) Auto Partitioning"
       - id: auto_dynamic_manual
-        text: "(1) Auto Partitioning; (2) Dynamic Partitioning; (3) Manual Partitioning."
+        text: "(1) Auto Partitioning; (2) Dynamic Partitioning; (3) Manual Partitioning"
       - id: dynamic_for_all
-        text: "Use Dynamic Partitioning for all three because it creates any missing value on insert."
+        text: "Dynamic Partitioning for all three, because it creates any value that is missing"
     answer: manual_auto_dynamic
     explanation: >-
-      Manual Partitioning keeps explicit business control, Auto Partitioning
-      reacts to incoming values, and Dynamic Partitioning follows the current
-      clock to create and remove complete time ranges. Auto creation does not
-      by itself define a rolling deletion policy, and Dynamic Partitioning does
-      not create arbitrary historical values merely because a late row arrives.
+      Manual Partitioning keeps the boundaries under explicit control, Auto
+      Partitioning creates a range when a value first arrives, and Dynamic
+      Partitioning follows the clock to create future ranges and remove old
+      ones. Auto Partitioning can also cap how many historical ranges it
+      keeps with partition.retention_count, but it keeps no window relative to
+      today, and Dynamic Partitioning does not create a range for a late value.
 
-  - id: m10_q5
-    objective: "Predict an hourly Dynamic Partition window"
+  - id: hourly_window
+    objective: "Read a Dynamic Partition window from its time unit, offsets, and time zone, and predict what happens to late data."
     prompt: >-
-      At 2026-06-12 10:30 in Asia/Shanghai, a table uses time_unit = HOUR,
-      start = -2, end = 1, create_history_partition = true, and the same time
-      zone. Which statement correctly describes the intended ranges and two
-      incoming events?
+      At 10:30 in Asia/Shanghai, a table uses time_unit = HOUR, start = -2,
+      end = 1, create_history_partition = true, and the same time zone. An
+      event at 08:00 and an event at 07:59 arrive. What happens?
     options:
       - id: four_hourly_ranges
-        text: "The online ranges are [08:00,09:00), [09:00,10:00), [10:00,11:00), and [11:00,12:00). An 08:00 event has a target; a 07:59 event does not. At 11:00 the oldest whole range becomes eligible for scheduled removal."
+        text: "The 08:00 event lands in the oldest of four hourly ranges; the 07:59 one fails"
       - id: latest_two_hours
-        text: "Only the latest two hours exist, and each row expires exactly two hours after its own timestamp."
+        text: "Both load, and each row expires exactly two hours after its own timestamp"
       - id: right_closed_ranges
-        text: "An event at 08:00 belongs to the range ending at 08:00 because Range Partitions are right-closed."
+        text: "The 08:00 event lands in the range that ends at 08:00, since ranges are right-closed"
       - id: minute_partition
-        text: "A 07:59 event automatically creates a minute Partition because HOUR is only a naming preference."
+        text: "The 07:59 event creates a one-minute Partition, because HOUR is only a label"
     answer: four_hourly_ranges
     explanation: >-
-      Inclusive offsets from -2 through +1 yield four left-closed,
-      right-open hourly ranges when history creation is enabled. The 08:00
-      boundary belongs to the range starting at 08:00, while 07:59 has no
-      target. Expiry applies to the complete oldest hour after the clock
-      boundary and a scheduler check, not independently to each row and never
-      at minute granularity.
+      Offsets -2 to +1 give four half-open hourly ranges: [08:00, 09:00)
+      through [11:00, 12:00). The 08:00 event belongs to the range that starts
+      at 08:00, and the 07:59 event has no range, so a normal insert fails. At
+      11:00 the whole oldest hour becomes eligible for removal at the next
+      scheduler check; rows do not expire one by one.
 
-  - id: m10_q6
-    objective: "Separate lifecycle evidence and recovery boundaries"
+  - id: expiry_evidence
+    objective: "Separate an accepted configuration, scheduler action, SQL visibility, and storage reclamation when a Partition expires."
     prompt: >-
-      A daily Dynamic Partition policy keeps the latest 30 calendar-day
-      ranges. After a date boundary advances the window, the scheduler reports
-      no error, SHOW PARTITIONS no longer lists the oldest day, and SQL returns
-      no rows from that range. A separate manual Partition dropped without
-      FORCE appears in the catalog recycle bin. Which conclusion is justified?
+      An operator narrows dynamic_partition.start from -3 to -2 on an hourly
+      table. SHOW CREATE TABLE shows the new value at once, but five minutes
+      later SHOW PARTITIONS still lists the oldest hour and its rows are still
+      returned. The FE check interval is the default 600 seconds. What is the
+      most likely explanation?
     options:
-      - id: offline_not_reclaimed
-        text: "The dynamic range is no longer online, but these observations do not prove immediate BE byte reclamation. The separate eligible manual drop may be recovered within its recycle-bin window; broader recovery requires an independent backup or replay plan."
-      - id: compaction_erased_all
-        text: "SQL returning no rows proves that Compaction erased every Segment and released all physical space immediately."
-      - id: replicas_restore
-        text: "Any replica can restore either deleted range because replication is an independent historical backup."
-      - id: recycle_bin_is_permanent
-        text: "A recycle-bin entry guarantees permanent recovery even after its configured retention period or a FORCE drop."
-    answer: offline_not_reclaimed
+      - id: scheduler_not_yet
+        text: "The rule is accepted, but the scheduler has not run its next check yet"
+      - id: rule_ignored
+        text: "Doris ignored the new start, because a window cannot shrink once it exists"
+      - id: rows_expire_individually
+        text: "Each row expires by itself three hours after its own event time, not as a range"
+      - id: needs_manual_drop
+        text: "A Dynamic Partition table removes old ranges only after a manual DROP PARTITION"
+    answer: scheduler_not_yet
     explanation: >-
-      The Partition list and SQL answer establish the online logical state;
-      scheduler status establishes that the scheduler observed its work. They
-      do not expose later physical cleanup or Compaction. A recent object drop
-      without FORCE can be eligible for RECOVER only while its recycle-bin
-      metadata remains available. Replicas converge on valid deletes, and the
-      recycle bin remains part of the same cluster, so neither replaces an
-      independent backup for wider failures.
+      ALTER TABLE ... SET changes the rule at once, but it does not run the
+      scheduler. The Dynamic Partition scheduler applies the rule at its next
+      check, every dynamic_partition_check_interval_seconds, and SHOW DYNAMIC
+      PARTITION TABLES shows when it last ran. Lab 10 shortens the interval so
+      that the removal follows within seconds. Even after the range disappears,
+      its bytes can stay on disk for a while.
+
+  - id: recovery_boundary
+    objective: "Decide when the recycle bin is enough and when an independent backup or a replay from the source is needed."
+    prompt: >-
+      A daily Dynamic Partition policy keeps 30 days. After the window
+      advances, SHOW PARTITIONS no longer lists the oldest day. Separately, an
+      operator dropped a manual Partition without FORCE an hour ago, and it
+      appears in the recycle bin. Which conclusion is justified?
+    options:
+      - id: recover_drop_backup_for_rest
+        text: "RECOVER can restore the recent drop; for expired days, rely on a backup or a replay"
+      - id: compaction_erased
+        text: "Both ranges are gone for good, because Compaction erased their Segments at once"
+      - id: replicas_restore
+        text: "Any replica can restore either range, because replicas keep a history of versions"
+      - id: recycle_bin_forever
+        text: "The recycle bin keeps both ranges until an operator empties it, even after FORCE"
+    answer: recover_drop_backup_for_rest
+    explanation: >-
+      A drop without FORCE stays in the recycle bin for a limited time, by
+      default a day, so RECOVER can bring that Partition back. An expired day
+      may sit in the recycle bin for a while too, but a retention policy should
+      not depend on that: data that must outlive the window, a drop with
+      FORCE, or a lost cluster needs an independent backup or a replay from the
+      source. Replicas copy deletions too, and the recycle bin belongs to the
+      same cluster.

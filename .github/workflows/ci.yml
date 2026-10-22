@@ -37,6 +37,7 @@ jobs:
           python tools/check_quiz_balance.py --strict doris-course/04-ai-integrations
           python tools/check_quiz_balance.py --strict doris-course/03-observability
           python tools/check_quiz_balance.py --strict doris-course/02-data-warehousing
+          python tools/check_quiz_balance.py --strict doris-course/01-real-time-analytics
       - name: Secrets, local paths and email addresses
         run: python tools/check_sensitive_info.py
       - name: Tests of the checks

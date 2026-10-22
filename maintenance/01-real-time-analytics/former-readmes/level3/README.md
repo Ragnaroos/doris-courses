@@ -12,7 +12,7 @@ Level 3 延续 Level 1–2 已建立的电商分析流程：
     → 随时间演进、保留和恢复数据
 ```
 
-**当前状态：Module 8–10 的 Course、Lab 与 Quiz 均已实现；Lab 关键路径已在本地 Doris 4.1.3 验证。** [Module 8 Course](module08-query-acceleration/course.md)、[Module 9 Course](module09-sharding-replication/course.md)、[Module 10 Course](module10-managing-data/course.md)、[Lab 8](module08-query-acceleration/lab08_accelerate_queries.ipynb)、[Lab 9](module09-sharding-replication/lab09_observe_sharding_and_replication.ipynb) 与 [Lab 10](module10-managing-data/lab10_manage_data.ipynb) 使用英文；每个 Module 另有一个英文交互式 Quiz Notebook 和一份本地 YAML 题库。本文件保留中文开发大纲，并以实际 Lab 顺序记录目的、预期结果和证据边界。Lab 10 跨整点的自然过期步骤仍取决于运行时钟和 Dynamic Partition 调度周期，不能把局部验证写成每次都已完成整本回归。
+**当前状态：Module 8–10 的 Course、Lab 与 Quiz 均已实现；Lab 关键路径已在本地 Doris 4.1.3 验证。** [Module 8 Course](../../../../doris-course/01-real-time-analytics/level3/module08-query-acceleration/course.md)、[Module 9 Course](../../../../doris-course/01-real-time-analytics/level3/module09-sharding-replication/course.md)、[Module 10 Course](../../../../doris-course/01-real-time-analytics/level3/module10-managing-data/course.md)、[Lab 8](../../../../doris-course/01-real-time-analytics/level3/module08-query-acceleration/lab08_accelerate_queries.ipynb)、[Lab 9](../../../../doris-course/01-real-time-analytics/level3/module09-sharding-replication/lab09_observe_sharding_and_replication.ipynb) 与 [Lab 10](../../../../doris-course/01-real-time-analytics/level3/module10-managing-data/lab10_manage_data.ipynb) 使用英文；每个 Module 另有一个英文交互式 Quiz Notebook 和一份本地 YAML 题库。本文件保留中文开发大纲，并以实际 Lab 顺序记录目的、预期结果和证据边界。Lab 10 跨整点的自然过期步骤仍取决于运行时钟和 Dynamic Partition 调度周期，不能把局部验证写成每次都已完成整本回归。
 
 技术基线为 Apache Doris 4.x，实验目标版本为 4.1.3。所有版本敏感行为必须通过后文列出的验证，才能写成实验的预期结果。
 
@@ -52,7 +52,7 @@ Level 3 不按“功能定义→语法清单”组织 Course。每个 Module 使
 
 ## 模块 8：在 Apache Doris 中加速查询
 
-已实现课程：[Module 8 Course](module08-query-acceleration/course.md)。
+已实现课程：[Module 8 Course](../../../../doris-course/01-real-time-analytics/level3/module08-query-acceleration/course.md)。
 
 ### 模块目标
 
@@ -177,7 +177,7 @@ Level 3 不按“功能定义→语法清单”组织 Course。每个 Module 使
 
 ### 模块 8 实验：验证查询加速方案
 
-实验文件：[Lab 8 Notebook](module08-query-acceleration/lab08_accelerate_queries.ipynb)。实验复用 Level 1–8 的单节点 `doris-rta` 容器和 `doris_course` Database；只读取 `events_modelled` 与 `dim_products`，所有可变对象均使用 `m08_*` 名称。以下编号严格对应 Notebook 的执行顺序。
+实验文件：[Lab 8 Notebook](../../../../doris-course/01-real-time-analytics/level3/module08-query-acceleration/lab08_accelerate_queries.ipynb)。实验复用 Level 1–8 的单节点 `doris-rta` 容器和 `doris_course` Database；只读取 `events_modelled` 与 `dim_products`，所有可变对象均使用 `m08_*` 名称。以下编号严格对应 Notebook 的执行顺序。
 
 0. **Initialize the Lab。**
    - **目的与数据环境：** 从课程根目录或模块目录定位 `doris_course/`，加载共享 `DorisLab` 并创建 `lab`；该单元格不启动 Docker、不连接 Doris、也不修改任何表。内核重启后只需先重跑这里。
@@ -276,11 +276,11 @@ Level 3 不按“功能定义→语法清单”组织 Course。每个 Module 使
 
 ### 测验 8 的已实现覆盖范围
 
-[Quiz 8 Notebook](module08-query-acceleration/quiz08_acceleration_choices.ipynb) 与 [Quiz 8 YAML](module08-query-acceleration/quiz08_acceleration_choices.yaml) 包含六个独立场景，覆盖逻辑复用与结果存储、新鲜度驱动的物化选择、改写条件、谓词驱动的索引选择、计划与运行证据、维护成本取舍。每个场景自行提供所需事实或小段证据。
+[Quiz 8 Notebook](../../../../doris-course/01-real-time-analytics/level3/module08-query-acceleration/quiz08_acceleration_choices.ipynb) 与 [Quiz 8 YAML](../../../../doris-course/01-real-time-analytics/level3/module08-query-acceleration/quiz08_acceleration_choices.yaml) 包含六个独立场景，覆盖逻辑复用与结果存储、新鲜度驱动的物化选择、改写条件、谓词驱动的索引选择、计划与运行证据、维护成本取舍。每个场景自行提供所需事实或小段证据。
 
 ## 模块 9：Apache Doris 的分片与副本
 
-已实现课程：[Module 9 Course](module09-sharding-replication/course.md)。
+已实现课程：[Module 9 Course](../../../../doris-course/01-real-time-analytics/level3/module09-sharding-replication/course.md)。
 
 ### 模块目标
 
@@ -437,7 +437,7 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 
 ### 模块 9 实验：从 3 FE + 2 BE 扩展并观察分布式行为
 
-实验文件：[Lab 9 Notebook](module09-sharding-replication/lab09_observe_sharding_and_replication.ipynb)。实验使用模块目录的 `compose.multinode.yml`、固定镜像 `apache/doris:all-in-one-4.1.3`、独立 Compose project、私有子网和 localhost 端口；不与 Level 1–8 的单节点 `doris-rta` 同时运行。首次缺少本地 baseline 时只读课程 S3 的 `[2020-03-01 00:00:00, 2020-03-01 07:00:00)`，不修改 S3。以下编号严格对应 Notebook 的 1.1–3.2 与结尾控制步骤。
+实验文件：[Lab 9 Notebook](../../../../doris-course/01-real-time-analytics/level3/module09-sharding-replication/lab09_observe_sharding_and_replication.ipynb)。实验使用模块目录的 `compose.multinode.yml`、固定镜像 `apache/doris:all-in-one-4.1.3`、独立 Compose project、私有子网和 localhost 端口；不与 Level 1–8 的单节点 `doris-rta` 同时运行。首次缺少本地 baseline 时只读课程 S3 的 `[2020-03-01 00:00:00, 2020-03-01 07:00:00)`，不修改 S3。以下编号严格对应 Notebook 的 1.1–3.2 与结尾控制步骤。
 
 0. **Initialize the Lab。**
    - **目的与数据环境：** 定位课程根目录，加载共享 `DorisLab`，记录 Compose 文件、HAProxy 统计地址、代理端口、固定 FE 服务/IP/主机端口映射和期望事件行数；不启动或停止任何容器。初始 helper 指向直连 `fe-1`，后续步骤会按实验目的切换连接。
@@ -525,11 +525,11 @@ BE：先启动 be-1、be-2 → 建立双副本基线 → 加入 be-3 → 执行�
 
 ### 测验 9 的已实现覆盖范围
 
-[Quiz 9 Notebook](module09-sharding-replication/quiz09_distribution_and_availability.ipynb) 与 [Quiz 9 YAML](module09-sharding-replication/quiz09_distribution_and_availability.yaml) 包含六个独立场景，覆盖存储副本与查询选中的副本、跨 BE 扫描任务、Bucket Shuffle / Colocate 的条件、两 BE 到三 BE 的副本再平衡、双副本与三副本的停机写入门槛、FE 选举与客户端入口切换，以及容器级和生产级故障域的区别。每题自行提供拓扑、配置和元数据，不要求正在运行 Docker 或 Doris。
+[Quiz 9 Notebook](../../../../doris-course/01-real-time-analytics/level3/module09-sharding-replication/quiz09_distribution_and_availability.ipynb) 与 [Quiz 9 YAML](../../../../doris-course/01-real-time-analytics/level3/module09-sharding-replication/quiz09_distribution_and_availability.yaml) 包含六个独立场景，覆盖存储副本与查询选中的副本、跨 BE 扫描任务、Bucket Shuffle / Colocate 的条件、两 BE 到三 BE 的副本再平衡、双副本与三副本的停机写入门槛、FE 选举与客户端入口切换，以及容器级和生产级故障域的区别。每题自行提供拓扑、配置和元数据，不要求正在运行 Docker 或 Doris。
 
 ## 模块 10：控制 Apache Doris 的存储成本与数据生命周期
 
-已实现课程：[Module 10 Course](module10-managing-data/course.md)。
+已实现课程：[Module 10 Course](../../../../doris-course/01-real-time-analytics/level3/module10-managing-data/course.md)。
 
 ### ClickHouse 参考课程与 Doris 映射
 
@@ -682,7 +682,7 @@ ClickHouse 参考：[Real-time Analytics with ClickHouse](https://learn.clickhou
 
 ### 模块 10 实验：比较压缩并验证分区生命周期
 
-实验文件：[Lab 10 Notebook](module10-managing-data/lab10_manage_data.ipynb)。实验使用 Level 1–8 的单节点 `doris-rta` 和 `doris_course`，不要求 Module 9 多节点集群运行；只读 `events_modelled` 的一天范围，其他数据均在本地生成。所有可变对象使用 `m10_*` 名称，不访问 AWS S3。以下编号严格对应 Notebook 的执行顺序。
+实验文件：[Lab 10 Notebook](../../../../doris-course/01-real-time-analytics/level3/module10-managing-data/lab10_manage_data.ipynb)。实验使用 Level 1–8 的单节点 `doris-rta` 和 `doris_course`，不要求 Module 9 多节点集群运行；只读 `events_modelled` 的一天范围，其他数据均在本地生成。所有可变对象使用 `m10_*` 名称，不访问 AWS S3。以下编号严格对应 Notebook 的执行顺序。
 
 0. **Initialize the Lab。**
    - **目的与数据环境：** 定位课程根目录并加载 `DorisLab` 与 UI helper；不启动 Docker、不连接 Doris、不修改表。内核重启后只需重新运行这里。
@@ -774,7 +774,7 @@ ClickHouse 参考：[Real-time Analytics with ClickHouse](https://learn.clickhou
 
 ### 测验 10 的已实现覆盖范围
 
-[Quiz 10 Notebook](module10-managing-data/quiz10_data_lifecycle_and_recovery.ipynb) 与 [Quiz 10 YAML](module10-managing-data/quiz10_data_lifecycle_and_recovery.yaml) 包含六道独立场景题，覆盖：
+[Quiz 10 Notebook](../../../../doris-course/01-real-time-analytics/level3/module10-managing-data/quiz10_data_lifecycle_and_recovery.ipynb) 与 [Quiz 10 YAML](../../../../doris-course/01-real-time-analytics/level3/module10-managing-data/quiz10_data_lifecycle_and_recovery.yaml) 包含六道独立场景题，覆盖：
 
 1. 根据查询频率、CPU 与存储目标选择压缩侧重点。
 2. 结合 Partition、Bucket、Tablet、Replica 与 `SHOW DATA` 的统计范围，判断两张物理布局不同的表能否用于给压缩算法排名。

@@ -2,91 +2,52 @@
 
 | Course information | Value |
 | --- | --- |
-| Course | Real-time Analytics with Apache Doris — Level 2 |
-| Product baseline | Apache Doris 4.x |
-| Lab version | Apache Doris 4.1.3 |
-| Estimated time | Approximately 80 minutes, including the guided lab |
+| Course | Real-time Analytics with Apache Doris · Level 2 |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox and `events_modelled` from Lab 4 |
+| Estimated time | About 95 minutes: reading 55, Lab 30, quiz 10 |
+
+[Course README](../../README.md) · [Open Lab 6](lab06_join_data.ipynb) · [Open Quiz 6](quiz06_join_semantics_and_execution.ipynb)
 
 ## Module goal
 
-This module explains how to combine related data without losing control of the
-result grain. You will begin with the business relationship and the rows the
-answer must retain. You will then connect those logical requirements to Hash
-and Nested Loop implementations and to the way Apache Doris moves data for a
-distributed Join.
+Combine related data without losing control of the result's grain: start from
+the business relationship and the rows the answer must keep, then see how
+Doris implements the Join and moves the data so that matching rows meet.
 
-Module 5 analyzed `doris_course.events_modelled`, where one row represents one
-original event. Module 6 enriches those events with locally generated product
-attributes from `dim_products`. The dimension has one row per product except
-for controlled unmatched cases. This makes matching, missing, and duplicate
-relationships observable without another external dataset.
+An operations team wants purchase revenue by product category and region. The
+events carry `product_id`, and the product attributes live in a dimension,
+`dim_products`, which Lab 6 generates with one row per product, except for
+deliberately missing and duplicated cases, so that matching, missing, and
+duplicate relationships become visible.
 
 ## Learning objectives
 
 After completing this module, you will be able to:
 
-1. State the grain and cardinality of both Join inputs and predict the result
-   grain before running the query.
-2. Explain why duplicate Join keys can multiply event rows and duplicate
-   measures.
-3. Choose Inner, Outer, Semi, Anti, or Cross Join from the matching and
-   unmatched rows the answer must retain.
-4. Place right-side conditions in `ON` or `WHERE` deliberately for an Outer
-   Join.
-5. Distinguish ordinary equality `=` from NULL-safe equality `<=>`, and explain
-   the NULL-aware exclusion required by `NOT IN` semantics.
-6. Recognize when point-in-time enrichment needs an ASOF Join rather than exact
-   timestamp equality or a current-state lookup.
-7. Explain the build and probe roles in a Hash Join and recognize when a pure
-   non-equi condition may require a Nested Loop Join.
-8. Compare Broadcast, Partition Shuffle, Bucket Shuffle, and Colocate Join by
-   the data movement and layout each requires.
-9. Explain why a small filtered dimension can fit Broadcast and why two large,
-   incompatible inputs usually require Shuffle.
-10. Read Join type, condition, distribution, Exchange, and Runtime Filter
-    evidence from `EXPLAIN`.
-11. Use a Query Profile to distinguish a planned Runtime Filter from its actual
-    probe-side effect.
-12. Explain why optimizer hints require plan and runtime evidence rather than
-    becoming a default business-query recipe.
+1. Predict a Join's result grain and multiplicity from the grain and key cardinality of both inputs.
+2. Choose Inner, Outer, Semi, Anti, Cross, or ASOF Join from the rows that the answer must retain.
+3. Decide how `NULL` keys match and whether a right-side condition belongs in `ON` or `WHERE`.
+4. Explain when Doris uses a Hash Join or a Nested Loop Join, and what the build and probe sides do.
+5. Compare Broadcast, Partition Shuffle, Bucket Shuffle, and Colocate Join by the data each moves and the layout each needs.
+6. Read the Join strategy and Runtime Filters in `EXPLAIN` separately from what the Query Profile records.
 
-## Scenario-led content outline
+## Module structure
 
-An operations team wants purchase revenue by product category and region.
-Events carry `product_id`; product attributes live in a dimension. Some events
-have no dimension match, a defective dimension can contain duplicate product
-rows, and historical product attributes may change over time. In a distributed
-cluster, matching rows must also reach the same execution location.
-
-Each section turns one part of that requirement into a Join decision:
-
-| Section | Requirement scenario | Decision developed in this module | Lab 6 evidence |
-| --- | --- | --- | --- |
-| **6.1 Establish the relationship** | Event facts need product category and brand, but a product Key may be missing or duplicated. | Declare both input grains and predict one-to-one, one-to-many, or many-to-many result multiplicity. | Build `dim_products` and use a controlled duplicate-Key case to observe row multiplication. |
-| **6.2 Choose the logical operator** | Reports may need only matched events, every event, orphan Keys, eligibility, reconciliation, or Cartesian combinations. | Select Inner, Outer, Semi, Anti, Cross, or ASOF semantics from the required result. | Execute Inner, Left Outer, Left Semi, and Left Anti examples; keep the other forms in bounded course scenarios. |
-| **6.3 Define missing-Key semantics** | Two Join Keys may both be `NULL`, and a right-side filter may accidentally remove unmatched left rows. | Choose `=` or `<=>` from business meaning; distinguish Anti Join, NULL-aware Anti Join, and predicate placement. | Compare `=` with `<=>` on controlled rows and observe an unmatched Left Outer row. |
-| **6.4 Enter physical execution** | Product enrichment has an equality Key; a range relationship may have no equality Key. | Use Hash Join for equi candidates and recognize when Nested Loop evaluation is required; identify build and probe roles. | Compare equi and pure non-equi `EXPLAIN SHAPE PLAN` output. |
-| **6.5 Broadcast a small input** | A large event input joins a small, filtered product relation. | Keep the probe input in place and send the complete build relation to participating execution instances when replication is acceptable. | Read a default `hashJoin[INNER_JOIN broadcast]` plan in the single-BE sandbox. |
-| **6.6 Partition Shuffle incompatible large inputs** | Neither input can be copied and no existing distribution can be reused. | Repartition both inputs by the Join Key so equal Keys reach the same execution partition. | Use a key-routing example in the course; Lab compares the general strategy with its observed non-Broadcast plan. |
-| **6.7 Reuse a Bucket layout** | One input is already Hash bucketed compatibly with the Join condition. | Keep that Bucket layout and redistribute only the other input when all strategy requirements are met. | The accepted `[shuffle]` comparison plan reports `shuffleBucket` in Doris 4.1.3. |
-| **6.8 Pre-colocate recurring inputs** | Two large tables repeatedly join on a stable shared Key. | Place matching Buckets together through a compatible Colocation Group and verify that the group is stable. | Use the layout scenario in the course; Lab does not create a Colocation Group. |
-| **6.9 Reduce probe candidates at the Scan** | A large event input joins only the small set of products that remain after a selective category filter. | Use build-side Join Keys as a Runtime Filter on the probe-side Scan; recognize when the filter is likely to help and when it may add little value. | Relate the `category_1` predicate to the product Keys that can reject event candidates before the Hash Join. |
-| **6.10 Separate plan from runtime evidence** | A plan contains Runtime Filter producers and consumers, but the team needs to know whether rows were actually filtered. | Read `EXPLAIN` for planned work and Query Profile counters for executed work; use hints only for evidence-driven comparison. | Inspect raw Runtime Profile counters for the `events_modelled` probe-side Scan and Hash Join. |
-
-The sequence is deliberate. Section 6.1 defines the relationship and expected
-grain. Sections 6.2–6.3 define the **logical Join result**, independent of the
-cluster layout. Section 6.4 begins **physical execution** with Hash Join and
-Nested Loop Join. Sections 6.5–6.8 then compare the distribution strategies
-and Exchange work that make matching inputs available to those Join operators
-across an MPP cluster. Sections 6.9–6.10 ask whether the physical plan can
-reduce probe candidates and what the executed Profile actually proves.
-
-The course explains all four distribution strategies using explicit input sizes
-and layouts. Lab 6 executes the logical Join cases and reads plans and a Profile
-from Doris 4.1.3. Its single Backend (BE) cannot demonstrate real cross-node
-network cost, multi-node placement, or which strategy is universally faster.
-
----
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 6.1 Establish the Relationship Before Adding Attributes | 6 min | Predict one-to-one, one-to-many, or many-to-many results from both grains |
+| 6.2 Choose the Logical Join Operator from the Rows the Answer Must Retain | 6 min | Choose Inner, Outer, Semi, Anti, Cross, or ASOF semantics |
+| 6.3 Define What Missing Keys and Predicates Mean | 6 min | Choose `=` or `<=>`, and place right-side predicates in `ON` or `WHERE` |
+| 6.4 Connect the Join Condition to Its Physical Implementation | 7 min | Tell Hash Join from Nested Loop Join, and the build side from the probe side |
+| 6.5 Use Broadcast When the Build Input Is Small Enough to Replicate | 5 min | Copy a small build input to every participant |
+| 6.6 Use Partition Shuffle When Both Inputs Need Redistribution | 5 min | Route both inputs by the Join key |
+| 6.7 Use Bucket Shuffle When One Existing Layout Can Be Reused | 5 min | Keep one compatible bucketed input in place |
+| 6.8 Use Colocate for a Stable, Repeated Join Relationship | 4 min | Store both inputs with matching Buckets in advance |
+| 6.9 Reduce Probe Candidates with a Runtime Filter | 6 min | Use the build side's keys to filter the probe-side scan |
+| 6.10 Read Plan Evidence Separately from Runtime Effect | 5 min | Read the plan, the Profile, and hints for what each shows |
+| Lab 6 | 30 min | Run the Join types on controlled cases, then read plans and a Profile |
+| Quiz 6 | 10 min | Six questions on these objectives |
 
 ## 6.1 Establish the Relationship Before Adding Attributes
 
@@ -208,9 +169,8 @@ specified comparison direction; it does not mean the smallest absolute time
 difference. ASOF Left Join keeps an event with no qualifying history row and
 fills right-side columns with `NULL`; ASOF Inner Join discards it.
 
-This syntax and behavior were verified with a read-only example in the course's
-Doris 4.1.3 environment. Lab 6 uses a current product lookup and does not add a
-second historical dimension. See [ASOF Join](https://doris.apache.org/docs/4.x/query-data/asof-join/)
+Lab 6 uses a current product lookup and does not add a second historical
+dimension. See [ASOF Join](https://doris.apache.org/docs/4.x/query-data/asof-join/)
 for supported temporal types, comparison directions, and restrictions.
 
 ## 6.3 Define What Missing Keys and Predicates Mean
@@ -704,13 +664,11 @@ Use a hint only after you have:
 Lab 6 uses `[shuffle]` to obtain a plan contrast and checks the Hint log. It
 does not turn that hint into the recommended production form.
 
----
-
 ## Lab 6: Joining Data in Apache Doris
 
 Open [Lab 6 — Joining Data in Apache Doris](lab06_join_data.ipynb) after Modules
-4 and 5. The Notebook reads the persistent `events_modelled` table and creates
-three Module 6 tables:
+4 and 5, and plan about 30 minutes. The Notebook reads the persistent
+`events_modelled` table and creates three Module 6 tables:
 
 - `dim_products`, a deterministic 204,231-row product dimension generated from
   local product identifiers;
@@ -728,7 +686,7 @@ It performs no external download and does not read Amazon S3.
 | 4 | Join one event to duplicate product-version Keys | A Join emits every matching pair and can repeat a measure |
 | 5 | Compare `=` with `<=>` for a `NULL` event Key | Ordinary equality creates no NULL-to-NULL pair; NULL-safe equality creates one under the fixture contract |
 | 6 | Compare equi and pure non-equi plans | The equi-condition uses Hash Join and the pure range condition uses Nested Loop Join in the tested plan |
-| 7 | Compare distribution plans and inspect a Runtime Profile | The default plan uses Broadcast, the accepted comparison reports Bucket Shuffle, and Profile counters show actual probe-side filtering |
+| 7 | Compare distribution plans and inspect a Query Profile | The default plan uses Broadcast, the accepted comparison reports Bucket Shuffle, and Profile counters show actual probe-side filtering |
 
 The Lab executes only bounded logical cases. Right, Full, Cross, NULL-aware
 Anti, ASOF, general Partition Shuffle routing, and Colocate are explained in
@@ -746,36 +704,41 @@ Do not use single-BE elapsed time to rank multi-node distribution strategies.
 Preserve `events_modelled` for the analytical flow; Module 6 owns and may
 rebuild only its dimension and controlled Join tables.
 
-## Module summary
+The Lab ends with a practice: predict the rows of an Outer Join when a condition
+moves from `ON` to `WHERE`. Predict the result first, then write the code in the
+empty cell; the collapsed reference solution after it also runs with Run All and
+leaves the Lab's tables as they were.
 
-A safe Join begins with the grain and cardinality of both inputs. Inner, Outer,
-Semi, Anti, Cross, and ASOF semantics determine which matches and unmatched
-rows remain. Duplicate Keys can multiply valid pairs and measures. `NULL`,
-NULL-safe equality, NULL-aware exclusion, and predicate placement require
-explicit business meaning.
+## Summary
 
-An equi-key lets Doris organize candidates with Hash Join; a pure non-equi
-relationship may require Nested Loop Join. Broadcast copies a small build input,
-Partition Shuffle redistributes both inputs, Bucket Shuffle reuses one compatible
-layout, and Colocate prepositions both layouts for a recurring relationship.
-These strategies decide where data meets, not which logical rows belong in the
-answer.
-
-`EXPLAIN` describes planned operators, Exchanges, and Runtime Filters. A Query
-Profile reports one execution's rows and work. Keep those evidence levels
-separate when diagnosing or tuning a Join. Module 7 next applies the same
-contract-first reasoning to changing current-state rows and deleting data.
+- A Join returns one row for every matching pair: a key that repeats on both
+  sides multiplies rows and their measures, so state both grains and the key's
+  cardinality before you trust a total.
+- The Join type follows the rows the answer must keep: matched pairs (Inner),
+  every row of one side (Outer), rows that have or lack a match (Semi, Anti),
+  every combination (Cross), or the closest earlier state (ASOF).
+- `=` never matches `NULL` keys and `<=>` matches them as one group; a
+  right-side condition in `ON` limits which rows match, while the same
+  condition in `WHERE` removes the unmatched rows that the Outer Join kept.
+- An equality key lets Doris build a hash table from one input and probe it
+  with the other; a pure non-equi condition needs a Nested Loop Join; the
+  optimizer, not the SQL text, assigns the build and probe sides.
+- Broadcast copies a small build input to every participant, Partition
+  Shuffle routes both inputs by the Join key, Bucket Shuffle keeps one
+  compatible bucketed input in place and routes the other, and Colocate stores
+  both inputs with matching Buckets in advance.
+- `EXPLAIN` shows the planned Join, its distribution, and the Runtime Filters
+  it builds and applies; only the Query Profile shows how many rows a filter
+  removed in one execution, and a hint is a tool for a controlled comparison.
 
 ## Quiz 6: Joining Data in Apache Doris
 
-Complete the interactive knowledge check after finishing the module and
-Lab 6. It runs without a Doris sandbox.
-
-[Open Quiz 6 — Joining Data in Apache Doris](quiz06_join_semantics_and_execution.ipynb)
+Open [Quiz 6: Joining Data in Apache Doris](quiz06_join_semantics_and_execution.ipynb).
+It has six single-choice questions and needs no running environment.
 
 Next module: [Module 7: Updating and Deleting Data in Apache Doris](../module07-updating-deleting/course.md).
 
-## Official references
+## References
 
 - Logical and physical Join behavior: [Doris Joins](https://doris.apache.org/docs/4.x/query-data/join/) and [SELECT Join syntax](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-query/SELECT/).
 - Point-in-time matching: [ASOF Join](https://doris.apache.org/docs/4.x/query-data/asof-join/).

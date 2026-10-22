@@ -2,53 +2,41 @@
 
 | Course information | Value |
 | --- | --- |
-| Course | Real-time Analytics with Apache Doris — Level 1 |
-| Product baseline | Apache Doris 4.x |
-| Lab version | Apache Doris 4.1.3 |
-| Estimated time | Approximately 65–70 minutes, including the guided lab and quiz |
+| Course | Real-time Analytics with Apache Doris · Level 1 |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox and the `events` table from Lab 1 |
+| Estimated time | About 75 minutes: reading 40, Lab 25, quiz 10 |
+
+[Course README](../../README.md) · [Open Lab 2](lab02_scan_less_data.ipynb) · [Open Quiz 2](quiz02_doris_architecture_and_physical_design.ipynb)
 
 ## Module goal
 
-This module explains the architectural and storage concepts that determine how
-Apache Doris executes queries, organizes data, handles repeated keys, and
-avoids unnecessary work.
-
-By the end of the module, you will be able to connect a SQL query to both sides
-of the system: the Frontend (FE) creates a distributed query plan and assigns
-its plan fragments, while Backend (BE) nodes execute the assigned plan
-fragments over distributed columnar data.
+Follow a query from the FE's plan to the BEs' scans, and see how the way Doris
+stores a table decides how much data a query has to read.
 
 ## Learning objectives
 
 After completing this module, you will be able to:
 
-1. Trace a SQL statement from FE planning to distributed, vectorized execution
-   on BE nodes.
-2. Explain the hierarchy from Table to Partition, Bucket/Tablet, Rowset, and
-   Segment.
-3. Explain how a load transaction creates Rowsets and Segments and why
-   background Compaction is necessary.
-4. Describe how the Duplicate Key model, Unique Key model, and Aggregate Key model
-   define repeated-key behavior.
-5. Distinguish partitioning, bucketing, the sort key, and the Prefix Index by
-   the problem each one solves.
-6. Use `EXPLAIN` and basic runtime evidence to compare effective and ineffective
-   filter patterns.
+1. Trace a query from FE planning, through its plan fragments, to its execution on BE nodes.
+2. Explain how columnar storage and vectorized execution reduce the work of an analytical scan.
+3. Explain the hierarchy from Table to Partition, Tablet, Rowset, and Segment, and why Compaction merges Rowsets.
+4. Describe how the Duplicate Key, Unique Key, and Aggregate Key models treat repeated keys.
+5. Distinguish partitioning, bucketing, the sort key, and the Prefix Index by the problem each one solves.
+6. Use `EXPLAIN` and the Query Profile to tell planned pruning from the scan work actually done.
 
 ## Module structure
 
-| Section | Format | Time | Outcome |
-| --- | --- | ---: | --- |
-| 2.1 From SQL to Distributed Pipelines | Reading/visual | 7 min | Trace FE planning and BE execution through one query |
-| 2.2 Columnar and Vectorized Processing | Reading/visual | 6 min | Explain why Doris reads columns and processes values in batches |
-| 2.3 How Doris Organizes Stored Data | Animated walkthrough | 9 min | Relate the logical namespace to the physical storage hierarchy |
-| 2.4 Load Transactions and Compaction | Reading/visual | 6 min | Connect load transactions, Rowsets, Segments, visibility, and Compaction |
-| 2.5 Table Models and Repeated Keys | Scenario comparison | 6 min | Predict the result of repeated keys in all three table models |
-| 2.6 How Doris Skips Work | SQL walkthrough | 7 min | Separate partition, tablet, and in-table scan reduction |
-| Lab 2 | Hands-on | 20 min | Compare sort keys, pruning, runtime scan evidence, and table models |
-| Quiz 2 | Interactive knowledge check | 5 min | Check the Module 2 architecture, storage, physical-design, and diagnostic mental models |
-
----
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 2.1 From SQL to Distributed Pipelines | 7 min | Trace FE planning and BE execution through one query |
+| 2.2 Columnar and Vectorized Processing | 6 min | Explain why Doris reads columns and processes values in batches |
+| 2.3 How Doris Organizes Stored Data | 8 min | Relate a table to its Partitions, Tablets, Rowsets, and Segments |
+| 2.4 Load Transactions and Compaction | 6 min | Connect a load to new Rowsets, its visibility, and Compaction |
+| 2.5 Table Models and Repeated Keys | 5 min | Predict what each table model does with a repeated key |
+| 2.6 How Doris Skips Work | 8 min | Separate partition pruning, tablet pruning, and scan reduction inside a Tablet |
+| Lab 2 | 25 min | Change the physical design of the same 10,158,080 rows and compare plans and scans |
+| Quiz 2 | 10 min | Six questions on these objectives |
 
 ## 2.1 From SQL to Distributed Pipelines
 
@@ -140,12 +128,10 @@ The source code reflects the same boundary. FE planning code produces fragment
 execution parameters, and the BE internal service passes incoming fragments to
 its fragment manager for Pipeline execution. See the project
 [source repository](https://github.com/apache/doris) and BE
-[`internal_service.cpp`](https://github.com/apache/doris/blob/master/be/src/service/internal_service.cpp).
+[`internal_service.cpp`](https://github.com/apache/doris/blob/4.1.3/be/src/service/internal_service.cpp).
 
 > **Mental model:** FE decides what distributed work should run and where. BE
 > nodes perform the assigned scan, filter, exchange, join, and aggregation work.
-
----
 
 ## 2.2 Columnar and Vectorized Processing
 
@@ -206,8 +192,6 @@ model: the columnar copy remains available, and enabling another representation
 has storage and write-cost tradeoffs. See the official
 [storage layout overview](https://doris.apache.org/docs/4.x/table-design/storage-layout-overview/).
 
----
-
 ## 2.3 How Doris Organizes Stored Data
 
 Doris first names data through a logical namespace:
@@ -249,6 +233,12 @@ Partitioning supports two main responsibilities:
 Partitioning is optional. An unpartitioned table still has one default
 Partition.
 
+Partitions can be declared in advance or created from the data. Lab 2 uses
+**Auto Partitioning**: with `AUTO PARTITION BY RANGE (date_trunc(event_time,
+'day'))`, Doris creates a daily Partition the first time a loaded row needs
+that day, so a table loaded with 26 days of events gets 26 Partitions. Module 4
+(Modeling Data in Apache Doris) compares the ways to create Partitions.
+
 ### Bucket and Tablet
 
 Each Partition is divided by a bucketing rule. A **Bucket** is a slot produced
@@ -261,7 +251,7 @@ Random bucketing distributes incoming rows without a bucket key, so it cannot
 provide the same key-based bucket (tablet) pruning.
 
 A Tablet is the basic unit of data distribution, balancing, and parallel scan.
-In the integrated storage-compute architecture, a Tablet may have replicas on
+In the integrated storage and compute architecture, a Tablet may have replicas on
 BE nodes. The single-node sandbox uses one replica. A production deployment
 chooses its replica count from availability and storage requirements.
 
@@ -290,8 +280,6 @@ The names are not interchangeable:
 
 See [partitioning and bucketing concepts](https://doris.apache.org/docs/4.x/table-design/data-partitioning/basic-concepts/)
 and [data bucketing](https://doris.apache.org/docs/4.x/table-design/data-partitioning/data-bucketing/).
-
----
 
 ## 2.4 Load Transactions and Compaction
 
@@ -359,8 +347,6 @@ is not a direct count of Rowsets or Segments.
 The official [Compaction principles](https://doris.apache.org/docs/4.x/admin-manual/trouble-shooting/compaction-principles/)
 and [Data Compaction](https://doris.apache.org/docs/4.x/key-features/data-compaction/)
 describe the storage-engine behavior in more depth.
-
----
 
 ## 2.5 Table Models and Repeated Keys
 
@@ -435,8 +421,6 @@ See the official [Duplicate Key model](https://doris.apache.org/docs/4.x/table-d
 and [Aggregate Key model](https://doris.apache.org/docs/4.x/table-design/data-model/aggregate/)
 documentation.
 
----
-
 ## 2.6 How Doris Skips Work
 
 Fast analytics is not only about processing scanned data quickly. It is also
@@ -487,7 +471,7 @@ The query path has two levels of data reduction:
 1. **FE pruning:** while creating the distributed query plan, FE uses metadata
    to exclude Partitions and Tablets.
 2. **BE scan reduction:** while executing assigned plan fragments, BE uses the
-   sort key, Prefix Index, Min/Max metadata, and applicable secondary indexes
+   sort key, Prefix Index, Min/Max metadata (the ZoneMap), and applicable secondary indexes
    to skip smaller data ranges inside selected Tablets.
 
 This wording matters. **Predicate pushdown** means that BE evaluates a
@@ -502,13 +486,14 @@ query. In an OLAP scan, look for evidence such as:
 
 ```text
 partitions=1/26
-tablets=1/260
+tablets=1/10
 PREDICATES: event_time >= ... AND user_id = ...
 ```
 
 - `partitions=1/26` means FE selected one of 26 Partitions.
-- `tablets=1/260` means FE selected a smaller Tablet set from the Table's
-  physical layout. Exact denominator presentation can vary by version.
+- `tablets=1/10` means FE selected one of the 10 Tablets of that Partition.
+  The denominator counts only the Tablets of the selected Partitions: a
+  user-only filter on all 26 days shows `tablets=26/260`.
 - `PREDICATES` shows scan-side predicate evaluation; it is separate from the
   selected/total pruning ratios.
 
@@ -541,20 +526,19 @@ The official [Data Pruning](https://doris.apache.org/docs/4.x/key-features/data-
 and [Query Profile](https://doris.apache.org/docs/4.x/query-acceleration/query-profile/)
 documentation provide the complete inspection workflow.
 
----
-
 ## Lab 2: Make Doris Scan Less Data
 
 The lab keeps the logical dataset constant while changing its physical design.
-It reuses all 10,158,080 rows in `doris_course.events`; it does not read from or
-write to S3.
+It reuses all 10,158,080 rows in `doris_course.events` from Lab 1 and does not
+read from or write to S3. Plan about 25 minutes.
 
 You will:
 
 1. Inspect the default physical design selected for the Lab 1 `events` table.
 2. Map the table to its Partition, Tablet, Rowset, and Segment hierarchy.
 3. Build `events_v2` with `user_id` as the leading sort-key column.
-4. Compare BE runtime scan evidence for user and time filters.
+4. Capture one Query Profile by hand, then compare the scan counters of user
+   and time filters on both tables.
 5. Build `events_v3` with daily Auto Partitioning and
    `HASH(user_id)` bucketing.
 6. Use storage metadata to connect load transactions, Tablet versions, and Compaction.
@@ -568,45 +552,49 @@ Open the notebook:
 
 [Lab 2 — Make Doris Scan Less Data](lab02_scan_less_data.ipynb)
 
-## Module summary
+The Lab ends with a practice: predict which Partitions and Tablets a region
+filter can prune. Predict the result first, then write the code in the empty
+cell; the collapsed reference solution after it also runs with Run All and
+leaves the Lab's tables as they were.
 
-- FE parses and analyzes SQL, creates and optimizes a distributed query plan,
-  prunes from metadata, and assigns plan fragments to BE nodes.
-- BE nodes execute the assigned plan fragments through vectorized operators and
-  Pipeline execution; Exchange operators move intermediate data when required.
-- The logical namespace is Catalog, Database, and Table. Inside an internal
-  Table, the physical hierarchy is Partition, Bucket/Tablet, Rowset, and
-  Segment.
-- A load transaction can create a new Rowset in every affected Tablet. Rowsets
-  contain immutable columnar Segments.
-- Background Compaction merges Rowsets within a Tablet to reduce read
-  amplification while preserving the logical query result.
-- The Duplicate Key model retains repeated keys, the Unique Key model exposes
-  one current row per key, and the Aggregate Key model merges declared value
-  columns.
-- Partitioning, bucketing, the sort key, and the Prefix Index solve different
-  data-skipping and placement problems.
-- `EXPLAIN` shows planned partition pruning and bucket (tablet) pruning. Query
-  Profile provides runtime evidence from BE execution.
-- Predicate pushdown is not the same as pruning: a predicate can run inside the
-  scan operator even when no entire Partition or Tablet is excluded.
+## Summary
+
+- The FE parses and analyzes SQL, prunes from metadata, creates and optimizes a
+  distributed query plan, and assigns its plan fragments; the BE nodes execute
+  them with physical operators, and Exchanges move intermediate rows between
+  fragments.
+- Columnar storage lets a scan read only the columns a query uses, and
+  vectorized execution processes batches of column values instead of single
+  rows: both reduce the work of a large analytical scan.
+- Inside a table, Partitions hold ranges of rows, each Bucket of a Partition is
+  a Tablet, each load adds a versioned Rowset of immutable Segments to the
+  Tablets it writes, and background Compaction merges a Tablet's Rowsets
+  without changing query results.
+- The Duplicate Key model keeps every row, the Unique Key model exposes one
+  current row per key, and the Aggregate Key model combines the value columns
+  of rows with the same key.
+- Partitioning sets ranges and lifecycle boundaries, Hash bucketing places rows
+  by a key, the sort key orders rows inside each Tablet, and the Prefix Index
+  over its leading columns narrows the rows a scan reads.
+- `EXPLAIN` shows the planned scope, such as `partitions=1/26` and
+  `tablets=1/10`; the Query Profile shows what the scan read; and predicate
+  pushdown is not the same as pruning.
 
 ## Quiz 2: Deep Dive into Apache Doris Architecture
 
-Complete the interactive knowledge check after finishing the module and
-Lab 2. It runs without a Doris sandbox.
-
-[Open Quiz 2 — Deep Dive into Apache Doris Architecture](quiz02_doris_architecture_and_physical_design.ipynb)
+Open [Quiz 2: Deep Dive into Apache Doris Architecture](quiz02_doris_architecture_and_physical_design.ipynb).
+It has six single-choice questions and needs no running environment.
 
 Next module: [Module 3: Loading Data into Apache Doris](../module03-loading-data/course.md).
 
-## Official references
+## References
 
 - [Apache Doris source repository](https://github.com/apache/doris)
 - [System Architecture](https://doris.apache.org/docs/4.x/features-architecture/system-architecture/)
 - [Storage Layout Overview](https://doris.apache.org/docs/4.x/table-design/storage-layout-overview/)
 - [Partitioning and Bucketing Concepts](https://doris.apache.org/docs/4.x/table-design/data-partitioning/basic-concepts/)
 - [Data Bucketing](https://doris.apache.org/docs/4.x/table-design/data-partitioning/data-bucketing/)
+- [Auto Partitioning](https://doris.apache.org/docs/4.x/table-design/data-partitioning/auto-partitioning/)
 - [Duplicate Key model](https://doris.apache.org/docs/4.x/table-design/data-model/duplicate/)
 - [Unique Key model](https://doris.apache.org/docs/4.x/table-design/data-model/unique/)
 - [Aggregate Key model](https://doris.apache.org/docs/4.x/table-design/data-model/aggregate/)
@@ -616,4 +604,4 @@ Next module: [Module 3: Loading Data into Apache Doris](../module03-loading-data
 - [Data Compaction](https://doris.apache.org/docs/4.x/key-features/data-compaction/)
 - [EXPLAIN](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-query/EXPLAIN/)
 - [Query Profile](https://doris.apache.org/docs/4.x/query-acceleration/query-profile/)
-- [BE plan-fragment execution source](https://github.com/apache/doris/blob/master/be/src/service/internal_service.cpp)
+- [BE plan-fragment execution source (Doris 4.1.3)](https://github.com/apache/doris/blob/4.1.3/be/src/service/internal_service.cpp)
