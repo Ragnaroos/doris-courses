@@ -51,5 +51,26 @@ class EnvironmentTests(unittest.TestCase):
                 self.assertIsNone(old.search(text))
 
 
+class PlatformTests(unittest.TestCase):
+    README = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    def test_readme_states_every_environment_requirement(self):
+        section = self.README.split("## Environment", 1)[1].split("\n## ", 1)[0]
+        for row in ("| Platforms |", "| Other platforms |", "| Resources |", "| Downloads |",
+                    "| Network |", "| Accounts and keys |", "| Python |"):
+            self.assertIn(row, section)
+        for fact in ("Apple silicon", "Linux on x86_64", "WSL 2", "4 CPUs, 8 GB of memory, and 20 GB",
+                     "apache/doris:all-in-one-4.1.3", "s3.us-east-1.amazonaws.com", "mainland China"):
+            self.assertIn(fact, section)
+
+    def test_lab1_accepts_only_the_platforms_the_readme_names(self):
+        lab1 = next(ROOT.glob("level1/module01-introduction/lab01_*.ipynb"))
+        cells = json.loads(lab1.read_text())["cells"]
+        setup = next("".join(c["source"]) for c in cells if 'case "${HOST_OS}/${HOST_ARCH}" in' in "".join(c["source"]))
+        accepted = re.findall(r"^\s+([A-Za-z]+/[a-z0-9_]+(?:\|[A-Za-z]+/[a-z0-9_]+)*)\)", setup, re.M)
+        self.assertEqual(accepted, ["Darwin/arm64|Darwin/aarch64", "Linux/x86_64|Linux/amd64"])
+        self.assertIn("see Environment in the course README", setup)
+
+
 if __name__ == "__main__":
     unittest.main()

@@ -5,7 +5,7 @@
 | Course | Real-time Analytics with Apache Doris — Level 3 |
 | Product baseline | Apache Doris 4.x |
 | Lab version | Apache Doris 4.1.3 |
-| Estimated time | Approximately 95 minutes, excluding the clock wait in the guided lab |
+| Estimated time | Approximately 95 minutes; the lab's optional real-clock part adds a wait of up to about an hour |
 
 ## Module goal
 
@@ -89,8 +89,8 @@ interchangeable solutions.
 | **10.2 Understand compression layers** | Required online events consume increasing storage and read I/O. | Relate column encoding to Page compression, then identify what the table property controls. | Inspect two low-cardinality event types and unique messages with a shared prefix. |
 | **10.3 Compare algorithms fairly** | The team is considering a change from the default compression setting. | Hold logical data and physical layout constant; compare reported storage without inferring CPU speed. | Load identical `NO_COMPRESSION`, `LZ4F`, and `ZSTD` tables. |
 | **10.4 Choose a Partition mode** | Compression reduces bytes, but old time ranges still accumulate. | Choose Manual, Auto, or Dynamic Partitioning according to what creates ranges and who removes them. | Create an hourly Dynamic Partition table separate from the recovery table. |
-| **10.5 Define a rolling window** | Keep seven calendar-day ranges online, prepare tomorrow, and decide how to handle late events. | Interpret half-open ranges, clock offsets, time zone, historical exceptions, and missing-Partition behavior. | Map the same mechanism to hours so natural expiry can be observed during the Lab. |
-| **10.6 Verify scheduled expiry** | The rule is accepted, but the oldest Partition remains visible. | Distinguish configuration, scheduler observation, catalog and SQL visibility, and later physical cleanup. | Return after an hour boundary and wait for automatic removal without issuing `DROP`. |
+| **10.5 Define a rolling window** | Keep seven calendar-day ranges online, prepare tomorrow, and decide how to handle late events. | Interpret half-open ranges, clock offsets, time zone, historical exceptions, and missing-Partition behavior. | Map the same mechanism to hours so expiry can be observed during the Lab. |
+| **10.6 Verify scheduled expiry** | The rule is accepted, but the oldest Partition remains visible. | Distinguish configuration, scheduler observation, catalog and SQL visibility, and later physical cleanup. | Move the window forward by one hour, or wait for the real boundary, and watch the scheduler remove the range without issuing `DROP`. |
 | **10.7 Place cold data intentionally** | Old data is still needed but local high-performance storage is expensive. | Choose local tiering, remote tiering, or another deployment mode only when the required media exist. | Course discussion only; the single-disk Lab does not simulate migration. |
 | **10.8 Establish recovery boundaries** | A Partition was dropped accidentally. | Use the recycle bin for an eligible recent drop and use independent backup or replay for broader failures. | Drop without `FORCE`, inspect the recycle bin, and recover the most recent matching Partition. |
 
@@ -511,10 +511,11 @@ infer that policy.
 
 Waiting a full day would make a poor guided exercise. Lab 10 applies the same
 boundary logic with `HOUR`, `start = -3`, and `end = 1`. It places a known
-event in the oldest hourly Partition and asks the learner to return after the
-next whole-hour boundary. This changes the demonstration scale, not the
-meaning of Dynamic Partitioning. The hourly Lab setting is not a production
-recommendation for this commerce service.
+event in the oldest hourly Partition and then moves the window forward by one
+hour, or optionally waits for the next whole-hour boundary on the real clock.
+This changes the demonstration scale, not the meaning of Dynamic Partitioning.
+The hourly Lab setting is not a production recommendation for this commerce
+service.
 
 Defining the window still does not prove that Doris has acted on it. The team
 must now distinguish an accepted policy from scheduler activity, online data
@@ -547,21 +548,29 @@ Useful scheduler fields include `Enable`, `State`, `LastSchedulerTime`,
 `LastCreatePartitionMsg`, and `LastDropPartitionMsg`. A `NORMAL` state is not a
 substitute for inspecting actual ranges or querying the business row.
 
-### Observe natural expiry without changing the rule
+### Observe expiry by moving the window or by waiting for the clock
 
-A defensible observation records the oldest Partition boundary, waits until
-the next boundary for the configured unit, and then performs a bounded
-scheduler wait. It does not:
+Two observations show the scheduler removing an expired range, and neither
+issues a manual `DROP PARTITION`:
 
-- shorten the rule after inserting the evidence;
-- issue a manual `DROP PARTITION`;
-- change the global FE interval merely to make the demonstration finish; or
-- poll forever when setup was not completed.
+- **Move the window.** Narrowing `start` by one unit makes the change that the
+  clock makes one unit later: the oldest retained range falls outside the
+  window. The scheduler removes it at its next check. In the course sandbox,
+  setting `dynamic_partition_check_interval_seconds` to a few seconds makes
+  that check happen almost at once, because the scheduler notices a changed
+  interval within a few seconds. The setting applies to the whole FE, so the
+  Lab restores it afterwards. This shows the removal, not the boundary
+  arriving on its own.
+- **Wait for the clock.** Record the oldest Partition boundary, wait until the
+  next boundary for the configured unit, and then perform a bounded scheduler
+  wait without changing the rule. If the boundary has not arrived, the Lab
+  reports when to return and stops; after it, a bounded wait displays elapsed
+  time and the last known scheduler state. The wait measures scheduling delay
+  after eligibility, not a row-level TTL duration.
 
-If the boundary has not arrived, the Lab should report when to return and stop.
-After the boundary, a bounded wait can display elapsed time and the last known
-scheduler state. The wait measures scheduling delay after eligibility, not a
-row-level TTL duration.
+In production, neither change is a way to remove data early: narrowing `start`
+drops every range it excludes, and the FE interval affects every
+Dynamic Partition table.
 
 ### Logical disappearance is not physical reclamation
 
@@ -741,9 +750,10 @@ Amazon S3.
 | **1F Compare storage reports** | Wait for nonzero metadata and display effective compression, rows, layout, size, and savings against the baseline. | Doris reports a whole-table storage difference for this sample; the result does not isolate one column or rank CPU performance. |
 | **2A Create an hourly window** | Rebuild a Dynamic Partition table with `HOUR`, `start=-3`, `end=1`, history creation, and `Asia/Shanghai`. | Five complete hourly ranges represent the rolling rule. |
 | **2B Record the boundary** | Insert events three hours ago, two hours ago, and now; display the oldest event's next eligible boundary and actual Partition ranges. | A row remains online with its complete hour until the window advances and the scheduler acts. |
-| **3A Wait after the hour** | Return after the recorded boundary and perform a bounded scheduler wait without changing the policy or dropping a Partition. | Automatic scheduling removes the oldest complete range; the wait reports scheduling delay rather than row-TTL precision. |
+| **3A Move the window** | Narrow `start` from `-3` to `-2`, set the FE check interval to 10 seconds, wait for the oldest hour to disappear, and restore the interval. | The scheduler removes every complete range older than `start`; narrowing `start` makes the change that one hour of clock time makes. No manual drop is issued. |
 | **3B Verify visibility** | Repeat the focused SQL and inspect current scheduler and Partition state. | The oldest event and its range are no longer online; this does not prove immediate physical byte reclamation. |
 | **3C Test late arrival** | Insert an event outside the current window and require the missing-Partition error. | Dynamic Partitioning does not silently recreate arbitrary expired history. |
+| **3D Optional: wait for the clock** | Rebuild the Section 2 window, skip 3A, and return after the printed boundary for a bounded scheduler wait. | Natural expiry removes the oldest range without any change to the rule; the wait reports scheduling delay rather than row-TTL precision. |
 | **4A Build a recovery sample** | Create a separate manually partitioned table with known rows. | The recovery example is isolated from the Dynamic Partition scheduler. |
 | **4B Drop without `FORCE`** | Remove one Partition, query the changed online answer, and inspect matching recycle-bin entries. | The manual drop removes the range from the table and leaves eligible recovery metadata with identity and time fields. |
 | **4C Recover by name** | Recover the most recently deleted matching Partition and rerun the business summary. | Name-only recovery can restore the just-dropped object in this controlled case; IDs remain necessary when names are ambiguous. |
@@ -760,9 +770,9 @@ Read the evidence in this order:
 5. SQL reports the visible business answer; and
 6. recycle-bin metadata identifies an eligible dropped object.
 
-The clock-dependent expiry step can span two Notebook sessions. Do not rerun
-the setup after the boundary, because rebuilding the table would replace the
-evidence with a new window.
+Only the optional clock-dependent step can span two Notebook sessions. There,
+do not rerun the setup after the boundary, because rebuilding the table would
+replace the evidence with a new window.
 
 ## Module summary
 
@@ -781,7 +791,7 @@ column's contribution or establish query CPU and latency.
 Manual Partitioning gives explicit control, Auto Partitioning creates ranges
 from incoming values, and Dynamic Partitioning advances a clock-defined
 window. The production scenario uses daily boundaries; the Lab maps the same
-rule to hours so a learner can observe natural expiry. Dynamic expiry removes
+rule to hours so a learner can observe expiry within the Lab. Dynamic expiry removes
 a complete Range Partition after a boundary and a scheduler check. Accepted
 properties, scheduler health, visible Partitions, SQL rows, and physical
 storage cleanup are separate evidence.

@@ -777,7 +777,9 @@ Check the environment before you start:
   the Doris image takes longer.
 
 The first complete run imports a read-only, bounded seven-hour course sample
-when no reusable local baseline exists. Later runs can preserve only the 12,062
+when no reusable local baseline exists. Its 12,062 rows are spread over all
+40 course files, so Doris reads about 59 MB of them: on a slow network this
+load takes about as long as the full load in Lab 1. Later runs can preserve only the 12,062
 committed logical event rows as a temporary local source, then rebuild the
 controlled physical event table. Other Module 9 business objects are rebuilt
 by the sections that own them. This avoids repeated S3 reads while ensuring the

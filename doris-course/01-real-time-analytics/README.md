@@ -5,6 +5,18 @@ datasets, and reusable runtime support for the three course levels. Levels 1
 and 2 are implemented. Level 3 includes executable Labs 8, 9, and 10; its
 course notes and quizzes are still planned.
 
+## Environment
+
+| | |
+| --- | --- |
+| Platforms | **macOS on Apple silicon** with Docker Desktop: the platform on which every lab of this release was run from start to finish. **Linux on x86_64** with Docker Engine: the labs accept it and use the same images, but this release has not been run on it. **Windows**: run the course inside a WSL 2 Linux distribution on x86_64 with Docker Desktop's WSL 2 integration, and start Jupyter there; inside WSL the labs see Linux on x86_64. This release has not been run on it either. |
+| Other platforms | Lab 1 stops at its first step on other combinations, such as an Intel Mac or Linux on arm64. The Doris, Kafka, and HAProxy images exist for both amd64 and arm64, but the course has not been run on those combinations, so Lab 1 does not continue there. |
+| Resources | Docker needs at least 4 CPUs, 8 GB of memory, and 20 GB of free disk. With 4 CPUs and 8 GB, the Doris container peaks at about 3.1 GiB during Lab 1's load. Module 9 runs three FEs, three BEs, and HAProxy within the same minimum (6.4 GB in all at its peak in our run); stop the single-node sandbox first. |
+| Downloads | Docker images: `apache/doris:all-in-one-4.1.3` (about 1.9 GB to download, 4.5 GB on disk), `apache/kafka:3.9.1` for Module 3 (0.2 GB), `haproxy:3.0-alpine` for Module 9 (20 MB), and `metabase/metabase:v0.59.6.3` for the optional Metabase lab (0.7 GB); a lab reuses an image that Docker already has. The optional Metabase lab also downloads the Doris driver for Metabase (19 KB) from GitHub. Data: 72 MiB of Parquet files from AWS S3 in Lab 1 and again in Lab 3; on its first run, Lab 9 reads a seven-hour slice of the same files, and because those rows are spread over all 40 files, Doris reads about 59 MB to find them; three small files in Lab 3. Python packages from PyPI. |
+| Network | Docker Hub for the images; `s3.us-east-1.amazonaws.com` and `doris-courses-public-dataset.s3.us-east-1.amazonaws.com` over HTTPS for the data; PyPI for the packages; GitHub for the optional Metabase lab's driver. From some networks, including mainland China, Docker Hub and AWS `us-east-1` can be slow or unreachable: use the registry mirror or proxy that your network provides. The labs give Doris longer S3 timeouts than its defaults (Module 3 explains them), so a slow connection makes a load slower instead of failing it: the 72 MiB load of Labs 1 and 3 took 11 seconds to 2 minutes over direct connections in our runs, and 22 minutes through a proxy that delivered about 60 KB/s; through the same proxy, Lab 9's first load took 13 minutes. |
+| Accounts and keys | None. The dataset bucket is public and is read anonymously. |
+| Python | 3.9 to 3.13. If `python3 --version` reports 3.14 or later, create the virtual environment with a supported version, for example `python3.12 -m venv .venv`. |
+
 ## Repository structure
 
 ```text
@@ -14,7 +26,6 @@ doris-course/
     ├── requirements.txt
     ├── pyproject.toml
     ├── .gitignore
-    ├── course_secrets.env.example
     ├── doris_course/
     │   ├── __init__.py
     │   ├── ui.py
@@ -92,19 +103,17 @@ that module. Python dependencies, notebook presentation, Docker/Doris access,
 S3 access, dataset contracts, and expected results are shared at the course
 root.
 
-Generated content is not committed: `.venv/`, `course_secrets.env`, notebook
-checkpoints, downloaded fixtures, and local JAR files remain local runtime
-state.
+Generated content is not committed: `.venv/`, notebook checkpoints, downloaded
+fixtures, and local JAR files remain local runtime state.
 
 ## Python environment and shared helpers
 
-Run setup from this directory:
+Run setup from this directory with Python 3.9 to 3.13 (see [Environment](#environment)):
 
 ```bash
 python3 -m venv .venv
 source .venv/bin/activate
 python -m pip install -r requirements.txt
-cp course_secrets.env.example course_secrets.env
 ```
 
 `requirements.txt` also installs `doris_labkit`, the notebook runtime shared by the
@@ -170,6 +179,10 @@ docker rm -f doris-rta doris-rta-metabase
 docker volume rm doris-rta-fe-meta doris-rta-be-storage doris-rta-metabase-data
 docker network rm doris-rta
 ```
+
+A command that names something you never created, such as the optional
+Metabase container, reports that it does not exist; the others still run.
+
 Destructive management exercises should also use an isolated or resettable
 environment. A module may clean up only the containers, volumes, topics, jobs,
 and tables it owns.
@@ -226,8 +239,30 @@ level1/module02-architecture/quiz02_doris_architecture_and_physical_design.ipynb
 level1/module03-loading-data/quiz03_load_methods_and_retry_safety.ipynb
 ```
 
-Lab 1 loads 10,158,080 ecommerce event rows from the read-only course S3
-dataset. Lab 2 reuses `events` without accessing S3. Lab 3 downloads its CSV and
-JSON fixtures into the ignored
-`level1/module03-loading-data/downloads/` runtime cache and compares Stream
-Load, S3 TVF with `INSERT INTO SELECT`, and Kafka Routine Load.
+Lab 1 loads 10,158,080 ecommerce event rows from the course's public S3
+bucket (see [Dataset](#dataset)); no AWS account or credentials are needed.
+Lab 2 reuses `events` without accessing S3. Lab 3 downloads its CSV and JSON
+fixtures into the ignored `level1/module03-loading-data/downloads/` runtime
+cache and compares Stream Load, S3 TVF with `INSERT INTO SELECT`, and Kafka
+Routine Load.
+
+## Dataset
+
+The labs use a transformed copy of
+[eCommerce behavior data from multi category store](https://www.kaggle.com/datasets/mkechinov/ecommerce-behavior-data-from-multi-category-store/data),
+published by Michael Kechinov and provided by the
+[REES46 Marketing Platform](https://rees46.com/en/datasets). The course copy keeps
+`event_time`, `event_type`, `product_id`, and `user_id`, adds a stable
+`event_id`, assigns each user one of eight synthetic `region` values, and keeps
+the price as `revenue` only for purchases. Module 1 describes the
+transformation and attribution in full.
+
+| | |
+| --- | --- |
+| Rows | 10,158,080 events from 2019-12-01 00:00:12 to 2020-03-11 04:53:08 (26 days in December 2019 and March 2020) |
+| Files | 40 Parquet files, about 72 MiB, in the public bucket `doris-courses-public-dataset` (AWS `us-east-1`): `s3://doris-courses-public-dataset/doris-course/events/v1/events-*.parquet` |
+| Lab 3 samples | Three small files (about 250 KB in total) under `https://doris-courses-public-dataset.s3.us-east-1.amazonaws.com/doris-course/lab3/v2/`, downloaded into `level1/module03-loading-data/downloads/` |
+| Access | Public and read-only. Doris reads the bucket with the S3 TVF and `"s3.credentials_provider_type" = "ANONYMOUS"`; no AWS account or key is needed. |
+
+`datasets/events.yaml` records the same locations, the schema, and the expected
+row count and time range.

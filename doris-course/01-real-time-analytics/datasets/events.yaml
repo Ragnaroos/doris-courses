@@ -1,10 +1,24 @@
 name: events
 database: doris_course
+# The course copy lives in a public, read-only bucket. Doris reads it with the
+# S3 TVF and "s3.credentials_provider_type" = "ANONYMOUS"; no account or key is needed.
+# The two timeouts (milliseconds) replace Doris's defaults of 1000 and 3000, which
+# fail over a slow network or a proxy.
 source:
-  uri: s3://yy-glue-test-us-east-1/doris-course/events/v1/events-*.parquet
+  uri: s3://doris-courses-public-dataset/doris-course/events/v1/events-*.parquet
   endpoint: https://s3.us-east-1.amazonaws.com
   region: us-east-1
+  credentials_provider_type: ANONYMOUS
+  connection_timeout_ms: 10000
+  request_timeout_ms: 30000
   format: parquet
+  files: 40
+  bytes: 75555348
+attribution:
+  dataset: eCommerce behavior data from multi category store
+  publisher: Michael Kechinov, REES46 Marketing Platform
+  original: https://www.kaggle.com/datasets/mkechinov/ecommerce-behavior-data-from-multi-category-store/data
+  provider: https://rees46.com/en/datasets
 schema:
   - {name: event_time, type: DATETIME}
   - {name: event_id, type: BIGINT}
@@ -16,3 +30,14 @@ schema:
 row_count: 10158080
 min_event_time: "2019-12-01 00:00:12"
 max_event_time: "2020-03-11 04:53:08"
+# Lab 3 downloads these files over HTTPS into level1/module03-loading-data/downloads/.
+fixtures:
+  - name: stream_events.csv
+    url: https://doris-courses-public-dataset.s3.us-east-1.amazonaws.com/doris-course/lab3/v2/stream_events.csv
+    bytes: 67054
+  - name: stream_events_malformed.csv
+    url: https://doris-courses-public-dataset.s3.us-east-1.amazonaws.com/doris-course/lab3/v2/stream_events_malformed.csv
+    bytes: 613
+  - name: routine_events.jsonl
+    url: https://doris-courses-public-dataset.s3.us-east-1.amazonaws.com/doris-course/lab3/v2/routine_events.jsonl
+    bytes: 187941

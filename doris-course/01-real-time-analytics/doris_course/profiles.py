@@ -4,9 +4,9 @@ from contextlib import contextmanager
 from dataclasses import dataclass
 import re
 from typing import Any, Mapping, Optional
-from uuid import uuid4
 
 import pandas as pd
+from doris_labkit.profiles import last_query_id
 
 from .ui import show_frame, show_log
 
@@ -264,10 +264,22 @@ class QueryEvidence:
     plan: str
     profile_id: str
     profile: str
+    statements: tuple[str, ...] = ()
+    profile_command: str = ""
 
     def show_result(self, title: str) -> None:
         """Display the already captured result without rerunning the query."""
         show_frame(title, self.rows)
+        self.show_statements(title)
+
+    def show_statements(self, title: str) -> None:
+        """Show, folded, the SQL that captured this evidence and how to read its Profile."""
+        if not self.statements:
+            return
+        text = "\n\n".join(statement.rstrip(";") + ";" for statement in self.statements)
+        if self.profile_command:
+            text += f"\n\n-- The Profile text of this query:\n-- {self.profile_command}"
+        show_log(f"{title}: SQL run to capture the result, plan, and Profile", text)
 
     def show_change(
         self,
@@ -341,6 +353,7 @@ class QueryEvidence:
 
     def show(self, title: str, *, detail: bool = False) -> None:
         show_frame(f"{title}: query result", self.rows)
+        self.show_statements(title)
         scans = [line for line in self.plan.splitlines() if re.match(r"\s*TABLE:", line)]
         show_log(
             f"{title}: EXPLAIN selected scans",
@@ -362,9 +375,9 @@ class QueryEvidence:
 def capture_query(lab: Any, statement: str, *, settings=None) -> QueryEvidence:
     """Capture fresh BE execution evidence on the existing local course session.
 
-    Reuses DorisLab's local FE endpoint and bounded Profile lookup. A unique SQL
-    comment disambiguates concurrent copies of the same query. Caches controlled
-    here are SQL, query and condition caches, not OS/storage/index caches.
+    The query runs once with its Profile collected; ``SELECT last_query_id()``
+    right after it returns its Profile ID. Caches controlled here are SQL,
+    query and condition caches, not OS/storage/index caches.
     """
     query = statement.strip().rstrip(";")
     if not re.match(r"SELECT\b", query, re.I):
@@ -376,17 +389,25 @@ def capture_query(lab: Any, statement: str, *, settings=None) -> QueryEvidence:
         "enable_condition_cache": "false",
     })
     with session_settings(lab, controlled):
-        before = {str(row["Profile ID"]) for row in lab._query_profiles()}
-        tagged_query = f"{query} /* course_profile_{uuid4().hex} */"
-        with lab._require_connection().cursor() as cursor:
+        connection = lab._require_connection()
+        with connection.cursor() as cursor:
             cursor.execute("EXPLAIN " + query)
             plan = "\n".join(str(next(iter(row.values()))) for row in cursor.fetchall())
-            cursor.execute(tagged_query)
+            cursor.execute(query)
             records = cursor.fetchall()
             columns = [column[0] for column in cursor.description]
-        profile_id = lab._latest_profile_id(tagged_query, exclude=before)
+        profile_id = last_query_id(connection)
         profile = lab._profile_text(profile_id)
-        return QueryEvidence(pd.DataFrame(records, columns=columns), plan, profile_id, profile)
+    statements = (
+        *(f"SET {name} = {value}" for name, value in controlled.items()),
+        "EXPLAIN " + query,
+        query,
+        "SELECT last_query_id()",
+    )
+    return QueryEvidence(
+        pd.DataFrame(records, columns=columns), plan, profile_id, profile,
+        statements=statements, profile_command=lab.profile_command(profile_id),
+    )
 
 
 __all__ = [

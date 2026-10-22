@@ -7,3 +7,13 @@ events:
     view: 9437184
     cart: 589824
     purchase: 131072
+# The 1,024-record sample that Lab 3 loads with Stream Load (stream_events.csv)
+# and Routine Load (routine_events.jsonl); both files hold the same records.
+lab3_sample:
+  rows: 1024
+  distinct_events: 1024
+  min_event_time: "2019-12-01 03:08:44"
+  max_event_time: "2020-03-06 03:10:18"
+  total_revenue: "23299.84"
+  malformed_rows: 10
+  malformed_filtered_rows: 1

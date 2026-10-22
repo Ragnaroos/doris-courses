@@ -417,6 +417,10 @@ and `user_id`; creates a stable `event_id`; assigns each user to a synthetic
 `region`; and records price as `revenue` only for purchase events. Synthetic
 regions do not represent real user locations.
 
+The course copy is 40 Parquet files (about 72 MiB, 10,158,080 rows) in the
+public bucket `doris-courses-public-dataset` in AWS `us-east-1`. The bucket
+allows anonymous reads, so the lab needs no AWS account or credentials.
+
 ## Module summary
 
 - Apache Doris is an open-source, MPP-based database for real-time analytics
