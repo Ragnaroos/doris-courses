@@ -79,14 +79,14 @@ Text requirements:
    `/tmp/doris-course-visuals/<MODULE_ID>/`
    Do not generate uncompressed source files directly under the target module.
 3. After visual review and compression, copy only the final web-ready files into the target module at:
-   `assets/diagrams/`
+   `images/`
 4. Use a two-digit sequence followed by an English kebab-case name, for example:
    `01-ingestion-paths.png`
    `02-fe-be-query-flow.png`
 5. Number the files in the order in which they appear in the course.
 6. Insert each image using a relative Markdown path, for example:
 
-   ![A client sends SQL to FE, which plans distributed work for BE nodes and returns the combined result.](assets/diagrams/02-fe-be-query-flow.png)
+   ![A client sends SQL to FE, which plans distributed work for BE nodes and returns the combined result.](images/02-fe-be-query-flow.png)
 
    *FE plans and coordinates the query while BE nodes execute the distributed work.*
 
@@ -108,7 +108,7 @@ Follow the Apache Doris Website [Image Compression Guide](https://github.com/apa
 3. If an exceptional image does not rely on a solid-color or transparent background, it may be converted to JPEG with Pillow using `convert('RGB')`, `quality=85`, and `optimize=True`, as specified by the guide. Use a `.jpg` filename and update the Markdown path accordingly.
 4. If a TinyPNG-compressed PNG remains above 120 KB, reduce its pixel dimensions proportionally and compress it again. Preserve the required aspect ratio and do not stretch or crop the diagram.
 5. Compare the compressed result with the reviewed source at the intended course-content width. The compressed version must preserve readable labels, clean arrows, accurate colors, and an apparently solid black background.
-6. Record the final byte size of every asset. Only the compressed final file may be copied to `assets/diagrams/` and committed.
+6. Record the final byte size of every asset. Only the compressed final file may be copied to `images/` and committed. Keep screenshots, generated diagrams, and other course illustrations together in this module-local directory.
 
 6. Verify image quality
 
