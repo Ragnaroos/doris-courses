@@ -74,28 +74,43 @@ Text requirements:
 
 4. Save the files and insert them into Markdown
 
-1. Generate each visual as a separate PNG file.
-2. Save the files under the target module at:
+1. Generate each visual as a separate, full-quality PNG source file.
+2. Keep all generated source files and intermediate compression attempts outside the repository. Use the operating system's temporary directory, for example:
+   `/tmp/doris-course-visuals/<MODULE_ID>/`
+   Do not generate uncompressed source files directly under the target module.
+3. After visual review and compression, copy only the final web-ready files into the target module at:
    `assets/diagrams/`
-3. Use a two-digit sequence followed by an English kebab-case name, for example:
+4. Use a two-digit sequence followed by an English kebab-case name, for example:
    `01-ingestion-paths.png`
    `02-fe-be-query-flow.png`
-4. Number the files in the order in which they appear in the course.
-5. Insert each image using a relative Markdown path, for example:
+5. Number the files in the order in which they appear in the course.
+6. Insert each image using a relative Markdown path, for example:
 
    ![A client sends SQL to FE, which plans distributed work for BE nodes and returns the combined result.](assets/diagrams/02-fe-be-query-flow.png)
 
    *FE plans and coordinates the query while BE nodes execute the distributed work.*
 
-6. Write objective alt text that describes the relationship shown in the image. Do not use generic text such as `diagram` or `architecture`, and do not repeat the filename.
-7. Add one italicized English caption below the image that states the conclusion the learner should take from it. Do not repeat the surrounding prose.
-8. Normally place a visual after one or two paragraphs have introduced the relevant concept and before the next subsection heading. Do not place it between a heading and its opening paragraph unless it is genuinely an overview of the entire subsection.
-9. If the source contains an ASCII or text diagram expressing the same relationship, replace that code block with the image and one caption while retaining the explanatory prose around it.
-10. If no ASCII diagram exists, add only the image and caption. Do not delete or rewrite the course text.
-11. Do not modify labs, quizzes, notebooks, course logic, or files outside the target course.
-12. Do not edit the synchronized copy under `apps/web/app/courses/content/` in the website repository. Modify only the Markdown and image assets in the course source repository.
+7. Write objective alt text that describes the relationship shown in the image. Do not use generic text such as `diagram` or `architecture`, and do not repeat the filename.
+8. Add one italicized English caption below the image that states the conclusion the learner should take from it. Do not repeat the surrounding prose.
+9. Normally place a visual after one or two paragraphs have introduced the relevant concept and before the next subsection heading. Do not place it between a heading and its opening paragraph unless it is genuinely an overview of the entire subsection.
+10. If the source contains an ASCII or text diagram expressing the same relationship, replace that code block with the image and one caption while retaining the explanatory prose around it.
+11. If no ASCII diagram exists, add only the image and caption. Do not delete or rewrite the course text.
+12. Do not modify labs, quizzes, notebooks, course logic, or files outside the target course.
+13. Do not edit the synchronized copy under `apps/web/app/courses/content/` in the website repository. Modify only the Markdown and image assets in the course source repository.
+14. Delete the temporary source and intermediate files only after the compressed assets, Markdown paths, and rendered result have been verified. Never commit temporary or uncompressed variants.
 
-5. Verify image quality
+5. Compress the final assets to approximately 100 KB
+
+Follow the Apache Doris Website [Image Compression Guide](https://github.com/apache/doris-website/blob/master/doc-tools/prompts/img-compression-guide.md).
+
+1. Target approximately 100 KB per final image. Aim for 80–120 KB; allow up to 150 KB only when further compression would make labels, thin lines, or arrows difficult to read.
+2. These course diagrams rely on a solid black background, sharp text, and line art. Following the guide's solid-color-image rule, retain PNG and compress it with [TinyPNG](https://tinypng.com/).
+3. If an exceptional image does not rely on a solid-color or transparent background, it may be converted to JPEG with Pillow using `convert('RGB')`, `quality=85`, and `optimize=True`, as specified by the guide. Use a `.jpg` filename and update the Markdown path accordingly.
+4. If a TinyPNG-compressed PNG remains above 120 KB, reduce its pixel dimensions proportionally and compress it again. Preserve the required aspect ratio and do not stretch or crop the diagram.
+5. Compare the compressed result with the reviewed source at the intended course-content width. The compressed version must preserve readable labels, clean arrows, accurate colors, and an apparently solid black background.
+6. Record the final byte size of every asset. Only the compressed final file may be copied to `assets/diagrams/` and committed.
+
+6. Verify image quality
 
 Inspect every generated image and confirm:
 
@@ -106,16 +121,18 @@ Inspect every generated image and confirm:
 - There is no misspelling, pseudo-text, overlap, clipping, or text that is too small to read.
 - Line widths, colors, card shapes, and spacing are consistent across the set.
 - The visual genuinely reduces the effort required to understand the passage.
+- The final asset is approximately 100 KB, normally within the 80–120 KB target range.
 - Every Markdown relative path is correct and resolves to an existing file.
 - Image order, file numbering, alt text, and captions correspond to one another.
+- No uncompressed source, intermediate attempt, or backup image is present in the repository.
 
 Regenerate any image that fails these checks. Do not repair it by covering text in post-processing, stretching the image, or explaining an error in the Markdown.
 
-6. Report the result
+7. Report the result
 
 At completion, provide:
 
-1. A list of all added images.
+1. A list of all added images, including each final format and file size.
 2. The section where each image was inserted and its teaching purpose.
 3. The path of every modified course Markdown file.
 4. A statement identifying any ASCII or text diagram that was replaced.
