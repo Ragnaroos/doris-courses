@@ -1,10 +1,32 @@
 #!/usr/bin/env bash
+# Start the Apache Doris MCP Server over stdio for an MCP Host.
+#
+# A Host runs this file by its absolute path. It reads the Doris route and the
+# mcp_reader password from .env.mcp.local next to it, and starts the Server
+# installed in the course's virtual environment. Standard output carries only
+# MCP messages; the Server writes its logs to logs/ next to this file.
 set -euo pipefail
 
 MCP_HOME="$(CDPATH= cd -- "$(dirname -- "${BASH_SOURCE[0]}")" && pwd)"
+COURSE_HOME="$(CDPATH= cd -- "$MCP_HOME/../.." && pwd)"
+ENV_FILE="$MCP_HOME/.env.mcp.local"
+SERVER="$COURSE_HOME/.venv/bin/doris-mcp-server"
+
+if [ ! -r "$ENV_FILE" ]; then
+  echo "run-doris-mcp-local: $ENV_FILE is missing. Create it with Lab 1." >&2
+  exit 1
+fi
+if [ ! -x "$SERVER" ]; then
+  echo "run-doris-mcp-local: $SERVER is missing. Install requirements.txt into $COURSE_HOME/.venv." >&2
+  exit 1
+fi
 
 set -a
-. "$MCP_HOME/.env.mcp.local"
+. "$ENV_FILE"
 set +a
 
-exec "$MCP_HOME/.venv/bin/doris-mcp-server" --transport stdio
+# The Server writes its logs relative to its working directory unless told
+# otherwise, and each Host starts it in a different one.
+export LOG_FILE_PATH="${LOG_FILE_PATH:-$MCP_HOME/logs/doris_mcp_server.log}"
+
+exec "$SERVER" --transport stdio

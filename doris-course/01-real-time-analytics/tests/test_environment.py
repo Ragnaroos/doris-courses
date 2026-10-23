@@ -10,6 +10,7 @@ from doris_course import environment
 ROOT = Path(__file__).resolve().parents[1]
 DEFAULTS = dict(re.findall(r'env_port\("(DORIS_RTA_\w+)", (\d+)\)', (ROOT / "doris_course/environment.py").read_text()))
 SHELL_DEFAULT = re.compile(r"\$\{(DORIS_RTA_\w+):-(\d+)\}")
+IMAGE = r"[a-z0-9][a-z0-9./_-]*:[A-Za-z0-9][A-Za-z0-9._-]*"
 
 
 def notebook_sources():
@@ -32,6 +33,24 @@ class EnvironmentTests(unittest.TestCase):
         # Every variable that a shell cell or Compose file can see is defined once in Python.
         self.assertGreaterEqual(len(seen), 12)
 
+    def test_images_name_an_exact_version_and_match_the_readme(self):
+        # A tag that names only a minor version, such as HAProxy's 3.0-alpine, moves to each new
+        # release. The course names the release that it was verified with, and the README lists the
+        # images that the Labs pull.
+        pulled = set()
+        for path in sorted(ROOT.glob("level*/module*/compose*.yml")):
+            for image in re.findall(r"^\s*image: (\S+)", path.read_text(), re.M):
+                pulled.add(re.sub(r"^\$\{\w+:-(.+)\}$", r"\1", image))
+        for _, text in notebook_sources():
+            pulled.update(re.findall(rf"docker (?:pull|run)\b[^\n]*?\s({IMAGE})", text))
+            pulled.update(re.findall(rf'_IMAGE="({IMAGE})"', text))
+        readme = (ROOT / "README.md").read_text(encoding="utf-8")
+        downloads = next(line for line in readme.splitlines() if line.startswith("| Downloads |"))
+        self.assertEqual(set(re.findall(rf"`({IMAGE})`", downloads)), pulled)
+        for image in pulled:
+            with self.subTest(image=image):
+                self.assertRegex(image.rsplit(":", 1)[1], r"\d+\.\d+\.\d+")
+
     def test_names_use_the_course_prefix(self):
         for name in ("DORIS_CONTAINER", "DORIS_NETWORK", "FE_VOLUME", "BE_VOLUME", "KAFKA_CONTAINER",
                      "METABASE_CONTAINER", "METABASE_VOLUME", "M09_PROJECT"):
@@ -49,6 +68,29 @@ class EnvironmentTests(unittest.TestCase):
         for path, text in notebook_sources():
             with self.subTest(notebook=path.name):
                 self.assertIsNone(old.search(text))
+
+
+class PlatformTests(unittest.TestCase):
+    README = (ROOT / "README.md").read_text(encoding="utf-8")
+
+    def test_readme_states_every_environment_requirement(self):
+        section = self.README.split("## Environment", 1)[1].split("\n## ", 1)[0]
+        for row in ("| Platforms |", "| Other platforms |", "| Resources |", "| Downloads |",
+                    "| Network |", "| Accounts and keys |", "| Python |"):
+            self.assertIn(row, section)
+        for fact in ("Apple silicon", "Linux on x86_64", "WSL 2", "4 CPUs, 8 GB of memory, and 20 GiB",
+                     "apache/doris:all-in-one-4.1.3", "s3.us-east-1.amazonaws.com", "mainland China",
+                     "sha256:82a5cabc7900ebcd3d080412d636c0cebd6602799fffe2605c652b2ea7d42609",
+                     "doris-4.1.3-rc02-7126cf65d96"):
+            self.assertIn(fact, section)
+
+    def test_lab1_accepts_only_the_platforms_the_readme_names(self):
+        lab1 = next(ROOT.glob("level1/module01-introduction/lab01_*.ipynb"))
+        cells = json.loads(lab1.read_text())["cells"]
+        setup = next("".join(c["source"]) for c in cells if 'case "${HOST_OS}/${HOST_ARCH}" in' in "".join(c["source"]))
+        accepted = re.findall(r"^\s+([A-Za-z]+/[a-z0-9_]+(?:\|[A-Za-z]+/[a-z0-9_]+)*)\)", setup, re.M)
+        self.assertEqual(accepted, ["Darwin/arm64|Darwin/aarch64", "Linux/x86_64|Linux/amd64"])
+        self.assertIn("see Environment in the course README", setup)
 
 
 if __name__ == "__main__":

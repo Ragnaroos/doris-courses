@@ -5,8 +5,9 @@ services:
     image: doris-course-superset:4.1.2-pydoris1.1.0
     mem_limit: 2g
     cpus: 2
+    # Change the host port with DW_BI_PORT before starting Jupyter (dw_course/environment.py).
     ports:
-      - '127.0.0.1:51888:8088'
+      - '127.0.0.1:${DW_BI_PORT:-51888}:8088'
     volumes:
       - bi-metadata:/app/superset_home
     healthcheck:

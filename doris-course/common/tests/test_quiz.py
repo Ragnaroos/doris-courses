@@ -7,6 +7,7 @@ from pathlib import Path
 
 from doris_labkit import quiz as quiz_module
 from doris_labkit.quiz import CourseQuiz
+from doris_labkit.quizbank import display_order, load_quiz
 
 QUIZ_YAML = """\
 title: "Module 1 Quiz: Example"
@@ -86,8 +87,23 @@ class QuizTests(unittest.TestCase):
             self.assertIn(label, result_html)
 
     def test_answer_must_match_an_option(self):
-        with self.assertRaisesRegex(ValueError, "answer does not match an option"):
+        with self.assertRaisesRegex(ValueError, "answer 'dba' is not one of the option ids"):
             load(QUIZ_YAML.replace("answer: fe", "answer: dba"))
+
+    def test_options_are_shown_in_the_fixed_shuffled_order(self):
+        # With this title, both questions are shown in a different order than written.
+        text = QUIZ_YAML.replace('"Module 1 Quiz: Example"', '"Module 2 Quiz: Example"')
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "quiz02_example.yaml"
+            path.write_text(text, encoding="utf-8")
+            quiz = CourseQuiz.from_yaml(path)
+            written = load_quiz(path)
+            self.assertEqual(quiz.questions, display_order(written).questions)
+        for shown, original in zip(quiz.questions, written.questions):
+            self.assertNotEqual(shown.options, original.options)
+        quiz._render_question()
+        choices = quiz._root.children[0].children[1]
+        self.assertEqual(list(choices.options), [(o.text, o.option_id) for o in quiz.questions[0].options])
 
     def test_styles_cover_every_quiz_element(self):
         source = Path(quiz_module.__file__).read_text(encoding="utf-8")

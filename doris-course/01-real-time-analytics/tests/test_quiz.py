@@ -69,10 +69,7 @@ class QuizTests(unittest.TestCase):
                     namespace = {}
                     exec(initialization, namespace)
                     quiz = namespace['quiz']
-                    if 'level3' in path.parts:
-                        self.assertEqual(len(quiz.questions), 6)
-                    else:
-                        self.assertIn(len(quiz.questions), (5, 6))
+                    self.assertEqual(len(quiz.questions), 6)
                     self.assertEqual(
                         len({q.question_id for q in quiz.questions}),
                         len(quiz.questions),

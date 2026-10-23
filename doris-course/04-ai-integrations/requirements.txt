@@ -1,0 +1,10 @@
+-e ../common
+jupyterlab==4.4.10
+ipykernel==6.29.5
+ipywidgets>=8.1,<9
+nbformat==5.10.4
+pandas==2.2.3
+PyMySQL==1.1.1
+PyYAML>=6.0,<7
+doris-mcp-server==1.0.0
+mcp==2.0.1

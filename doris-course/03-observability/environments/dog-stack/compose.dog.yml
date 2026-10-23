@@ -21,7 +21,6 @@ services:
       - fe_meta:/opt/apache-doris/fe/doris-meta
       - be_storage:/opt/apache-doris/be/storage
       - ${DORIS_OBS_COURSE_ROOT:?set DORIS_OBS_COURSE_ROOT}/.runtime/doris-logs/fe:/opt/apache-doris/fe/log
-      - ${DORIS_OBS_COURSE_ROOT:?set DORIS_OBS_COURSE_ROOT}/.runtime/doris-logs/be:/opt/apache-doris/be/log
 
   otel-collector:
     container_name: doris-obs-otel-collector

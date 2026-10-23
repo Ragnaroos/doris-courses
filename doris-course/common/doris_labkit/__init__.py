@@ -9,5 +9,6 @@ requirements.txt and builds its own lab helpers on top of it:
 - ``docker``: Docker and process helpers;
 - ``shell``: learner-visible Bash with live progress;
 - ``profiles``: values read from Query Profile text;
+- ``quizbank``: loading, checking and ordering the questions of a quiz file;
 - ``quiz``: the single-choice knowledge-check widget.
 """

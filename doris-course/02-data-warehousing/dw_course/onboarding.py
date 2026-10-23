@@ -12,6 +12,10 @@ LABS = {
     1: "level1/module01-introduction/lab01_connect_and_query.ipynb",
     5: "level1/module05-ingestion/lab05_stream_load.ipynb",
     6: "level1/module06-data-quality/lab06_validate_orders.ipynb",
+    7: "level1/module07-state-changes/lab07_current_state_and_replay.ipynb",
+    9: "level2/module09-modeling-and-joins/lab09_modeling_and_joins.ipynb",
+    10: "level2/module10-metric-processing/lab10_metric_processing.ipynb",
+    11: "level2/module11-bi-and-ai/lab11_bi_and_ai_delivery.ipynb",
 }
 
 
@@ -20,7 +24,7 @@ class SetupRequired(RuntimeError):
 
     def __init__(self, message, *, labs=(), detail=""):
         super().__init__(message)
-        self.links = [("First-time setup", "GETTING_STARTED.md")]
+        self.links = [("Get started (course README)", "README.md")]
         self.links.extend((f"Open Lab {number}", LABS[number]) for number in labs)
         self.detail = detail
 

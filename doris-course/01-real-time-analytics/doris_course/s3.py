@@ -1,7 +1,9 @@
-"""S3 configuration and credential helpers shared by data-loading labs."""
+"""The S3 TVF that reads the course's public bucket, shared by data-loading labs."""
 
 from doris_labkit.db import sql_string
 
-from .doris_client import load_env_file, redacted_s3_config, s3_tvf
+from .doris_client import DorisLab, s3_tvf
 
-__all__ = ["load_env_file", "redacted_s3_config", "s3_tvf", "sql_string"]
+COURSE_S3_TVF = s3_tvf(DorisLab.S3_CONFIG)
+
+__all__ = ["COURSE_S3_TVF", "s3_tvf", "sql_string"]

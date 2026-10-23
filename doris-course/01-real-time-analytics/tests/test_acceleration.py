@@ -56,9 +56,6 @@ class FakeLab:
     def cursor(self):
         return FakeCursor(self)
 
-    def _query_profiles(self):
-        return []
-
 
 class EvidenceTests(unittest.TestCase):
     def test_mv_queries_use_requested_objects_and_reject_unsafe_names(self):
@@ -67,11 +64,13 @@ class EvidenceTests(unittest.TestCase):
         lab = object.__new__(DorisLab)
         lab._metadata_rows = Mock(return_value=[
             {"TableName": "another_table", "RollupIndexName": "another_view"},
-            {"TableName": "another_table", "RollupIndexName": "unrelated_view"},
         ])
         rows = lab.sync_mv_jobs("another_table", "another_view", database="another_db")
         self.assertEqual(len(rows), 1)
-        lab._metadata_rows.assert_called_with("SHOW ALTER TABLE MATERIALIZED VIEW FROM `another_db`")
+        lab._metadata_rows.assert_called_with(
+            "SHOW ALTER TABLE MATERIALIZED VIEW FROM `another_db`\n"
+            "WHERE TableName = 'another_table' AND RollupIndexName = 'another_view'"
+        )
         lab.async_mv_tasks("async_view", database="another_db")
         statement = lab._metadata_rows.call_args.args[0]
         self.assertIn("MvDatabaseName = 'another_db'", statement)

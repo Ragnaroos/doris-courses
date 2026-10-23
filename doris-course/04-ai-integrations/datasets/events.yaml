@@ -1,0 +1,37 @@
+# The storefront events that the AI Integrations labs load into Doris.
+# events.csv is synthetic: datasets/generate_events.py writes it from a fixed
+# seed, so it contains no real shoppers or orders. The Lab compares the loaded
+# table with the numbers below, and the tests compare them with the CSV file.
+name: events
+file: events.csv
+sha256: e3d138c31576a959a1e2480e4a4478de8c3e3bb0163ed0e0bbaf01fe840109f4
+database: ai_course
+table: events
+comment: Synthetic storefront events for the AI Integrations course
+columns:
+  - {name: event_time, type: DATETIME, comment: When the event happened}
+  - {name: event_id, type: BIGINT, comment: Unique event identifier}
+  - {name: user_id, type: BIGINT, comment: Anonymous shopper identifier}
+  - {name: event_type, type: VARCHAR(16), comment: "view, cart, or purchase"}
+  - {name: region, type: VARCHAR(16), comment: Sales region of the shopper}
+  - {name: product_id, type: BIGINT, comment: Product identifier}
+  - {name: revenue, type: "DECIMAL(12, 2)", comment: "Order value in USD for purchase events, otherwise 0.00"}
+row_count: 14307
+min_event_time: "2026-03-01 00:10:30"
+max_event_time: "2026-03-31 23:06:38"
+distinct_users: 800
+distinct_products: 200
+total_revenue: "73236.22"
+event_counts:
+  view: 12753
+  cart: 1074
+  purchase: 480
+# The bounded aggregation of the lesson (section 1.6): events and distinct
+# shoppers per event type from 2026-03-09 inclusive to 2026-03-16 exclusive.
+weekly_activity:
+  start: "2026-03-09 00:00:00"
+  end: "2026-03-16 00:00:00"
+  rows:
+    - {event_type: view, event_count: 2904, distinct_users: 453}
+    - {event_type: cart, event_count: 238, distinct_users: 204}
+    - {event_type: purchase, event_count: 106, distinct_users: 94}

@@ -1,109 +1,124 @@
-title: "Module 5 Quiz: Partitioning and Bucketing for Observability Data"
-description: Six questions check whether daily, monthly, hourly, dynamic, and automatic partitioning answer
-  different retention and analysis needs, and whether HASH, RANDOM, and automatic bucket choices match
-  the access pattern.
+title: 'Module 5 Quiz: Partitioning and Bucketing for Observability Data'
+description: Six questions check whether you can explain partitions, buckets, and tablets, predict partition
+  pruning and dynamic partitions, choose a partition grain and method, choose a bucketing, and explain
+  the number of buckets.
 questions:
-- id: choose_daily_partition_granularity
-  objective: Choose partition granularity from retention and query grain
-  prompt: A logs table keeps 180 days of data. Queries and retention operations are performed independently
-    for each calendar day; hourly detail is not required at the partition level. Which range-partition
-    grain is the most appropriate?
+- id: count_tablets
+  objective: Explain how Doris divides a table into partitions, buckets, and tablets.
+  prompt: otel_traces has 5 daily partitions of 10 buckets each, with one replica. How many tablets does
+    it have, and which of them does a scan of one partition read?
   options:
+  - id: fifty_in_partition
+    text: 50 tablets; the scan reads the 10 tablets of that partition, in parallel
+  - id: ten_shared
+    text: 10 tablets that all partitions share; the scan reads all 10 of them
+  - id: five_one
+    text: 5 tablets, one per partition; the scan reads the partition's one tablet
+  - id: fifty_all
+    text: 50 tablets; any scan reads all 50, since buckets reach across partitions
+  answer: fifty_in_partition
+  explanation: 'Doris stores each bucket of each partition as a tablet: 5 partitions of 10 buckets make
+    50 tablets. A scan opens only the tablets of the partitions that it reads, here 10, and reads them
+    in parallel. Buckets divide each partition; they are not shared between partitions, and a partition
+    is not a single tablet unless it has one bucket.'
+- id: predict_partition_pruning
+  objective: Predict which partitions a query reads from its filter on the partition column.
+  prompt: In a fresh environment, EXPLAIN shows partitions=1/5 for a query of otel_traces with timestamp
+    >= a time an hour ago, and also partitions=1/5 for the same query without any filter on time. What
+    explains the second plan?
+  options:
+  - id: empty_skipped
+    text: Only today's partition holds rows, and Doris also skips partitions that are empty
+  - id: filter_ignored
+    text: Doris ignored the time filter in the first plan too, so both read the same partition
+  - id: service_pruning
+    text: Doris pruned the partitions by service_name, which every query of otel_traces implies
+  - id: plan_cache
+    text: Doris reused the plan of the first query from its SQL cache for the second one
+  answer: empty_skipped
+  explanation: Pruning keeps the partitions whose range can hold matching rows, and Doris also leaves
+    out partitions without any rows. In a fresh environment only today's partition has data, so both plans
+    read it; on a week of telemetry, the query without a time filter would read every partition, while
+    the first would still read one. The first plan did apply its filter; the partitions are by time, not
+    by service; and the SQL cache keeps results of repeated identical queries, not plans for others.
+- id: predict_dynamic_partitions
+  objective: Predict which partitions dynamic partitioning creates and drops.
+  prompt: A table is created with dynamic partitioning by DAY, start = -7, end = 1, and history_partition_num
+    = 10. Which partitions does it have right after it is created?
+  options:
+  - id: seven_today_tomorrow
+    text: The 7 days before today, today, and tomorrow
+  - id: ten_today_tomorrow
+    text: The 10 days before today, today, and tomorrow
+  - id: today_only
+    text: Only today's; past days get partitions when their data arrives
+  - id: no_tomorrow
+    text: The 7 days before today and today; tomorrow's comes at midnight
+  answer: seven_today_tomorrow
+  explanation: 'Dynamic partitioning creates the partitions up to end, here tomorrow, and history_partition_num
+    creates past ones with the table, but never beyond start: of 10 requested past days, 7 are created.
+    Afterwards, the scheduler creates and drops partitions every 10 minutes. Partitions that arriving
+    data creates are AUTO PARTITION''s behavior, and end = 1 creates tomorrow''s partition before midnight.'
+- id: choose_partitioning
+  objective: Choose a partition grain and a partitioning method for a retention period and a query pattern.
+  prompt: A service writes about 2 GB of logs a day. Queries cover the last minutes to hours, and the
+    logs are kept for 30 days. Which partitioning fits best?
+  options:
+  - id: daily_retention
+    text: Daily partitions on the log time, whose dynamic partitioning drops the days older than 30
+  - id: hourly_forever
+    text: Hourly partitions on the log time, created ahead of time and without a start, so that no log
+      line is ever lost
   - id: monthly
-    text: One monthly partition for each month
-  - id: single
-    text: One partition containing all 180 days
-  - id: daily
-    text: Daily partitions
-  - id: hourly
-    text: Hourly partitions for every day
-  answer: daily
-  explanation: Daily partitions align with day-level query pruning and retention. Hourly partitions create
-    unnecessary metadata, while monthly or single partitions cannot independently manage one day's data.
-- id: predict_dynamic_partition_retention
-  objective: Predict dynamic-partition retention
-  prompt: A dynamic-partition table uses time_unit = DAY, start = -14, and end = 2. History creation is
-    enabled and requests 20 historical partitions. How many historical partitions should remain after
-    creation?
+    text: Monthly partitions, since a query can still filter one day inside a month's partition
+  - id: unpartitioned_delete
+    text: No partitions, and a DELETE every night of the rows that are older than 30 days
+  answer: daily_retention
+  explanation: Daily partitions prune these queries to a day or two, and retention drops a day at a time
+    without rewriting data. Hourly partitions multiply the tablets by 24 for 2 GB a day, and without a
+    start they are never dropped, so the table grows until the disk is full. A monthly partition can be
+    filtered by day, but each query reads the whole month to find the day, and retention drops a month
+    at a time. A DELETE rewrites data and costs far more than dropping a partition.
+- id: choose_bucketing
+  objective: Choose HASH or RANDOM bucketing from a table's filters and the distribution of its data.
+  prompt: Bucketed by HASH(service_name) into 10 buckets, a copy of the spans reads one tablet for service_name
+    = 'payment', but one tablet holds 38% of the rows and another none. Its users mostly look up whole
+    traces by trace_id. Which distribution fits them best?
   options:
-  - id: fourteen
-    text: '14'
-  - id: twenty
-    text: '20'
-  - id: two
-    text: '2'
-  - id: twenty_two
-    text: '22'
-  answer: fourteen
-  explanation: The start value defines the retention boundary. Requesting 20 historical partitions cannot
-    retain partitions outside that boundary, so only the most recent 14 historical days are kept.
-- id: choose_auto_partition_for_sparse_data
-  objective: Choose automatic partitioning for irregular arrival
-  prompt: Event files arrive on some days but not others. The team wants Doris to create only the partitions
-    needed by arriving data and does not need automatic age-based deletion. Which partition strategy fits
-    best?
-  options:
+  - id: hash_trace
+    text: 'HASH(trace_id): its values spread the rows evenly, and a lookup reads one tablet per partition'
+  - id: more_service_buckets
+    text: HASH(service_name) with 100 buckets, which spreads each busy service over more tablets
+  - id: random_lookup
+    text: RANDOM, which keeps the tablets even and still reads only one tablet when a query looks up a
+      trace_id
   - id: one_bucket
-    text: No partition, but one bucket for all historical data
-  - id: auto
-    text: AUTO PARTITION on the day-truncated event time
-  - id: dynamic_dense
-    text: Dynamic partitioning that pre-creates every calendar day
-  - id: static_monthly
-    text: A single manually created monthly partition
-  answer: auto
-  explanation: AUTO PARTITION creates partitions when matching data arrives, which avoids empty pre-created
-    partitions for sparse dates. Dynamic partitioning is more useful when predictable creation and TTL
-    deletion are required.
-- id: choose_random_bucket_for_skew
-  objective: Choose bucketing for a skewed append-only workload
-  prompt: A DUPLICATE logs table is usually queried over bounded time ranges and rarely filtered by service_name.
-    Ninety-eight percent of rows have one service_name, and HASH bucketing on that column creates one
-    dominant tablet. Which bucket strategy best fits these conditions?
+    text: One bucket per partition, so that every lookup reads exactly one tablet of a partition
+  answer: hash_trace
+  explanation: 'Bucket by the column that most queries filter on with =, when it spreads the rows evenly.
+    Trace IDs are random, and no trace holds more than a few dozen spans, so the tablets stay even, and
+    a lookup of one trace reads one tablet of each partition that it scans. More buckets do not split
+    a service: all rows with one value hash to one bucket. RANDOM keeps tablets even but cannot prune
+    any bucket. One bucket per partition does read one tablet, but that tablet is the whole partition.'
+- id: explain_auto_buckets
+  objective: Explain how Doris sets the number of buckets of each partition.
+  prompt: The exporter's otel_traces says DISTRIBUTED BY RANDOM BUCKETS AUTO, and the course's partitions
+    hold a few megabytes each, yet every partition has 10 buckets. Why?
   options:
-  - id: hash_service
-    text: HASH bucketing on service_name, because the skew will disappear after compaction
-  - id: one_bucket
-    text: One bucket, because fewer tablets always improve scan performance
-  - id: partition_key
-    text: Put service_name in the partition key and remove time partitioning
-  - id: random
-    text: RANDOM bucketing, accepting less bucket pruning in exchange for even distribution
-  answer: random
-  explanation: RANDOM bucketing spreads append-only DUPLICATE rows evenly and avoids a hot tablet. The
-    tradeoff is that a filter on a bucket column cannot prune buckets, which is acceptable when bounded-range
-    or full scans dominate.
-- id: predict_bucket_pruning_scope
-  objective: Predict which pruning levels can apply
-  prompt: A table is partitioned by day and bucketed with HASH(service_name). A query constrains the timestamp
-    to one day but has no filter on service_name. Which pruning can normally apply?
-  options:
-  - id: partition_only
-    text: Partition pruning can remove other days; bucket pruning on service_name cannot apply
-  - id: bucket_only
-    text: Bucket pruning can remove buckets, but the query must scan every partition
-  - id: both
-    text: Both partition and bucket pruning can target the same reduced set
-  - id: neither
-    text: Neither pruning can apply unless service_name is selected in the output
-  answer: partition_only
-  explanation: The timestamp predicate supports range-partition pruning. HASH bucket pruning needs a usable
-    predicate on the bucket column, so a query without service_name must scan the selected day's relevant
-    buckets.
-- id: choose_auto_bucket_count
-  objective: Choose automatic bucket sizing for variable volume
-  prompt: Daily compressed volume for one partition ranges from 5 GB to 80 GB as traffic changes. The
-    team wants to avoid manually recalculating a bucket count as volume grows. Which distribution choice
-    is most appropriate?
-  options:
-  - id: fixed_huge
-    text: A very large fixed bucket count that never needs review
-  - id: dynamic_bucket_property
-    text: Put the bucket count only in a dynamic-partition property and omit the distribution clause
-  - id: auto_buckets
-    text: BUCKETS AUTO, letting Doris calculate an appropriate bucket count
-  - id: fixed_one
-    text: BUCKETS 1, because bucket count is unrelated to scan parallelism
-  answer: auto_buckets
-  explanation: Automatic bucket sizing adapts the physical distribution as partition volume changes. A
-    fixed count can become too small for large partitions or create unnecessary metadata for small ones.
+  - id: default_then_floor
+    text: Partitions made with the table got dynamic_partition.buckets, 10; later estimates below half
+      of it are ignored
+  - id: hash_only
+    text: BUCKETS AUTO works only for HASH tables, so a RANDOM table gets the default of 10 buckets for
+      each of its partitions
+  - id: per_megabyte
+    text: Doris estimates one bucket for each megabyte of a partition's data, and each partition holds
+      about 10 MB
+  - id: per_disk
+    text: Doris creates one bucket for each disk of the cluster, and the course's Docker host has 10 disks
+  answer: default_then_floor
+  explanation: The partitions that Doris creates together with the table get dynamic_partition.buckets,
+    10. For later partitions, BUCKETS AUTO estimates from the sizes of the earlier ones, here 1 bucket,
+    and when an estimate is below half of the previous partition's number, Doris keeps the previous number.
+    BUCKETS AUTO works for RANDOM tables too; the estimate is about one bucket up to 100 MB and one per
+    5 GB beyond, not one per megabyte; and the cluster's disks only cap the number.

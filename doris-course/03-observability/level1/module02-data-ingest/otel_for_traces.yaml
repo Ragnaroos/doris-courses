@@ -1,8 +1,8 @@
 receivers:
   otlp:
     protocols:
-      grpc:
-        endpoint: 0.0.0.0:4317
+      # OTLP over HTTP. The Lab publishes this port on the host as
+      # 127.0.0.1:24328, where the Python code sends its span.
       http:
         endpoint: 0.0.0.0:4318
 
@@ -26,10 +26,9 @@ exporters:
     password:
     table:
       traces: otel_traces
-    create_schema: true
-    mysql_endpoint: doris-obs:9030
-    history_days: 10
-    create_history_days: 10
+    # The DOG Collector created otel_traces when Module 1 started it. This
+    # collector only loads rows, so it does not create tables.
+    create_schema: false
     timezone: UTC
     timeout: 60s
     log_response: true

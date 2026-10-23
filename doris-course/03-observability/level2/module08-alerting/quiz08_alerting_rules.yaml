@@ -1,63 +1,74 @@
-title: "Module 8 Quiz: Alerting with Grafana"
-description: Six questions check whether you can define the evaluated metric, reason about time-based
-  alert conditions, separate routing from evaluation, and interpret alert evidence at the correct scope.
+title: 'Module 8 Quiz: Alerting with Grafana'
+description: Six questions check whether you can write an alert query, predict an alert's states, separate
+  rules, policies, and contact points, keep the labels that an alert needs, handle missing data, and keep
+  rules as code.
 questions:
 - id: choose_alert_expression
-  objective: Align the alert query with the monitored signal
-  prompt: Operators must be notified when the CPU of a host stays busy. The DOG Collector stores host CPU
-    in otel_metrics_gauge as system.cpu.utilization, with one row per CPU core and state (idle, user, system,
-    and so on) and the share of time in value. Which alert expression measures how busy each host is?
+  objective: Write an alert query that measures what the alert is about.
+  prompt: Operators must be notified when the CPU of a host stays busy. The DOG Collector stores host
+    CPU in otel_metrics_gauge as system.cpu.utilization, with one row per CPU core and state (idle, user,
+    system, and so on) and the share of time in value. Which alert expression measures how busy each host
+    is?
   options:
   - id: every_row
     text: Filter the table to system.cpu.utilization and compare the value of every row with the threshold
   - id: all_states
-    text: Average all the states of each host's cores over the last minute and compare that average with the threshold
+    text: Average all the states of each host's cores over the last minute and compare that average with
+      the threshold
   - id: count_rows
     text: Count each host's rows from the last minute and alert when the count exceeds the threshold
   - id: busy_share
-    text: Subtract each host's average idle share over the last minute from 1 and compare it with the threshold
+    text: Subtract each host's average idle share over the last minute from 1 and compare it with the
+      threshold
   answer: busy_share
-  explanation: Each row is the share of time that one core spent in one state, so idle rows are close to 1
-    on a quiet host, and the states of a core always add up to 1. One minus the average idle share is the
-    busy share of the host's cores, and grouping the result by host gives one alert instance per host.
-- id: predict_duration_condition
-  objective: Predict a sustained-threshold alert state
-  prompt: An alert condition is true when CPU utilization is above 90% continuously for 10 minutes. Samples
-    for one host are 96%, 96%, and 94%, but the interval between them contains a drop below 90%. What
-    should happen?
+  explanation: Each row is the share of time that one core spent in one state, so idle rows are close
+    to 1 on a quiet host, and the states of a core always add up to 1. One minus the average idle share
+    is the busy share of the host's cores, and grouping the result by host gives one alert instance per
+    host. Comparing every row fires on idle cores; the average of all states is the same for every host;
+    and the number of rows measures how often the Collector reports, not how busy the host is.
+- id: predict_pending_states
+  objective: Predict how an alert instance moves between Normal, Pending, and Alerting, and back.
+  prompt: A rule is evaluated every 30 seconds and has a pending period of 1 minute. Its condition is
+    true at 10:00:00 and 10:00:30, false at 10:01:00, and true again from 10:01:30 on. When does its instance
+    become Alerting?
   options:
-  - id: not_firing
-    text: The sustained condition is broken, so the alert should not become firing only because three
-      sampled values were above 90%
-  - id: firing
-    text: The alert fires because three above-threshold samples are always equivalent to ten continuous
-      minutes
-  - id: permanent
-    text: The alert fires permanently after the first above-threshold sample
-  - id: no_data
-    text: The alert stays normal for the rest of the day after the first below-threshold sample
-  answer: not_firing
-  explanation: A duration condition depends on continuity, not only on selected samples. A drop below
-    the threshold within the evaluation window breaks the sustained condition.
-- id: distinguish_contact_point_and_policy
-  objective: Separate notification destination from routing
-  prompt: A Grafana team needs email delivery for alerts, and some alert groups must route to different
-    recipients by service. Which responsibility split is correct?
+  - id: after_reset
+    text: At 10:02:30, a minute after it became Pending again at 10:01:30
+  - id: first_minute
+    text: At 10:01:00, one minute after the condition first became true
+  - id: count_true
+    text: At 10:01:30, once the condition has been true at three evaluations
+  - id: stays_normal
+    text: Never, because one false evaluation turns the rule off until it is saved again
+  answer: after_reset
+  explanation: 'An instance is Pending while its condition holds and becomes Alerting when it has held
+    at every evaluation for the whole pending period. The false evaluation at 10:01:00 returned the instance
+    to Normal, so the period started again at 10:01:30 and ended at 10:02:30. The condition was not true
+    at 10:01:00, true evaluations are not added up across a false one, and a false evaluation does not
+    disable a rule: it keeps being evaluated.'
+- id: find_the_routing_problem
+  objective: Separate what a contact point, a notification policy, and an alert rule each decide.
+  prompt: The Test of the contact point doris-course-email delivered an email. Later, the rule Host CPU
+    busy fires, but no email reaches oncall@example.com, and the default contact point's address receives
+    one instead. What should you check first?
   options:
-  - id: dashboard
-    text: Alert rules embed their recipients directly; contact points are optional display labels
-  - id: metric
-    text: The metric table chooses the recipient from the value column
-  - id: split
-    text: The contact point defines how to send the notification; the notification policy controls which
-      alerts are routed to that contact point
-  - id: reverse
-    text: The contact point selects recipients for every rule; notification policies only format the message
-  answer: split
-  explanation: A contact point is the delivery integration, such as email. Notification policies match
-    and route alert instances to contact points, which allows different groups to reach different recipients.
-- id: preserve_node_dimension
-  objective: Keep alert grouping useful for diagnosis
+  - id: policy_labels
+    text: The notification policy, and whether the rule's labels match the policy that routes to doris-course-email
+  - id: contact_address
+    text: The address of the contact point, because the success of a test notification proves nothing
+      about delivery
+  - id: rule_recipient
+    text: The rule's query, which must return the address that the email goes to in a column
+  - id: smtp_server
+    text: Grafana's SMTP settings, because tests and alerts are sent through different mail servers
+  answer: policy_labels
+  explanation: 'The rule decides what fires, the notification policy decides by the alert''s labels where
+    it goes, and the contact point decides how it is sent. An alert that matches no other policy follows
+    the default policy to its contact point, which is what happened here: check the policy''s matching
+    label and the rule''s labels. The test proved that the contact point delivers, once; a rule does not
+    name recipients; and tests and alerts use the same SMTP settings.'
+- id: preserve_host_dimension
+  objective: Keep the labels that an alert needs to be acted on.
   prompt: CPU alerts must tell operators which host is affected, and the alert query can return the host
     name. Which alert configuration preserves that requirement?
   options:
@@ -70,27 +81,12 @@ questions:
   - id: drop_dimension
     text: Aggregate all hosts into one unlabeled value before evaluation
   answer: keep_dimension
-  explanation: The alert must preserve the dimension that operators need for action. Collapsing or discarding
-    the host name makes a firing alert less actionable even when the threshold is correct.
-- id: interpret_one_delivery
-  objective: Interpret a successful notification as scoped evidence
-  prompt: One test alert produces one email. The alert rule is enabled, but no multi-hour traffic test
-    has been run. Which conclusion is best supported?
-  options:
-  - id: path_works
-    text: The notification path can deliver at least one alert; it does not prove grouping, recovery,
-      or repeated delivery behavior
-  - id: all_future
-    text: Every future high-CPU condition will produce exactly one correctly routed email
-  - id: metric_accuracy
-    text: The email proves the CPU metric values are accurate
-  - id: all_folder_rules
-    text: The email proves every alert rule in the folder is routed to that contact point
-  answer: path_works
-  explanation: One delivery tests the configured destination once. Grouping, silencing, recovery notifications,
-    and repeated evaluation are separate behaviors that require their own validation.
+  explanation: Grafana makes an alert instance of each row of the query and labels it with the row's text
+    columns, so GROUP BY host gives each host an instance labeled host=... that a notification, a policy,
+    and a silence can use. A generic message, a host name written into the rule, or one value for all
+    hosts each lose the information that an operator needs, even when the threshold is right.
 - id: distinguish_missing_data_from_low_value
-  objective: Distinguish no data from a normal metric value
+  objective: Decide how a rule treats missing data, and detect a source that stops reporting.
   prompt: A host's CPU series stops reporting for several minutes while other hosts continue. The alert
     threshold is value > 90%. Which handling is most defensible?
   options:
@@ -105,6 +101,31 @@ questions:
     text: Treat every missing sample as 100% and fire every alert
   answer: no_data_state
   explanation: Missing telemetry is not a measured low value. Define explicitly what happens without data,
-    so that an instrumentation or network failure is not reported as a healthy host. In Grafana, the no data
-    setting of a rule applies when its query returns nothing at all; a host that goes silent while others
-    still report needs a check of its own, such as the time since its newest sample.
+    so that an instrumentation or network failure is not reported as a healthy host. In Grafana, the no
+    data setting of a rule applies when its query returns nothing at all; a host that goes silent while
+    others still report needs a check of its own, such as the time since its newest sample. Reusing the
+    last value hides the silence, and 0% or 100% invent a measurement.
+- id: provision_rule_with_uid
+  objective: Keep alert rules as code, and send them to Grafana.
+  prompt: 'A team keeps the rule Failed orders as JSON with a fixed uid, and sends it with PUT /api/v1/provisioning/folder/{folder
+    uid}/rule-groups/orders. On a new Grafana, the request fails with 500: could not find alert rule.
+    What fixes it?'
+  options:
+  - id: post_first
+    text: Create the rule once with POST /api/v1/provisioning/alert-rules; the group's PUT only updates
+      existing rules
+  - id: disable_provenance
+    text: 'Add the header X-Disable-Provenance: true, which lets the group''s PUT create the rules it
+      does not know'
+  - id: export_first
+    text: Export the rule from the old Grafana with the export API, which registers its uid on the new
+      Grafana
+  - id: sign_in_first
+    text: Sign in to the new Grafana's web page as admin once, which enables its provisioning API for
+      that user
+  answer: post_first
+  explanation: 'A group''s PUT sets the group''s interval and rules, but it can only update a rule whose
+    uid Grafana has: a rule with a new fixed uid is created with POST first, as lab.provision_alert_rule_group
+    does. X-Disable-Provenance only keeps the rules editable in the web page. Exporting reads a rule from
+    one Grafana and registers nothing on another. The API takes the admin''s credentials with each request,
+    so signing in to the web page changes nothing for it.'

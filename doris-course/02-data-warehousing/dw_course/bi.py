@@ -9,13 +9,18 @@ from urllib.parse import quote
 import pymysql
 import requests
 
+from .environment import port
 from .sidecars import start_service
 from .runtime import expect
 from .ui import show_records
 
-URL = 'http://127.0.0.1:51888'
 ADMIN = 'course_admin'
 ADMIN_PASSWORD = 'course_local_only'
+
+
+def superset_url():
+    """The host address of the course Superset, on DW_BI_PORT (51888 by default)."""
+    return f"http://127.0.0.1:{port('DW_BI_PORT')}"
 
 
 class SupersetAPI:
@@ -29,7 +34,7 @@ class SupersetAPI:
         self.session.headers['X-CSRFToken'] = token
 
     def request(self, method, endpoint, payload=None):
-        response = self.session.request(method, URL + '/api/v1/' + endpoint,
+        response = self.session.request(method, superset_url() + '/api/v1/' + endpoint,
                                         json=payload, timeout=120)
         if not response.ok:
             # Server errors can contain connection strings. Never echo a payload or URI.
@@ -143,10 +148,10 @@ def build_payment_dashboard(lab, *, start=False):
         attached = api.request('GET', f'dashboard/{dashboard_id}/charts')['result']
         expect(sorted(row['id'] for row in attached), sorted(charts), title='All three charts belong to the published dashboard')
         show_records('Verified Superset executions; not notebook-only mock charts', observations)
-        show_records('Local dashboard access', [{'url': URL + f'/superset/dashboard/{dashboard_id}/',
+        show_records('Local dashboard access', [{'url': superset_url() + f'/superset/dashboard/{dashboard_id}/',
                                               'local_ui_user': ADMIN, 'doris_reader': user,
                                               'as_of': '2026-01-04 00:00:00 Asia/Shanghai'}])
-        return {'dashboard_id': dashboard_id, 'url': URL + f'/superset/dashboard/{dashboard_id}/',
+        return {'dashboard_id': dashboard_id, 'url': superset_url() + f'/superset/dashboard/{dashboard_id}/',
                 'charts': charts, 'reader': user}
     finally:
         api.session.close()

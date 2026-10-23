@@ -1,0 +1,14 @@
+# Notebooks are committed without outputs. Set the hook up once per clone
+# (see CONTRIBUTING.md):
+#
+#   python3 -m pip install pre-commit
+#   pre-commit install
+repos:
+  - repo: https://github.com/kynan/nbstripout
+    rev: 0.9.1
+    hooks:
+      - id: nbstripout
+        # Strips outputs, execution counts and run timestamps. Keep the cell
+        # ids: the course tests and notebook tools find cells by id, and
+        # nbstripout would otherwise renumber them.
+        args: [--keep-id, --unix-newlines]

@@ -4,17 +4,22 @@ import boto3
 from botocore.exceptions import ClientError
 from botocore.config import Config
 
+from .environment import port
 from .sidecars import start_service
 
-ENDPOINT = 'http://127.0.0.1:51910'
 BUCKET = 'course-backups'
 ACCESS_KEY = 'course_backup'
 SECRET_KEY = 'course_backup_local_only'
 
 
+def endpoint():
+    """The host address of the backup object storage, on DW_BACKUP_S3_PORT (51910 by default)."""
+    return f"http://127.0.0.1:{port('DW_BACKUP_S3_PORT')}"
+
+
 def prepare_backup_storage(lab, *, start=False):
     start_service(lab, 'backup', start=start)
-    client = boto3.client('s3', endpoint_url=ENDPOINT, region_name='us-east-1',
+    client = boto3.client('s3', endpoint_url=endpoint(), region_name='us-east-1',
                           aws_access_key_id=ACCESS_KEY, aws_secret_access_key=SECRET_KEY,
                           config=Config(s3={'addressing_style': 'path'}))
     try:

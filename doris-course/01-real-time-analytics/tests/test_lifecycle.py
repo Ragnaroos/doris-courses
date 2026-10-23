@@ -79,7 +79,7 @@ class LifecycleHelperTests(unittest.TestCase):
         lab._metadata_rows = Mock(side_effect=[
             [{"Tables_in_doris_course": "m10_retained_events"}],
             [{"event_time": "2026-10-19 22:06:05"}],
-            [{"server_now": "2026-10-20 01:06:06"}],
+            [{"server_now": "2026-10-20 01:06:06", "time_zone": "Asia/Shanghai"}],
         ])
         lab.wait_for_partition_removal = Mock()
         with patch.object(client, "card") as card:
@@ -101,7 +101,7 @@ class LifecycleHelperTests(unittest.TestCase):
         lab._metadata_rows = Mock(side_effect=[
             [{"Tables_in_doris_course": "m10_retained_events"}],
             [{"event_time": "2026-10-19 22:06:05"}],
-            [{"server_now": "2026-10-20 02:00:30"}],
+            [{"server_now": "2026-10-20 02:00:30", "time_zone": "Asia/Shanghai"}],
             [
                 {"PartitionName": "p2026101922",
                  "Range": "[types: [DATETIMEV2]; keys: [2026-10-19 22:00:00]; "
@@ -132,6 +132,46 @@ class LifecycleHelperTests(unittest.TestCase):
             )
         self.assertEqual(card.call_args.args[1:], ("ok", "Hourly expiry already applied"))
         lab.wait_for_partition_removal.assert_not_called()
+
+    def test_partition_holding_event_names_the_hour_and_its_sql(self):
+        lab = DorisLab.__new__(DorisLab)
+        lab._metadata_rows = Mock(side_effect=[
+            [{"event_time": "2026-10-21 22:40:44"}],
+            [
+                {"PartitionName": "p2026102122",
+                 "Range": "[types: [DATETIMEV2]; keys: [2026-10-21 22:00:00]; "
+                          "..types: [DATETIMEV2]; keys: [2026-10-21 23:00:00]; )"},
+                {"PartitionName": "p2026102123",
+                 "Range": "[types: [DATETIMEV2]; keys: [2026-10-21 23:00:00]; "
+                          "..types: [DATETIMEV2]; keys: [2026-10-22 00:00:00]; )"},
+            ],
+        ])
+        with patch.object(client, "card") as card, patch.object(client, "show_log") as log:
+            partition = lab.partition_holding_event("m10_retained_events", event_id=1001)
+        self.assertEqual(partition, "p2026102122")
+        self.assertIn("p2026102122", card.call_args.args[0])
+        self.assertIn("SELECT event_time FROM m10_retained_events WHERE event_id = 1001;", log.call_args.args[1])
+
+    def test_partition_holding_a_missing_event_is_none(self):
+        lab = DorisLab.__new__(DorisLab)
+        lab._metadata_rows = Mock(return_value=[])
+        with patch.object(client, "card") as card:
+            self.assertIsNone(lab.partition_holding_event("m10_retained_events", event_id=1001))
+        self.assertEqual(card.call_args.args[1:], ("skip", "The event is already gone"))
+
+    def test_lab10_moves_the_window_and_restores_the_interval(self):
+        path = ROOT / "level3/module10-managing-data/lab10_manage_data.ipynb"
+        cells = {cell["id"]: "".join(cell["source"]) for cell in json.loads(path.read_text())["cells"]}
+        fast = cells["b1132789"]
+        self.assertIn('"dynamic_partition.start" = "-2"', fast)
+        self.assertIn("'dynamic_partition_check_interval_seconds' = '10'", fast)
+        restore = fast.index("finally:")
+        self.assertIn("{original_interval}", fast[restore:])
+        self.assertNotIn("DROP PARTITION", fast)
+        clock = cells["m10-real-clock-wait"]
+        self.assertIn("WAIT_FOR_REAL_HOUR = False", clock)
+        self.assertIn("lab.wait_for_hourly_partition_expiry(", clock)
+        self.assertNotIn("Do not use Run All", "".join(cells.values()))
 
     def test_recycle_summary_selects_exact_partition_id(self):
         lab = DorisLab.__new__(DorisLab)

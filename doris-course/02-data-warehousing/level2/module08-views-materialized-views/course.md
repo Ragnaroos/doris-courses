@@ -1,97 +1,114 @@
 # Module 8: Views and Materialized Views
 
-| Course Information | Details |
+| Course information | Value |
 | --- | --- |
 | Course | Data Warehousing with Apache Doris · Level 2 |
-| Product scope | Apache Doris 4.x; examples use the course's 4.1.3 sandbox |
-| Prerequisites | Level 1 Lab 5 and its `orders_imported` table |
-| Suggested time | About 118 minutes: reading 45, Lab 65, Quiz 8; first-start image downloads/builds are additional |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox from Module 1; `orders_current` and `order_events` from Lab 7 |
+| Estimated time | About 117 minutes: reading 42, Lab 65, quiz 10 |
 
-[Level 2 contents](../README.md) · [Open Lab 8](lab08_views_and_materialized_views.ipynb) · [Open Quiz 8](quiz08_views_and_materialized_views.ipynb)
+[Course README](../../README.md) · [Open Lab 8](lab08_views_and_materialized_views.ipynb) · [Open Quiz 8](quiz08_views_and_materialized_views.ipynb)
 
-## Module Goal
+## Module goal
 
-Operations, Finance, and BI all ask for daily order counts and amounts. If each team copies and edits its own SQL, their filters will drift; if every dashboard repeatedly scans detail rows, the same aggregation is calculated again and again. This module first uses a regular view to share a definition, then explains when a stored result is worthwhile and how to prove that it is fresh, correct, and actually used by a query.
+Give every team one definition of daily orders, store its result where repeated queries justify it, and prove from metadata, rows, and plans that the stored result is fresh, right, and used.
 
-## Learning Objectives
+## Learning objectives
 
-After this module, you should be able to:
+After completing this module, you will be able to:
 
-1. Distinguish a regular view's saved SQL definition from a materialized view's stored result.
-2. Choose a refresh strategy based on freshness, write cost, and query cost.
-3. Verify materialized-view status and values rather than relying on a successful `CREATE` response.
-4. Use `EXPLAIN` to look for transparent rewriting instead of assuming it happened.
-5. Keep a published consumer contract stable when its physical implementation changes.
-6. Decide whether repeated query cost justifies maintaining a stored result.
+1. Distinguish a regular view's saved query from a materialized view's stored result.
+2. Choose a refresh trigger and scope from the freshness that consumers need and the cost of a refresh.
+3. Check a materialized view's state and rows instead of trusting a successful CREATE.
+4. Read in EXPLAIN whether a query was rewritten to use a materialized view, and why it was not.
+5. Keep a published view's names and meanings stable when its implementation changes.
+6. Decide whether repeated queries justify storing and maintaining a result.
 
-## Module Schedule
+## Module structure
 
-| Section | Question | Time |
-| --- | --- | ---: |
-| 8.1 Regular views | Why do three teams' SQL definitions drift? | 8 min |
-| 8.2 Precomputation | When is a materialized view worth its cost? | 10 min |
-| 8.3 Incremental refresh | Does `AUTO` mean row-by-row accumulation? | 12 min |
-| 8.4 Rewrite evidence | How do we know which object a query scanned? | 10 min |
-| Lab 8 / Quiz 8 | Existing foundations and extended core evidence | 65 / 8 min |
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 8.1 The Data of Level 2 | 5 min | Which data answers which question, and its amounts |
+| 8.2 One Question, Two Definitions | 8 min | Why "daily orders" needs a definition before it needs speed |
+| 8.3 Store a Result | 9 min | Regular, synchronous, and asynchronous views, and when to store |
+| 8.4 Refresh: When and How Much | 8 min | Manual, scheduled, and partitioned refreshes |
+| 8.5 Prove a Rewrite | 8 min | What EXPLAIN shows, and three reasons a query is not rewritten |
+| 8.6 Keep the Contract | 4 min | Change the implementation, not the meaning |
+| Lab 8 | 65 min | Publish a view, store its daily result, read the plans, and watch three kinds of maintenance |
+| Quiz 8 | 10 min | Six questions on these objectives |
 
-## 8.1 Use a Regular View to Share Meaning
+## 8.1 The Data of Level 2
 
-### One question, different filters
+Level 1 left a database with a history and a current state. Level 2 builds on them, and on one small case of its own:
 
-Imagine two teams querying the ten orders loaded in Lab 5. Operations counts only delivered orders; Finance counts all positive-amount orders:
+| Data | Where it comes from | Used in | Rows and amounts |
+| --- | --- | --- | --- |
+| Level 1's orders | Lab 7's `orders_current` and `order_events`, from the orders that Lab 6 accepted | The main path of Modules 8–12 | 11 orders and 1510.00 of order amount; without the cancelled order 900002, 10 orders and 1310.00; 250.00 paid and 150.00 refunded |
+| The warehouse case | `datasets/warehouse_case.json`, loaded by Lab 9 | Lab 9 sections 5–7, Lab 10 sections 5–6, Lab 11's optional dashboard | 10 order deliveries, 8 orders and 850.00; 7 orders and 800.00 without the cancelled one; 660.00 paid in its reporting window |
+| WWI history | Lab 5's ten `wwi_*` tables | Lab 9's customer dimension, through Lab 6's `customers`; nothing else in Level 2 | 701,846 rows of 2013–2016; 663 of them are customers |
+
+Level 1's orders were created on two days and paid twice: enough to define, store, join, and publish daily metrics, too few to measure payments in a reporting window or customers who buy again. The case has those, and Lab 9 says why it exists. Its amounts are its own; do not add them to Level 1's.
+
+A measurement of query speed needs more rows than either has: Lab 10 generates 100,000 orders for it.
+
+## 8.2 One Question, Two Definitions
+
+Operations and Finance both ask for the orders of each day, and both write reasonable SQL. Operations groups the current orders by the date of their `event_time`:
 
 ```sql
--- Operations' definition
-SELECT DATE(event_time) AS order_date,
-       COUNT(*) AS order_count,
-       SUM(order_amount) AS gross_amount
-FROM orders_imported
-WHERE status = 'DELIVERED'
+SELECT DATE(event_time) AS order_date, COUNT(*) AS order_count, SUM(order_amount) AS gross_amount
+FROM orders_current
 GROUP BY DATE(event_time);
 ```
 
+Finance groups them by the date of the event that created each order, and leaves cancelled orders out:
+
 ```sql
--- Finance's definition
-SELECT DATE(event_time) AS order_date,
-       COUNT(*) AS order_count,
-       SUM(order_amount) AS gross_amount
-FROM orders_imported
-WHERE order_amount > 0
-GROUP BY DATE(event_time);
+SELECT DATE(e.event_time) AS order_date, COUNT(*) AS order_count, SUM(o.order_amount) AS gross_amount
+FROM orders_current o
+JOIN order_events e ON e.order_id = o.order_id AND e.event_version = 1
+WHERE o.status <> 'CANCELLED'
+GROUP BY DATE(e.event_time);
 ```
 
-Both statements run, but they answer different questions. If Operations later includes `SHIPPED` orders without telling Finance, the reports can diverge without an SQL error. Before optimizing a query, decide which business definition consumers should share.
+| order_date | First query: orders, amount | Second query: orders, amount |
+| --- | ---: | ---: |
+| 2026-01-01 | 7, 950.00 | 9, 1200.00 |
+| 2026-01-02 | 4, 560.00 | 1, 110.00 |
 
-A regular view saves a SQL definition, not a copy of its result. Lab 8 creates this service view (the example below is for reading; the Notebook executes it):
+Neither query has an error. `orders_current` keeps the time of each order's latest event: 900001 was delivered, 900002 cancelled, and 900003 refunded on January 2, so the first query counts them on that day, the cancelled one included. The second counts each order once, on the day it was placed. They answer different questions, and a dashboard that shows one under the name of the other is wrong without any SQL error. Before a query is made faster, decide what it means.
+
+This course takes the second definition: an order's date is the date of its version 1 event, and a cancelled order is not counted. A **regular view** saves that query under a name, so that every consumer runs the same one:
+
+**SQL reading example: the view that Lab 8 creates. Do not rerun it after the Lab.**
 
 <!-- reading-only-example -->
 ```sql
-CREATE VIEW orders_service_view_l2 AS
-SELECT DATE(event_time) AS order_date,
-       customer_id,
-       order_amount,
-       data_source
-FROM orders_imported
-WHERE order_amount > 0;
+CREATE VIEW orders_view_l2 AS
+SELECT o.order_id,
+       DATE(e.event_time) AS order_date,
+       o.customer_id, o.status, o.order_amount, o.paid_amount, o.refund_amount, o.region
+FROM orders_current o
+JOIN order_events e ON e.order_id = o.order_id AND e.event_version = 1
+WHERE o.status <> 'CANCELLED';
 ```
 
-The view names the date expression, centralizes a filter, and exposes only four intended columns. A query against it still reads and calculates from the base table. **A regular view is a semantic interface, not a result cache or an automatic speed-up.**
+The view names the date `order_date`, keeps the filter in one place, and shows only the columns that reports use: 10 orders and 1310.00. It stores no rows: each query of the view runs the saved query on the current tables, so it is always as fresh as they are, and costs what they cost. It is not an access grant either: Module 12 grants access to a view.
 
-A consumer contract should also state what each column means: whether `order_amount` is pre-tax order value or money collected, its currency and unit, whether `order_date` is order time or payment time, what `NULL` means, and who owns corrections. A view can provide a stable name while the underlying implementation changes, but silently changing a column's meaning breaks the contract. Creating a view also does not grant users access; Module 12 covers permissions.
+`order_amount` is the order's pre-tax value, not money received: 900003 keeps its 150.00 in the view although it was refunded. Payments and refunds are measures of their own. A view's contract says such things: what each column means, its unit, its time zone, the meaning of `NULL`, and who changes it.
 
-## 8.2 Decide Whether to Store a Result
+## 8.3 Store a Result
 
-Suppose a million detail rows are queried every five minutes for the same daily aggregation. A regular view shares the definition but still repeats the scan and aggregation. A materialized view stores a precomputed result at the cost of storage and refresh work. On the course's ten-row sample, precomputation is useful for learning semantics—not for proving a performance gain.
+A dashboard that opens the daily totals every few minutes runs the same join and aggregation again and again, and gets the same answer until the orders change. A **materialized view** stores that answer: it has a query, like a view, and a result, like a table.
 
-| Object | What it stores | Work at query time | Main trade-off |
+| Object | What it stores | When it computes | What to watch |
 | --- | --- | --- | --- |
-| Regular view | SQL definition | Runs the underlying query | Stable meaning, no stored result |
-| Synchronous materialized view | Materialized index on a base table | Reads a maintained result when matched | Write-path maintenance and model restrictions |
-| Asynchronous materialized view | Separately refreshed result | Reads the result directly or through rewrite | Refresh cost and possible staleness |
+| Regular view | The query | At every query | The cost of every query |
+| Synchronous materialized view | An aggregate or a different column order of one table, kept with the table | At every load into the table | The load's extra work; only one table, and on a Unique Key table no aggregation |
+| Asynchronous materialized view | The result of a query over one or several tables | At each refresh | Freshness and the cost of each refresh |
 
-Synchronous materialized views target single-table queries and are maintained with writes. On a **Unique Key** base table they can change column order but cannot aggregate. This course's `orders_imported` is a **Duplicate Key** table, so do not transfer Unique Key restrictions or examples to it without checking the model. [Doris's synchronous materialized-view guide](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/sync-materialized-view/) documents the limitations.
-
-Lab 8 focuses on an asynchronous view. The Notebook executes this definition:
+**SQL reading example: the materialized view that Lab 8 creates. Do not rerun it after the Lab.**
+It stores the daily totals, with the same tables, join, and filter as the view:
 
 <!-- reading-only-example -->
 ```sql
@@ -99,125 +116,99 @@ CREATE MATERIALIZED VIEW orders_daily_mv_l2
 BUILD IMMEDIATE
 REFRESH AUTO ON MANUAL
 AS
-SELECT DATE(event_time) AS order_date,
+SELECT DATE(e.event_time) AS order_date,
        COUNT(*) AS order_count,
-       SUM(order_amount) AS gross_amount
-FROM orders_imported
-GROUP BY DATE(event_time);
+       SUM(o.order_amount) AS gross_amount
+FROM orders_current o
+JOIN order_events e ON e.order_id = o.order_id AND e.event_version = 1
+WHERE o.status <> 'CANCELLED'
+GROUP BY DATE(e.event_time);
 ```
 
-| Clause | Meaning | Do not assume |
+`BUILD IMMEDIATE` starts the first build when the view is created; `REFRESH AUTO` lets Doris decide how much to recompute; `ON MANUAL` means that only a `REFRESH MATERIALIZED VIEW` statement starts a refresh. The build runs as a task after `CREATE` returns. A successful `CREATE` only accepted the definition, so check four things afterward, each with its own question:
+
+| Check | Where | Question |
 | --- | --- | --- |
-| `BUILD IMMEDIATE` | Start the first build after creation | `CREATE` returning means the data is ready |
-| `REFRESH AUTO` | Let Doris choose the applicable refresh scope | Only newly inserted rows are always processed |
-| `ON MANUAL` | Refresh is triggered manually | Every `SELECT` refreshes automatically |
-| `GROUP BY DATE(event_time)` | Store daily aggregates | A customer-level filter remains possible |
+| `State` | `mv_infos('database'='<db>')` | Can the materialized view be used at all? NORMAL |
+| `RefreshState` | the same | Did its last refresh succeed? SUCCESS |
+| `SyncWithBaseTables` | the same | Does its result still match the base tables? 1 |
+| The rows | `SELECT` from the materialized view | Are they the definition's answer? 9 / 1200.00 and 1 / 110.00 |
 
-The view stores daily `COUNT(*)` and `SUM(order_amount)` values but not `customer_id`. A customer-filtered query therefore cannot be answered from this result alone. The definition has no partition mapping, so this first MV does not demonstrate refreshing only one day; Section 8.5 uses a separate partitioned MV to observe that path. It also does not schedule automatic refresh. These are separate design choices, not hidden benefits of creating an MV.
+When a refresh fails or takes too long, `tasks('type'='mv')` lists the view's refresh tasks with their `Status` and `ErrorMsg`; the Lab's waits show them when they time out.
 
-A materialized view is most useful for stable, frequently repeated expensive queries when its freshness contract can be met. It is less compelling for one-off exploration, tiny data, rapidly changing query shapes, or a refresh schedule that cannot keep up with updates. Compare both the read savings and write/refresh cost before adopting one.
+A stored result pays when the same costly query is asked often, its answer may be minutes old, and someone watches the refreshes. It does not pay for one-off exploration, for a query shape that keeps changing, or for data that changes faster than a refresh can follow. On ten orders nothing needs storing; the Lab stores them to show how a stored result behaves, and Lab 10 measures what storing saves on 100,000 rows.
 
-## 8.3 Understand Incremental Refresh
+## 8.4 Refresh: When and How Much
 
-Here, “incremental” can mean **recomputing only affected partitions**, not adding each changed row to the previous `SUM`. Consider a base table and MV whose date partitions can be mapped to one another:
+A refresh answers two questions: when it runs, and how much it recomputes.
 
-| Date | Base partition | Orders |
-| --- | --- | ---: |
-| 2026-01-01 | `p20260101` | 100 |
-| 2026-01-02 | `p20260102` | 150 |
-| 2026-01-03 | `p20260103` | 200 |
+**When.** `ON MANUAL` refreshes when a statement says so, for example at the end of the job that loads a batch, which is the right trigger when consumers need the completed batch. `ON SCHEDULE EVERY 10 MINUTE` refreshes on a clock, whether or not anything changed, which suits data that arrives continuously and a consumer who accepts a known delay. A refresh on a clock does not know whether a late batch has arrived yet.
 
-If only January 3 changes, a partition-aware refresh can recalculate the corresponding MV partition rather than every day. That requires compatible base and MV partitioning and a relationship Doris can infer. A change to an unpartitioned dimension table in a join may affect many dates and require a wider refresh; if partition mapping cannot be derived, a full refresh may be necessary. `AUTO` is not a promise of row-level delta arithmetic.
+**How much.** "Incremental" here means that Doris recomputes only the affected partitions, not that it adds new rows to the previous sum. A materialized view `PARTITION BY` a date column of its base table maps each of its partitions to that table's partitions, so a change in one day's partition refreshes one day:
 
-For example, if a day's amount changes from 200 to 180, adding 180 to 200 to obtain 380 is wrong. Recompute the affected day's aggregate from its current source rows to obtain 180. Module 10 returns to the difference between snapshot recomputation and adding new business events.
-
-After building the MV, inspect its status:
-
-<!-- reading-only-example -->
-```python
-lab.sql(
-    f"SELECT * FROM mv_infos('database'='{lab.database}') "
-    "WHERE Name = 'orders_daily_mv_l2'",
-    title="Materialized-view status and refresh details",
-)
-```
-
-`State`, `RefreshState`, and `SyncWithBaseTables` answer different questions about object state, refresh execution, and synchronization with the base table. A successful first build should be followed by a direct value check. For the Lab 5 sample, the daily result is one row for `2026-01-01` with 10 orders and 1400.00 in order amount. This is an initial teaching snapshot, not money collected or the current state after Lab 7 replay.
-
-## 8.4 Prove Whether Rewriting Happened
-
-Four outcomes must not be conflated: (1) creation succeeded, (2) refresh completed, (3) a direct `SELECT` from the MV returned correct data, and (4) a query written against the base table was transparently rewritten to use the MV. The first three do **not** prove the fourth.
-
-Directly querying the MV name is not a rewrite. To investigate rewriting, explain a compatible query written against the base table:
-
-```sql
-EXPLAIN
-SELECT DATE(event_time) AS order_date,
-       COUNT(*) AS order_count,
-       SUM(order_amount) AS gross_amount
-FROM orders_imported
-GROUP BY DATE(event_time)
-ORDER BY order_date;
-```
-
-Read the scan nodes in the actual plan. Scanning `orders_daily_mv_l2` is evidence of rewrite; scanning `orders_imported` means this plan did not use the MV. In either case, compare the result with an independent base-table aggregation. A planner can choose not to rewrite even when an MV exists.
-
-If no rewrite appears, check three groups of causes:
-
-1. **MV readiness:** Has refresh completed? Are `State`, `RefreshState`, and synchronization status appropriate?
-2. **Query compatibility:** Do filters, grain, and required columns match what the MV can answer? The service view filters `order_amount > 0`, while this MV has no such filter. The current ten positive sample rows may yield equal totals, but sample equality does not make the SQL definitions interchangeable.
-3. **Planner choice:** Is the rewrite setting enabled? Are statistics adequate? Has an allowed freshness or `grace_period` setting affected eligibility?
-
-Do not use `FROM orders_daily_mv_l2` as “proof” of transparent rewrite, and do not infer rewrite from a descriptive object name or one matching answer.
-
-## 8.5 Observe Three Different Maintenance Paths
-
-The extended Lab uses isolated sources rather than modifying the shared Level 1 input. First it builds a synchronous aggregate index on a Duplicate Key table. After its initial DDL job finishes, a new committed order is included without a separate refresh. The cost moves into write maintenance; `EXPLAIN` still decides whether a compatible read uses that index.
-
-Next, two daily fact partitions join an unpartitioned customer dimension. The asynchronous MV groups by `(order_date, region)` and maps its partitions to the fact date. Adding an order on the second day causes one result partition to be republished. Updating a customer's region invalidates the unpartitioned dependency and causes both result partitions to be republished in this example. One day can have identical values before and after a wider refresh, so value equality alone cannot establish refresh scope.
-
-| Path | Trigger used in the Lab | Evidence to inspect |
+| Change | What Doris can map | What `REFRESH ... AUTO` recomputes, in Lab 8 |
 | --- | --- | --- |
-| Synchronous aggregate index | A committed base-table write after the initial build | Current aggregate and the selected index in `EXPLAIN` |
-| Partitioned asynchronous join MV; one fact date changes | Manual `REFRESH ... AUTO` | Values, partition-identity/version changes, and the task's refresh-partition list |
-| Same MV; unpartitioned dimension changes | Manual `REFRESH ... AUTO` | Both result partitions republished, even if one day's values are unchanged |
+| A new order in February 2's partition of the fact table | February 2 | One partition: `RefreshMode` PARTIAL |
+| Customer 1's region in an unpartitioned customer table | No date | Both partitions: `RefreshMode` COMPLETE |
 
-A replaced partition can retain the same visible version number. Compare partition identity together with visible version. These describe publication, not operator CPU or scan cost. Use task records to explain scope and Query Profile to measure work. The Lab proves these controlled refresh paths; it does not pretend to validate automatic scheduling, refresh-failure recovery, or production latency. The partition mapping and non-partitioned dependency rules are documented in [CREATE ASYNC MATERIALIZED VIEW](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/table-and-view/async-materialized-view/CREATE-ASYNC-MATERIALIZED-VIEW/).
+The second refresh recomputed February 2 although nothing in it changed: equal values before and after do not show how much was recomputed. The task's `NeedRefreshPartitions` does, and a partition that was published again gets a new `PartitionId`. If a day's amount changes from 200.00 to 180.00, a refresh recomputes the day from its current rows; it never adds 180.00 to 200.00.
 
-## Hands-on Lab: From Shared Definition to Verified Materialization
+Lab 8 also shows the other side: a manual-refresh result after a write. Its regular view shows 2 orders and 150.00 at once; its materialized view keeps 1 order and 100.00 until the refresh. A synchronous materialized view has no such gap: the load updates it, and its cost moves into every load.
 
-Open [Lab 8](lab08_views_and_materialized_views.ipynb). It connects to the course database, creates `orders_service_view_l2` and `orders_daily_mv_l2`, checks `mv_infos`, compares direct MV values with a canonical aggregation, and records the `EXPLAIN` plan. A second, isolated `_l2` source then receives a new order: its regular view changes immediately, while its manual-trigger MV changes only after an explicit refresh. It then compares synchronous write maintenance, fact-partition refresh, and a full refresh after an unpartitioned dimension change. The Lab never writes to the Level 1 source table.
+## 8.5 Prove a Rewrite
 
-| Check | Expected observation |
-| --- | --- |
-| Regular view | Ten positive-amount sample rows |
-| Base-table daily aggregation | One day, 10 orders, 1400.00 |
-| Materialized result | Same values as the base-table aggregation |
-| `EXPLAIN` | Record whether the actual scan uses the MV; do not assume it does |
-| Refresh contrast | After a new 50.00 order, the regular view shows 2 / 150.00 while the stored MV still shows 1 / 100.00; after manual refresh both show 2 / 150.00 |
+Dashboards query the view, not the materialized view. When a query asks for something that a materialized view stores, Doris can rewrite the query to read the stored rows instead of the base tables: **transparent rewriting**. Four things are easily confused: the view was created, its refresh finished, a direct query of it returns the right rows, and a query of the base tables or the view was rewritten to use it. The first three do not prove the fourth.
 
-### Independent exercise
+`EXPLAIN` shows the plan of a query without running it. Each scan names the table or materialized view that it reads, and a section lists the materialized views that Doris tried: chosen, usable but not chosen, or not usable, with the reason. Lab 8 explains three queries of `orders_view_l2`:
 
-A consumer now wants to filter the daily result by customer. Is the existing MV sufficient? No: its only columns are date, count, and amount. One option is to aggregate by `(order_date, customer_id)` so a consumer can filter a customer or roll up to a day; this increases stored rows. Another option is a second customer-level MV, which adds storage and refresh work. In either case, do not silently change the existing consumer view's column names or amount meaning.
+| Query of the view | What the plan reads | `orders_daily_mv_l2` |
+| --- | --- | --- |
+| The daily totals | `orders_daily_mv_l2` | Chosen |
+| The totals per day and region | `orders_current` and `order_events` | Not usable: `View dimensions doesn't not cover the query dimensions` |
+| The totals of January 1 alone | `orders_current` and `order_events` | Not usable: `Rewrite compensate predicate by view fail` |
 
-## Module Summary
+The second one cannot be answered: the stored rows have no region, and no rewrite can bring back a column that the materialized view did not keep. The third one surprises: the stored rows have `order_date`, yet a filter on it stopped the rewrite. Doris 4.1.3 turns `DATE(event_time) = '2026-01-01'` into a range on `event_time`, `event_time >= '2026-01-01 00:00:00' AND event_time <= '2026-01-01 23:59:59'`, before it looks for a materialized view, and the stored rows do not keep `event_time`. Over a table with a real `DATE` column, such as Module 9's order fact, the same filter can be applied to the stored rows: measured on 4.1.3, the rewrite then succeeds, although on tiny tables the optimizer may still prefer to read the base table.
 
-- Regular views save definitions and stabilize business meaning; queries still compute from source data.
-- Materialized views store results but incur storage, maintenance, and freshness costs.
-- Synchronous and asynchronous MVs differ in maintenance and supported definitions.
-- Partition-aware incremental refresh narrows the recomputation scope; it is not row-by-row addition to a prior sum.
-- `CREATE`, refresh, direct query, and transparent rewriting are separate checks.
-- A view contract includes grain, filters, units, and ownership; physical optimization must not silently change it.
+When a query is not rewritten, look in this order: is the materialized view ready (`State`, `RefreshState`); does it keep the grain, the columns, and the filters that the query needs; and did the cost-based optimizer simply prefer the base tables, which it may do on tiny tables, listing the view as usable but not chosen? A rewritten plan still says nothing about whether the answer is right: compare the stored rows with the definition, as section 8.3 did.
 
-## Knowledge Quiz 8: Views and Materialized Views
+## 8.6 Keep the Contract
 
-Open [Quiz 8](quiz08_views_and_materialized_views.ipynb) after the reading and Lab. Its six scenario questions cover view types, refresh trade-offs, result checks, rewrite evidence, contract stability, and when precomputation pays off.
+Consumers depend on a view's names and meanings, not on how it is computed. That lets the implementation change underneath: a view's query can start reading a materialized view, or another table, as long as each column keeps its name, its type, and what it means, and the change is checked by comparing the old and the new answer for the same data. Renaming `gross_amount` to `revenue`, or adding `customer_id` to a view whose row is a day, changes the contract, and its consumers must hear about it first.
+
+A new question at a new grain gets a new interface. When a regional dashboard asks for the orders of each day and region, `orders_daily_mv_l2` cannot answer; a second materialized view at that grain can, and Lab 8's practice builds it. It stores more rows than the daily one, and it is one more refresh to schedule and check.
+
+## Lab 8: Share One Definition, Store Its Result, and Check the Rewrite
+
+Open [Lab 8: Share One Definition, Store Its Result, and Check the Rewrite](lab08_views_and_materialized_views.ipynb). You:
+
+1. Compare two answers to "daily orders": 7 or 9 orders on January 1.
+2. Publish the course's definition as the regular view `orders_view_l2`: 10 orders, 1310.00.
+3. Store its daily totals in `orders_daily_mv_l2`, and check its state and rows.
+4. Explain three queries of the view, and see which ones the materialized view answers.
+5. On small tables of their own: watch a manual-refresh result go stale and catch up, a synchronous materialized view that a load updates, and a partitioned refresh of one day against a refresh of both.
+6. Practice: store the totals per day and region, and see the query per region rewritten.
+
+You need the course sandbox from Module 1 and Lab 7's `orders_current` and `order_events`; the Lab changes neither, and its own objects end in `_l2`.
+
+## Summary
+
+- A regular view saves a query and stores nothing, so it is always as fresh and as costly as its tables; a materialized view stores a result, which a load or a refresh keeps up to date.
+- Refresh on the event that consumers wait for, such as a completed batch, or on a schedule they accept; a partitioned materialized view recomputes the partitions that Doris can map to a change, and all of them when it cannot.
+- After `CREATE`, check `State`, `RefreshState`, and `SyncWithBaseTables`, then compare the stored rows with the definition; `tasks('type'='mv')` says why a refresh failed.
+- `EXPLAIN` lists the materialized views that Doris tried and why one was not used: a missing column or grain, a filter that it cannot apply to the stored rows, or a cheaper base table.
+- Change a view's implementation freely, its names and meanings only with its consumers; a new grain is a new interface.
+- Store a result when the same costly query is asked often and its consumers accept a monitored delay, not for one-off questions or tiny tables.
+
+## Quiz 8
+
+Open [Quiz 8: Views and Materialized Views](quiz08_views_and_materialized_views.ipynb). It has six single-choice questions and needs no running environment.
 
 Next module: [Module 9: Warehouse Modeling and Joins](../module09-modeling-and-joins/course.md).
 
-## Official References
+## References
 
-- [Synchronous materialized views](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/sync-materialized-view/)
-- [Asynchronous materialized-view overview](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/overview/)
-- [Asynchronous materialized-view use guide](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/use-guide/)
-- [CREATE ASYNC MATERIALIZED VIEW](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/table-and-view/async-materialized-view/CREATE-ASYNC-MATERIALIZED-VIEW/)
+- [Apache Doris: CREATE VIEW](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/table-and-view/view/CREATE-VIEW/)
+- [Apache Doris: Synchronous materialized views](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/sync-materialized-view/)
+- [Apache Doris: Asynchronous materialized views, overview](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/overview/)
+- [Apache Doris: Asynchronous materialized views, best practices](https://doris.apache.org/docs/4.x/query-acceleration/materialized-view/async-materialized-view/use-guide/)
+- [Apache Doris: CREATE ASYNC MATERIALIZED VIEW](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/table-and-view/async-materialized-view/CREATE-ASYNC-MATERIALIZED-VIEW/)

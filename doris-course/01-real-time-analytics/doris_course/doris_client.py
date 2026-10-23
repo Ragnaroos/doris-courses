@@ -1,7 +1,6 @@
 from __future__ import annotations
 
 import html
-import base64
 import csv
 import http.client
 import io
@@ -11,6 +10,7 @@ import platform
 import re
 import socket
 import subprocess
+import textwrap
 import time
 import urllib.request
 import urllib.parse
@@ -23,6 +23,7 @@ from typing import Mapping, Sequence
 
 import pandas as pd
 import pymysql
+import yaml
 from IPython.display import HTML, Javascript, display
 
 from doris_labkit.db import connect_doris, report_sql_error, sql, sql_string
@@ -35,7 +36,13 @@ from doris_labkit.docker import (
     wait_for_health,
 )
 from doris_labkit import docker as labkit_docker
-from doris_labkit.profiles import normalize_statement, profile_metric, profile_row_sum
+from doris_labkit.profiles import (
+    fetch_profile_text,
+    last_query_id,
+    normalize_statement,
+    profile_metric,
+    profile_row_sum,
+)
 from doris_labkit.results import result_frame, show_frame
 from doris_labkit.shell import run_shell
 from doris_labkit.ui import ReturnLater, card, progress_step, show_log, show_sql, workflow_html
@@ -47,6 +54,11 @@ from . import environment as env
 # Every notebook uses the course root as its runtime workspace, even when the
 # notebook file itself lives several module directories below it.
 LAB_DIR = Path(__file__).resolve().parent.parent
+
+
+def expected_results() -> dict:
+    """Return datasets/expected_results.yaml: the numbers the Labs check."""
+    return yaml.safe_load((LAB_DIR / "datasets/expected_results.yaml").read_text(encoding="utf-8"))
 
 # Styles for the components only this course uses: the cover, flow diagrams,
 # and the load-method matching activity. doris_labkit styles everything else.
@@ -113,48 +125,66 @@ def install_styles() -> None:
     install_shared_styles(ACTIVITY_CSS)
 
 
-def load_env_file(path: Path) -> Mapping[str, str]:
-    values: dict[str, str] = {}
-    if not path.exists():
-        raise FileNotFoundError(f"Missing secrets file: {path}")
-    for raw in path.read_text(encoding="utf-8").splitlines():
-        line = raw.strip()
-        if not line or line.startswith("#"):
-            continue
-        key, separator, value = line.partition("=")
-        if not separator:
-            raise ValueError(f"Invalid line in {path.name}: {raw!r}")
-        values[key.strip()] = value.strip()
-    return values
+class EnvironmentNotReady(RuntimeError):
+    """A step stopped because the environment or its data is not ready.
+
+    The card shown before raising says why and what to do.
+    """
+
+    def _render_traceback_(self) -> list[str]:
+        return [f"Stopped: {self}"]
 
 
-def s3_tvf(config: Mapping[str, str], access_key: str, secret_key: str) -> str:
+class WaitTimedOut(TimeoutError):
+    """A bounded wait ended before Doris reached the expected state.
+
+    The card and table shown before raising describe the last state seen.
+    """
+
+    def _render_traceback_(self) -> list[str]:
+        return [f"Timed out: {self}"]
+
+
+# The tables each Lab reads from earlier Labs: table -> (rows when complete, the Lab that builds it).
+PREREQUISITES = {
+    2: {"events": (10_158_080, "Lab 1 (Start Doris and Build a Baseline Dataset)")},
+    4: {"events": (10_158_080, "Lab 1 (Start Doris and Build a Baseline Dataset)")},
+    5: {"events_modelled": (10_158_080, "Lab 4 (Model Data for Analytical Workloads)")},
+    6: {"events_modelled": (10_158_080, "Lab 4 (Model Data for Analytical Workloads)")},
+    8: {
+        "events_modelled": (10_158_080, "Lab 4 (Model Data for Analytical Workloads)"),
+        "dim_products": (204_231, "Lab 6 (Joining Data in Apache Doris)"),
+    },
+    10: {"events_modelled": (10_158_080, "Lab 4 (Model Data for Analytical Workloads)")},
+}
+
+
+def s3_tvf(config: Mapping[str, str]) -> str:
+    """Return the S3 TVF that reads the course's public bucket without credentials.
+
+    ANONYMOUS stops the BE from trying the AWS default credential chain (for
+    example the EC2 metadata address) before it sends unsigned requests. The
+    two timeouts replace Doris's defaults (1 s to connect, 3 s without data),
+    which fail over a slow network or a proxy with "curlCode: 28".
+    """
     properties = {
         "uri": config["uri"],
         "s3.endpoint": config["endpoint"],
         "s3.region": config["region"],
-        "s3.access_key": access_key,
-        "s3.secret_key": secret_key,
+        "s3.credentials_provider_type": "ANONYMOUS",
+        "s3.connection.timeout": "10000",
+        "s3.connection.request.timeout": "30000",
         "format": config["format"],
     }
     body = ",\n".join(f'    "{key}" = "{sql_string(value)}"' for key, value in properties.items())
     return f"S3(\n{body}\n)"
 
 
-def redacted_s3_config(config: Mapping[str, str]) -> pd.DataFrame:
-    rows = [{"property": key, "value": value} for key, value in config.items()]
-    rows.extend([
-        {"property": "s3.access_key", "value": "•••••••• (loaded from local secrets file)"},
-        {"property": "s3.secret_key", "value": "•••••••• (loaded from local secrets file)"},
-    ])
-    return pd.DataFrame(rows)
-
-
 class DorisLab:
     """Learner-facing façade shared by the Doris course notebooks.
 
     The notebook keeps the SQL visible while this class owns environment
-    branching, credentials, expected values, progress, and styled diagnostics.
+    branching, expected values, progress, and styled diagnostics.
     """
 
     DORIS_IMAGE = env.DORIS_IMAGE
@@ -162,8 +192,9 @@ class DorisLab:
     DORIS_NETWORK = env.DORIS_NETWORK
     FE_VOLUME = env.FE_VOLUME
     BE_VOLUME = env.BE_VOLUME
+    # The course's public bucket; datasets/events.yaml describes the same objects.
     S3_CONFIG = {
-        "uri": "s3://yy-glue-test-us-east-1/doris-course/events/v1/events-*.parquet",
+        "uri": "s3://doris-courses-public-dataset/doris-course/events/v1/events-*.parquet",
         "endpoint": "https://s3.us-east-1.amazonaws.com",
         "region": "us-east-1",
         "format": "parquet",
@@ -175,9 +206,8 @@ class DorisLab:
     EXPECTED_DISTINCT_PRODUCTS = 204_231
     EXPECTED_TOTAL_REVENUE = Decimal("39984455.64")
     EXPECTED_EVENT_COUNTS = {"view": 9_437_184, "cart": 589_824, "purchase": 131_072}
-    SOURCE_TOKEN = "{{COURSE_S3}}"
-    S3_ACCESS_KEY_TOKEN = "{{S3_READ_ONLY_ACCESS_KEY}}"
-    S3_SECRET_KEY_TOKEN = "{{S3_READ_ONLY_SECRET_KEY}}"
+    # The 1,024 records that Lab 3 loads with Stream Load and with Routine Load.
+    LAB3_SAMPLE = expected_results()["lab3_sample"]
 
     def __init__(
         self,
@@ -196,14 +226,6 @@ class DorisLab:
         self._connection_port = connection_port
         self._profile_http_host = profile_http_host or connection_host
         self._profile_http_port = profile_http_port
-        self._source_tvf: str | None = None
-        self._s3_access_key: str | None = None
-        self._s3_secret_key: str | None = None
-        self._redacted_tvf = s3_tvf(
-            self.S3_CONFIG,
-            "{{S3_READ_ONLY_ACCESS_KEY}}",
-            "{{S3_READ_ONLY_SECRET_KEY}}",
-        )
         install_styles()
         card(
             ready_message,
@@ -216,9 +238,14 @@ class DorisLab:
         if log:
             show_log("Diagnostic details", log, opened=True)
 
-    def _secrets(self) -> tuple[str, ...]:
-        keys = (getattr(self, "_s3_access_key", None), getattr(self, "_s3_secret_key", None))
-        return tuple(key for key in keys if key)
+    @staticmethod
+    def _timed_out(title: str, message: str, last_state: pd.DataFrame | None = None,
+                   hint: str = "") -> WaitTimedOut:
+        """Show why a bounded wait ended and return the exception to raise."""
+        card(f"{message} {hint}".strip(), "fail", title)
+        if last_state is not None and not last_state.empty:
+            show_frame("Last state seen", last_state)
+        return WaitTimedOut(message)
 
     def _require_connection(self):
         if self.connection is None:
@@ -246,35 +273,28 @@ class DorisLab:
                 except pymysql.MySQLError:
                     pass
             except (OSError, pymysql.MySQLError) as exc:
-                raise RuntimeError(
-                    "No running Doris server is reachable on "
-                    f"{self._connection_host}:{self._connection_port}. "
-                    "Start this module's Doris environment if it is stopped, then rerun the "
-                    "Notebook initialization cell. A kernel restart clears the Python "
-                    "connection, but it does not delete Docker containers, named volumes, "
-                    "or imported tables."
-                ) from exc
+                self.connection = None
+                address = f"{self._connection_host}:{self._connection_port}"
+                card(
+                    f"Nothing answers on {address}. {self._start_hint()} "
+                    "A kernel restart clears only the Python connection; containers, "
+                    "volumes, and tables remain.",
+                    "fail",
+                    "Doris is not reachable",
+                )
+                raise EnvironmentNotReady(f"Doris is not reachable on {address}.") from exc
         return self.connection
 
-    def _expand_sql(self, statement: str) -> tuple[str, str]:
-        display_statement = statement.replace(self.SOURCE_TOKEN, self._redacted_tvf)
-        requires_s3_credentials = any(token in statement for token in (
-            self.SOURCE_TOKEN,
-            self.S3_ACCESS_KEY_TOKEN,
-            self.S3_SECRET_KEY_TOKEN,
-        ))
-        if not requires_s3_credentials:
-            return statement, display_statement
-        if (
-            self._source_tvf is None
-            or self._s3_access_key is None
-            or self._s3_secret_key is None
-        ):
-            raise RuntimeError("S3 credentials are not loaded. Complete Section 4 before continuing.")
-        executable = statement.replace(self.SOURCE_TOKEN, self._source_tvf)
-        executable = executable.replace(self.S3_ACCESS_KEY_TOKEN, self._s3_access_key)
-        executable = executable.replace(self.S3_SECRET_KEY_TOKEN, self._s3_secret_key)
-        return executable, display_statement
+    def _start_hint(self) -> str:
+        """Say how to start the environment this Lab connects to."""
+        if self._connection_port == env.QUERY_PORT and self._connection_host == "127.0.0.1":
+            return (
+                f"Start the sandbox with the Restart cell at the end of any Lab, or run "
+                f"`docker start {env.DORIS_CONTAINER}`, then rerun this cell. A new sandbox "
+                "comes from Lab 1, Section 2. If you set DORIS_RTA_QUERY_PORT, start Jupyter "
+                "with the same value."
+            )
+        return "Start the Module 9 cluster with Section 1.1 of Lab 9, then rerun this cell."
 
     def sql(
         self,
@@ -302,7 +322,6 @@ class DorisLab:
                 return self.tablet_layout_summary(table_name, title=title)
             raise ValueError(f"Unknown metadata view: {metadata_view!r}")
         connection = self._require_connection()
-        executable, visible = self._expand_sql(statement.strip())
         normalized = " ".join(statement.upper().split())
         if columns is None and normalized == "SHOW FRONTENDS":
             columns = ["Name", "Host", "Role", "IsMaster", "Join", "Alive", "Version"]
@@ -312,25 +331,23 @@ class DorisLab:
             ]
         return sql(
             connection,
-            executable,
+            statement.strip(),
             title=title,
             show_statement=False,
             final=final,
             columns=columns,
-            display_statement=visible,
-            secrets=self._secrets(),
         )
 
     def query(self, statement: str):
         """Execute a SQL query and return all rows without displaying them."""
         connection = self._require_connection()
-        executable, visible = self._expand_sql(statement.strip())
+        statement = statement.strip()
         with connection.cursor() as cursor:
             try:
-                cursor.execute(executable)
+                cursor.execute(statement)
                 rows = cursor.fetchall() if cursor.description else []
             except pymysql.MySQLError as error:
-                report_sql_error(None, visible, error, secrets=self._secrets())
+                report_sql_error(None, statement, error)
                 raise
             if cursor.description is None:
                 raise ValueError("query() requires a statement that returns rows.")
@@ -405,15 +422,12 @@ class DorisLab:
 
     def execute(self, statement: str, *, show_errors: bool = True) -> int:
         connection = self._require_connection()
-        executable, visible = self._expand_sql(statement.strip())
         return sql(
             connection,
-            executable,
+            statement.strip(),
             show_statement=False,
             quiet_success=True,
-            display_statement=visible,
             show_errors=show_errors,
-            secrets=self._secrets(),
         )
 
     def insert(
@@ -421,32 +435,12 @@ class DorisLab:
         statement: str,
         *,
         title: str = "Insert completed",
-        low_memory_s3: bool = False,
         expected_rows: int | None = None,
         show: bool = True,
     ) -> int:
         """Run a learner-visible data insert and report its wall-clock duration."""
         started_at = time.perf_counter()
-        connection = self._require_connection()
-        previous_settings: dict[str, object] = {}
-        if low_memory_s3:
-            with connection.cursor() as cursor:
-                for variable, value in (
-                    ("parallel_pipeline_task_num", 1),
-                    ("max_file_scanners_concurrency", 2),
-                ):
-                    cursor.execute(f"SHOW VARIABLES LIKE '{variable}'")
-                    row = cursor.fetchone()
-                    if row:
-                        previous_settings[variable] = row.get("Value")
-                    cursor.execute(f"SET {variable} = {value}")
-        try:
-            affected = self.execute(statement)
-        finally:
-            if previous_settings:
-                with connection.cursor() as cursor:
-                    for variable, value in previous_settings.items():
-                        cursor.execute(f"SET {variable} = {int(value)}")
+        affected = self.execute(statement)
         if expected_rows is not None and affected != expected_rows:
             raise AssertionError(
                 f"{title} affected {affected:,} rows; expected {expected_rows:,}."
@@ -473,7 +467,6 @@ class DorisLab:
         *,
         expected_rows: int | None = None,
         title: str | None = None,
-        low_memory_s3: bool = False,
     ) -> int:
         """Populate a derived course table without duplicating rows on rerun."""
         table_name = self._safe_table_name(table_name)
@@ -507,7 +500,6 @@ class DorisLab:
         return self.insert(
             statement,
             title=title or f"Load {table_name}",
-            low_memory_s3=low_memory_s3,
             expected_rows=expected_rows,
         )
 
@@ -606,6 +598,7 @@ class DorisLab:
             {"design choice": "Replica allocation", "resolved value": replicas},
         ])
         show_frame(title or f"{table_name} design summary", frame)
+        show_log(f"Complete SHOW CREATE TABLE {table_name} output", ddl)
         return frame
 
     def partition_layout_summary(
@@ -653,6 +646,10 @@ class DorisLab:
             {"partition metric": "Logical rows", "observed value": f"{row_count:,}"},
         ])
         show_frame(title or f"{table_name} partition summary", frame)
+        raw = pd.DataFrame(partitions)
+        columns = [c for c in ("PartitionName", "State", "Range", "DistributionKey", "Buckets", "RowCount")
+                   if c in raw.columns]
+        show_log(f"Complete SHOW PARTITIONS FROM {table_name} output", raw[columns].to_string(index=False))
         return frame
 
     def tablet_layout_summary(
@@ -694,6 +691,10 @@ class DorisLab:
             },
         ])
         show_frame(title or f"{table_name} tablet summary", frame)
+        raw = pd.DataFrame(tablets)
+        columns = [c for c in ("TabletId", "BackendId", "Version", "RowCount", "VersionCount", "LocalDataSize")
+                   if c in raw.columns]
+        show_log(f"Complete SHOW TABLETS FROM {table_name} output", raw[columns].to_string(index=False))
         return frame
 
     def tablet_replica_placement(
@@ -737,6 +738,7 @@ class DorisLab:
         frame = pd.DataFrame(rows)
         if show:
             show_frame(title or f"{table_name} tablet-to-replica placement", frame)
+            self.show_statements(f"SHOW TABLETS FROM {table_name}", "SHOW BACKENDS")
         return frame
 
     def tablet_replica_health_summary(
@@ -789,6 +791,7 @@ class DorisLab:
             ),
         }])
         show_frame(title or f"{table_name} replica health", frame)
+        self.show_statements(f"SHOW TABLETS FROM {self._safe_table_name(table_name)}", "SHOW BACKENDS")
         return frame
 
     def tablet_replica_backend_summary(
@@ -841,6 +844,7 @@ class DorisLab:
 
         frame = pd.DataFrame(rows)
         show_frame(title or f"{table_name} replica versions by BE", frame)
+        self.show_statements(f"SHOW TABLETS FROM {table_name}", "SHOW BACKENDS")
         return frame
 
     def wait_for_tablet_rows(
@@ -868,7 +872,8 @@ class DorisLab:
                 f"{expected_rows:,}. Complete the preceding insert cell first."
             )
 
-        deadline = time.monotonic() + timeout_seconds
+        started = time.monotonic()
+        deadline = started + timeout_seconds
         metadata_rows = None
         while time.monotonic() < deadline:
             tablets = self._metadata_rows(f"SHOW TABLETS FROM `{table_name}`")
@@ -882,13 +887,29 @@ class DorisLab:
                     per_tablet.get(tablet_id, 0), int(row["RowCount"])
                 )
             metadata_rows = sum(per_tablet.values())
-            if metadata_rows == expected_rows:
+            partitions = self._metadata_rows(f"SHOW PARTITIONS FROM `{table_name}`")
+            partition_rows = sum(max(int(row.get("RowCount", 0)), 0) for row in partitions)
+            if metadata_rows == expected_rows and partition_rows == expected_rows:
+                card(
+                    f"{len(per_tablet)} tablets and {len(partitions)} partition(s) report all "
+                    f"{expected_rows:,} rows (waited {time.monotonic() - started:.0f} seconds)",
+                    "ok",
+                    f"Tablet reports for {table_name} are complete",
+                )
+                self.show_statements(
+                    f"SELECT COUNT(*) AS row_count FROM {table_name}",
+                    f"SHOW TABLETS FROM {table_name}",
+                    f"SHOW PARTITIONS FROM {table_name}",
+                    title="SQL behind this check (the two SHOW statements repeat until their counts match)",
+                )
                 return
             time.sleep(2)
-        raise TimeoutError(
-            f"{table_name} contains the expected {query_rows:,} committed rows, but "
-            f"Tablet metadata reported {metadata_rows}; expected {expected_rows:,} "
-            f"within {timeout_seconds} seconds."
+        raise self._timed_out(
+            "Tablet reports are late",
+            f"{table_name} has the expected {query_rows:,} committed rows, but after "
+            f"{timeout_seconds} seconds its tablets report {metadata_rows} rows instead of "
+            f"{expected_rows:,}.",
+            hint="Each BE reports tablet statistics about once a minute; rerun this cell.",
         )
 
     def wait_for_replica_health(
@@ -911,9 +932,12 @@ class DorisLab:
             ):
                 return placement
             time.sleep(1)
-        raise TimeoutError(
-            f"Replica health for {table_name} did not reach alive={expected_alive}, "
-            f"version_complete={expected_complete}; last placement={placement.to_dict('records')!r}"
+        raise self._timed_out(
+            "Replicas did not become healthy",
+            f"After {timeout_seconds} seconds, the tablets of {table_name} did not all have "
+            f"{expected_alive} alive and {expected_complete} up-to-date replicas.",
+            placement,
+            hint="Check the containers with `docker compose --file level3/module09-sharding-replication/compose.multinode.yml ps` and read the logs of the one that is not running.",
         )
 
     def wait_for_node_state(
@@ -970,11 +994,18 @@ class DorisLab:
                 break
             time.sleep(1)
         else:
-            raise TimeoutError(
-                f"{normalized} did not reach total={expected_total}, alive={expected_alive}, "
-                f"masters={expected_masters}, roles={expected_roles}, "
-                f"same_version={require_same_version}; last rows={rows!r}; "
-                f"last error={last_error!r}"
+            columns = ["Name", "Host", "Role", "IsMaster", "Alive", "Version", "BackendId"]
+            last = pd.DataFrame(rows)
+            last = last[[column for column in columns if column in last.columns]]
+            expected = f"{expected_alive} of {expected_total} alive"
+            if expected_masters is not None:
+                expected += f", {expected_masters} Master"
+            error = f" The last attempt failed: {last_error}." if last_error else ""
+            raise self._timed_out(
+                "The cluster did not reach the expected state",
+                f"After {timeout_seconds} seconds, {normalized} did not show {expected}.{error}",
+                last,
+                hint="Check the containers with `docker compose --file level3/module09-sharding-replication/compose.multinode.yml ps` and read the logs of the one that is not running.",
             )
         frame = pd.DataFrame(rows)
         columns = (
@@ -1010,15 +1041,21 @@ class DorisLab:
                 break
             time.sleep(1)
         else:
-            raise TimeoutError(
-                f"Only {len(ready) if 'ready' in locals() else 0}/{expected_backends} BEs "
-                f"reported usable storage; last rows={rows!r}"
+            last = pd.DataFrame(rows)
+            last = last[[c for c in ("BackendId", "Host", "Alive", "AvailCapacity", "TotalCapacity")
+                         if c in last.columns]]
+            raise self._timed_out(
+                "BE storage is not ready",
+                f"After {timeout_seconds} seconds, not all {expected_backends} BEs reported usable storage.",
+                last,
+                hint="Check the containers with `docker compose --file level3/module09-sharding-replication/compose.multinode.yml ps` and read the logs of the one that is not running.",
             )
         frame = pd.DataFrame(rows)[
             ["BackendId", "Host", "Alive", "AvailCapacity", "TotalCapacity"]
         ]
         if show:
             show_frame(title, frame)
+            self.show_statements("SHOW BACKENDS")
         return frame
 
     def environment_resource_summary(
@@ -1122,6 +1159,10 @@ class DorisLab:
             })
         frame = pd.DataFrame(rows)
         show_frame("Physical layout comparison", frame)
+        self.show_statements(*(
+            statement for name in table_names
+            for statement in (f"SHOW PARTITIONS FROM {name}", f"SHOW TABLETS FROM {name}")
+        ))
         return frame
 
     @staticmethod
@@ -1245,9 +1286,8 @@ class DorisLab:
         if not normalized.upper().startswith("EXPLAIN"):
             raise ValueError("An EXPLAIN statement is required.")
         connection = self._require_connection()
-        executable, _visible = self._expand_sql(normalized)
         with connection.cursor() as cursor:
-            cursor.execute(executable)
+            cursor.execute(normalized)
             records = cursor.fetchall()
         plan = "\n".join(str(next(iter(record.values()))) for record in records)
         show_log(title, plan, opened=True)
@@ -1307,64 +1347,55 @@ class DorisLab:
 
     _normalize_statement = staticmethod(normalize_statement)
 
-    def _query_profiles(self) -> list[dict[str, object]]:
-        connection = self._require_connection()
-        with connection.cursor() as cursor:
-            cursor.execute("SHOW QUERY PROFILE")
-            return list(cursor.fetchall())
-
-    def _latest_profile_id(
-        self,
-        statement: str,
-        *,
-        exclude: set[str] | None = None,
-        timeout_seconds: int = 8,
-    ) -> str:
-        target = self._normalize_statement(statement)
-        excluded = exclude or set()
-        deadline = time.monotonic() + timeout_seconds
-        while time.monotonic() < deadline:
-            for profile in self._query_profiles():
-                profile_id = str(profile["Profile ID"])
-                candidate = str(profile.get("Sql Statement", ""))
-                if profile_id not in excluded and self._normalize_statement(candidate) == target:
-                    return profile_id
-            time.sleep(0.2)
-        raise RuntimeError("The newly completed query was not found in SHOW QUERY PROFILE.")
+    # Session settings for reading a query's scan work from its Query Profile:
+    # collect the Profile and stop the caches from answering without a scan.
+    PROFILE_SETTINGS = {
+        "enable_profile": "true",
+        "profile_level": "2",
+        "enable_sql_cache": "false",
+        "enable_query_cache": "false",
+        "enable_condition_cache": "false",
+    }
 
     _profile_metric = staticmethod(profile_metric)
 
     _profile_row_sum = staticmethod(profile_row_sum)
 
-    def _profile_text(self, profile_id: str, *, timeout_seconds: int = 20) -> str:
-        token = base64.b64encode(b"root:").decode("ascii")
-        url = (
-            f"http://{self._profile_http_host}:{self._profile_http_port}"
-            f"/rest/v2/manager/query/profile/text/{profile_id}"
+    def show_statements(self, *statements: str, title: str = "SQL behind this result") -> None:
+        """Show, folded, the statements a step ran, ready to paste into a MySQL client."""
+        text = "\n\n".join(
+            statement.strip().rstrip(";") + ";" for statement in statements if statement.strip()
         )
+        show_log(title, text)
+
+    def profile_command(self, profile_id: str) -> str:
+        """Return the curl command that prints one query's Profile text."""
+        return f'curl -u root: "{self.fe_http_url}/api/profile/text?query_id={profile_id}"'
+
+    def _profile_text(self, profile_id: str, *, timeout_seconds: int = 20) -> str:
+        """Return the Profile text of one finished query from the FE HTTP API.
+
+        The BEs report their part after the query ends, so the text is read
+        again until it contains a scan operator.
+        """
         deadline = time.monotonic() + timeout_seconds
         last_error: Exception | None = None
         while time.monotonic() < deadline:
             try:
-                request = urllib.request.Request(
-                    url,
-                    headers={"Authorization": f"Basic {token}"},
-                )
-                with urllib.request.urlopen(request, timeout=5) as response:
-                    payload = json.load(response)
-                profile = str(payload.get("data", {}).get("profile", ""))
+                profile = fetch_profile_text(self.fe_http_url, profile_id, timeout_seconds=0)
+            except (OSError, urllib.error.URLError, http.client.HTTPException) as exc:
+                last_error = exc
+            else:
                 if "OLAP_SCAN_OPERATOR" in profile:
                     return profile
-                if "Is Cached: Yes" in profile and "Total Instances Num: 0" in profile:
+                if "Is Cached: Yes" in profile:
                     raise RuntimeError(
                         "The query used SQL Cache, so Doris did not run a new BE scan operator."
                     )
-            except Exception as exc:  # profile materialization can lag the query briefly
-                last_error = exc
-                if "used SQL Cache" in str(exc):
-                    raise
             time.sleep(0.4)
-        raise RuntimeError(f"The Query Profile was not ready: {last_error or 'timed out'}")
+        raise RuntimeError(
+            f"The Query Profile {profile_id} was not ready: {last_error or 'no scan operator yet'}"
+        )
 
     def show_join_runtime_filter_profile(
         self,
@@ -1381,71 +1412,58 @@ class DorisLab:
             raise ValueError("A SELECT statement is required.")
 
         connection = self._require_connection()
-        settings = {
-            "enable_profile": "true",
-            "profile_level": "2",
-            "enable_condition_cache": "false",
-            "enable_query_cache": "false",
-            "enable_sql_cache": "false",
-        }
-        originals: dict[str, str] = {}
-        try:
-            with connection.cursor() as cursor:
-                for name, value in settings.items():
-                    cursor.execute(f"SHOW VARIABLES LIKE '{name}'")
-                    row = cursor.fetchone()
-                    if row is None:
-                        raise RuntimeError(f"Doris did not expose the session variable {name}.")
-                    originals[name] = str(row["Value"])
-                    cursor.execute(f"SET {name} = {value}")
-
-            existing_ids = {str(row["Profile ID"]) for row in self._query_profiles()}
+        with self.session_settings(self.PROFILE_SETTINGS):
             with connection.cursor() as cursor:
                 cursor.execute(query)
                 result = cursor.fetchone()
-
-            profile_id = self._latest_profile_id(query, exclude=existing_ids)
+            profile_id = last_query_id(connection)
             profile = self._profile_text(profile_id)
-            merged = profile.split("MergedProfile:", 1)[-1].split("DetailProfile", 1)[0]
-            scan_header = re.search(
-                rf"(?m)^\s*OLAP_SCAN_OPERATOR\([^\n]*table_name={re.escape(probe_table)}\(",
-                merged,
-            )
-            if scan_header is None:
-                raise RuntimeError(f"The Profile has no merged Scan for {probe_table}.")
+        merged = profile.split("MergedProfile:", 1)[-1].split("DetailProfile", 1)[0]
+        scan_header = re.search(
+            rf"(?m)^\s*OLAP_SCAN_OPERATOR\([^\n]*table_name={re.escape(probe_table)}\(",
+            merged,
+        )
+        if scan_header is None:
+            raise RuntimeError(f"The Profile has no merged Scan for {probe_table}.")
 
-            join_header = merged.rfind("HASH_JOIN_OPERATOR(", 0, scan_header.start())
-            join_block = merged[join_header:scan_header.start()] if join_header >= 0 else ""
-            next_operator = re.search(
-                r"(?m)^\s*[A-Z][A-Z_]+_OPERATOR\(",
-                merged[scan_header.end():],
-            )
-            scan_end = (
-                scan_header.end() + next_operator.start()
-                if next_operator else len(merged)
-            )
-            scan_block = merged[scan_header.start():scan_end]
-            join_lines = [
-                line for line in join_block.splitlines()
-                if "HASH_JOIN_OPERATOR(" in line or re.search(r"- ProbeRows:", line)
-            ]
-            scan_lines = [
-                line for line in scan_block.splitlines()
-                if "OLAP_SCAN_OPERATOR(" in line
-                or re.search(r"- (?:RowsProduced|ScanRows):", line)
-                or re.search(r"- RF\d+ (?:InputRows|FilterRows):", line)
-            ]
-            if not any(re.search(r"- RF\d+ FilterRows:", line) for line in scan_lines):
-                raise RuntimeError("The probe Scan Profile has no Runtime Filter row counters.")
-            excerpt = "\n".join(join_lines + scan_lines)
-            result_text = ", ".join(f"{name}={value}" for name, value in (result or {}).items())
-            print(f"Query result: {result_text}")
-            show_log(title, excerpt, opened=True)
-            return excerpt
-        finally:
-            with connection.cursor() as cursor:
-                for name, value in originals.items():
-                    cursor.execute(f"SET {name} = {value}")
+        join_header = merged.rfind("HASH_JOIN_OPERATOR(", 0, scan_header.start())
+        join_block = merged[join_header:scan_header.start()] if join_header >= 0 else ""
+        next_operator = re.search(
+            r"(?m)^\s*[A-Z][A-Z_]+_OPERATOR\(",
+            merged[scan_header.end():],
+        )
+        scan_end = (
+            scan_header.end() + next_operator.start()
+            if next_operator else len(merged)
+        )
+        scan_block = merged[scan_header.start():scan_end]
+        join_lines = [
+            line for line in join_block.splitlines()
+            if "HASH_JOIN_OPERATOR(" in line or re.search(r"- ProbeRows:", line)
+        ]
+        scan_lines = [
+            line for line in scan_block.splitlines()
+            if "OLAP_SCAN_OPERATOR(" in line
+            or re.search(r"- (?:RowsProduced|ScanRows):", line)
+            or re.search(r"- RF\d+ (?:InputRows|FilterRows):", line)
+        ]
+        if not any(re.search(r"- RF\d+ FilterRows:", line) for line in scan_lines):
+            raise RuntimeError("The probe Scan Profile has no Runtime Filter row counters.")
+        excerpt = "\n".join(join_lines + scan_lines)
+        result_text = ", ".join(f"{name}={value}" for name, value in (result or {}).items())
+        print(f"Query result: {result_text}")
+        show_log(title, excerpt, opened=True)
+        self._show_profile_statements(query, profile_id)
+        return excerpt
+
+    def _show_profile_statements(self, query: str, profile_id: str) -> None:
+        """Show the SQL and the command used to capture one query's Profile."""
+        settings = [f"SET {name} = {value}" for name, value in self.PROFILE_SETTINGS.items()]
+        self.show_statements(
+            *settings, query, "SELECT last_query_id()",
+            title="SQL run to capture this Profile; the settings then return to their earlier values",
+        )
+        show_log(f"Command that prints this Profile · {profile_id}", self.profile_command(profile_id))
 
     def compare_profiles(
         self,
@@ -1455,34 +1473,16 @@ class DorisLab:
     ) -> pd.DataFrame:
         """Run comparable queries and summarize only their OLAP scan evidence."""
         connection = self._require_connection()
-        controlled_settings = {
-            "enable_profile": "true",
-            "profile_level": "2",
-            "enable_condition_cache": "false",
-            "enable_query_cache": "false",
-            "enable_sql_cache": "false",
-        }
-        original_settings: dict[str, str] = {}
-        with connection.cursor() as cursor:
-            for name, value in controlled_settings.items():
-                cursor.execute(f"SHOW VARIABLES LIKE '{name}'")
-                row = cursor.fetchone()
-                if row is None:
-                    raise RuntimeError(f"Doris did not expose the required session variable {name}.")
-                original_settings[name] = str(row["Value"])
-                cursor.execute(f"SET {name} = {value}")
         rows: list[dict[str, object]] = []
-        profile_ids: list[str] = []
-        try:
+        commands: list[str] = []
+        executed: list[str] = []
+        with self.session_settings(self.PROFILE_SETTINGS):
             for label, statement in cases:
                 query = statement.strip().rstrip(";")
-                existing_profile_ids = {
-                    str(profile["Profile ID"]) for profile in self._query_profiles()
-                }
                 with connection.cursor() as cursor:
                     cursor.execute(query)
                     result = cursor.fetchone() or {}
-                profile_id = self._latest_profile_id(query, exclude=existing_profile_ids)
+                profile_id = last_query_id(connection)
                 profile = self._profile_text(profile_id)
                 merged = profile
                 if "MergedProfile:" in merged:
@@ -1497,19 +1497,27 @@ class DorisLab:
                     "rows_read": self._profile_row_sum(profile, "RowsRead"),
                     "scan_bytes": self._profile_metric(merged, "ScanBytes"),
                 })
-                profile_ids.append(f"{label}: {profile_id}")
-        finally:
-            with connection.cursor() as cursor:
-                for name, value in original_settings.items():
-                    cursor.execute(f"SET {name} = {value}")
+                executed += [f"-- {label}\n{textwrap.dedent(statement).strip()}", "SELECT last_query_id()"]
+                commands.append(f"# {label}\n{self.profile_command(profile_id)}")
         frame = pd.DataFrame(rows)
         show_frame(title, frame)
-        show_log("Profile IDs for optional inspection in the FE web UI", "\n".join(profile_ids))
+        self.show_statements(
+            *(f"SET {name} = {value}" for name, value in self.PROFILE_SETTINGS.items()),
+            *executed,
+            title="SQL run by this comparison; the settings then return to their earlier values",
+        )
+        show_log("Commands that print each Query Profile", "\n\n".join(commands))
         return frame
 
     def shell(self, script: str, *, title: str) -> subprocess.CompletedProcess[str]:
-        """Run learner-visible Bash from the course root with live progress."""
-        return run_shell(script, title=title, cwd=self.lab_dir)
+        """Run learner-visible Bash from the course root with live progress.
+
+        A failing script already shows its log, so the stop is one line.
+        """
+        try:
+            return run_shell(script, title=title, cwd=self.lab_dir)
+        except RuntimeError as exc:
+            raise EnvironmentNotReady(f"{title} failed; the log above shows why.") from exc
 
     def load_method_quiz(self) -> None:
         """Match visible workload requirements to load methods."""
@@ -1869,10 +1877,9 @@ class DorisLab:
     ) -> str:
         """Run an intentionally invalid query and render its expected diagnostic compactly."""
         connection = self._require_connection()
-        executable, _visible = self._expand_sql(statement.strip())
         try:
             with connection.cursor() as cursor:
-                cursor.execute(executable)
+                cursor.execute(statement.strip())
         except pymysql.MySQLError as exc:
             message = str(exc)
             if contains.lower() not in message.lower():
@@ -1948,11 +1955,11 @@ LIMIT 10
     def _validate_fixture(path: Path, kind: str) -> int:
         text = path.read_text(encoding="utf-8")
         lines = [line for line in text.splitlines() if line.strip()]
-        if kind in {"stream_csv", "stream_malformed_csv", "group_commit_csv"}:
+        sample = DorisLab.LAB3_SAMPLE
+        if kind in {"stream_csv", "stream_malformed_csv"}:
             expected_rows = {
-                "stream_csv": 1024,
-                "stream_malformed_csv": 10,
-                "group_commit_csv": 2,
+                "stream_csv": sample["rows"],
+                "stream_malformed_csv": sample["malformed_rows"],
             }[kind]
             fields = [line.split("|") for line in lines]
             if len(fields) != expected_rows or any(len(row) != 7 for row in fields):
@@ -1964,32 +1971,90 @@ LIMIT 10
                     raise ValueError("The Stream Load fixture is not the authored Lab 1/2 sample.")
                 if any(row[6] == "not-a-number" for row in fields):
                     raise ValueError("The main Stream Load fixture must contain only valid rows.")
-            elif kind == "stream_malformed_csv":
+                DorisLab._check_sample(
+                    path.name,
+                    [row[1] for row in fields],
+                    [row[0] for row in fields],
+                    [Decimal(row[6]) for row in fields],
+                )
+            else:
                 if fields[0][1] != "1" or fields[-1][1] != "10":
                     raise ValueError("The malformed fixture is not the authored ten-row sample.")
-                if sum(row[6] == "not-a-number" for row in fields) != 1:
+                if sum(row[6] == "not-a-number" for row in fields) != sample["malformed_filtered_rows"]:
                     raise ValueError("The malformed fixture must contain one invalid revenue value.")
-            elif {row[1] for row in fields} != {"10027009", "10027010"}:
-                raise ValueError("The Group Commit fixture contains unexpected event_id values.")
             return len(fields)
         if kind == "routine_json":
-            if len(lines) != 1024:
-                raise ValueError(f"{path.name} must contain 1024 JSON messages.")
+            if len(lines) != sample["rows"]:
+                raise ValueError(f"{path.name} must contain {sample['rows']} JSON messages.")
             records = [json.loads(line) for line in lines]
             if records[0]["meta"]["event_id"] != 1 or records[-1]["meta"]["event_id"] != 10027072:
                 raise ValueError("The Routine Load fixture is not the authored Lab 1/2 sample.")
-            if len({record["meta"]["event_id"] for record in records}) != 1024:
-                raise ValueError("The Routine Load fixture must contain 1024 distinct event IDs.")
             if any(not isinstance(record["event"]["revenue"], (int, float)) for record in records):
                 raise ValueError("The Routine Load fixture must contain only valid numeric revenue values.")
+            DorisLab._check_sample(
+                path.name,
+                [record["meta"]["event_id"] for record in records],
+                [record["meta"]["occurred_at"].replace("T", " ") for record in records],
+                [Decimal(str(record["event"]["revenue"])) for record in records],
+            )
             return len(records)
         raise ValueError(f"Unknown fixture kind: {kind!r}")
+
+    @staticmethod
+    def _check_sample(name: str, event_ids: list, event_times: list[str], revenues: list[Decimal]) -> None:
+        """Require a Lab 3 file to hold exactly the records in datasets/expected_results.yaml."""
+        sample = DorisLab.LAB3_SAMPLE
+        observed = {
+            "distinct events": (len(set(event_ids)), sample["distinct_events"]),
+            "earliest event time": (min(event_times), sample["min_event_time"]),
+            "latest event time": (max(event_times), sample["max_event_time"]),
+            "total revenue": (sum(revenues, Decimal("0")), Decimal(sample["total_revenue"])),
+        }
+        wrong = [
+            f"{label} {actual}, expected {expected}"
+            for label, (actual, expected) in observed.items() if actual != expected
+        ]
+        if wrong:
+            raise ValueError(f"{name} is not the Lab 3 sample: " + "; ".join(wrong) + ".")
+
+    def verify_lab3_sample(self, statement: str, *, title: str) -> pd.DataFrame:
+        """Run the visible validation query and compare it with the Lab 3 sample."""
+        result = self.sql(statement, title=title)
+        row = result.iloc[0]
+        sample = self.LAB3_SAMPLE
+        observed = {
+            "loaded_rows": (int(row["loaded_rows"]), sample["rows"]),
+            "distinct_events": (int(row["distinct_events"]), sample["distinct_events"]),
+            "min_event_time": (str(row["min_event_time"]), sample["min_event_time"]),
+            "max_event_time": (str(row["max_event_time"]), sample["max_event_time"]),
+            "total_revenue": (Decimal(str(row["total_revenue"])), Decimal(sample["total_revenue"])),
+        }
+        wrong = [
+            f"{column} is {actual}, expected {expected}"
+            for column, (actual, expected) in observed.items() if actual != expected
+        ]
+        if wrong:
+            raise AssertionError(
+                "The loaded rows differ from the sample in datasets/expected_results.yaml: "
+                + "; ".join(wrong) + "."
+            )
+        card(
+            f"{sample['rows']:,} rows from {sample['min_event_time']} to {sample['max_event_time']}, "
+            f"total revenue {Decimal(sample['total_revenue']):,}",
+            "ok",
+            "The loaded rows match the 1,024-record sample",
+        )
+        return result
 
     def fetch_fixtures(
         self,
         fixtures: Sequence[tuple[str, str, str, str]],
     ) -> pd.DataFrame:
-        """Download validated course fixtures using a same-directory atomic rename."""
+        """Download validated course fixtures using a same-directory atomic rename.
+
+        The files are public objects in the course bucket, so a plain HTTPS
+        GET is enough; no credentials are involved.
+        """
         rows: list[dict[str, str]] = []
         for label, remote_url, local_path, kind in fixtures:
             destination = (self.lab_dir / local_path).resolve()
@@ -2001,40 +2066,21 @@ LIMIT 10
                 action = "downloaded"
                 temporary = destination.with_name(destination.name + ".part")
                 try:
-                    if remote_url.startswith("s3://"):
-                        try:
-                            import boto3
-                        except ImportError as exc:
-                            raise RuntimeError(
-                                "boto3 is required for the private course S3 fixtures. "
-                                "Install requirements.txt and rerun this cell."
-                            ) from exc
-                        secrets = load_env_file(self.lab_dir / "course_secrets.env")
-                        access_key = secrets.get("S3_READ_ONLY_ACCESS_KEY", "")
-                        secret_key = secrets.get("S3_READ_ONLY_SECRET_KEY", "")
-                        if not access_key or not secret_key:
-                            raise RuntimeError(
-                                "Fill both read-only S3 credentials in course_secrets.env "
-                                "before downloading the Lab 3 fixtures."
-                            )
-                        parsed = urllib.parse.urlsplit(remote_url)
-                        client = boto3.client(
-                            "s3",
-                            endpoint_url=self.S3_CONFIG["endpoint"],
-                            region_name=self.S3_CONFIG["region"],
-                            aws_access_key_id=access_key,
-                            aws_secret_access_key=secret_key,
-                        )
-                        client.download_file(
-                            parsed.netloc,
-                            parsed.path.lstrip("/"),
-                            str(temporary),
-                        )
-                    else:
-                        with urllib.request.urlopen(remote_url, timeout=60) as response:
-                            temporary.write_bytes(response.read())
+                    with urllib.request.urlopen(remote_url, timeout=60) as response:
+                        temporary.write_bytes(response.read())
                     row_count = self._validate_fixture(temporary, kind)
                     os.replace(temporary, destination)
+                except OSError as exc:
+                    temporary.unlink(missing_ok=True)
+                    host = urllib.parse.urlsplit(remote_url).hostname
+                    card(
+                        f"Could not download {remote_url}: {getattr(exc, 'reason', exc)}. Check that this "
+                        f"computer can reach {host} over HTTPS (a proxy, VPN, or firewall can block it), "
+                        "then rerun this cell.",
+                        "fail",
+                        f"{label} was not downloaded",
+                    )
+                    raise EnvironmentNotReady(f"{label} was not downloaded.") from exc
                 except Exception:
                     temporary.unlink(missing_ok=True)
                     raise
@@ -2052,7 +2098,7 @@ LIMIT 10
     def preview_fixture(self, local_path: str, kind: str, *, limit: int | None = 10) -> pd.DataFrame:
         path = (self.lab_dir / local_path).resolve()
         self._validate_fixture(path, kind)
-        if kind in {"stream_csv", "stream_malformed_csv", "group_commit_csv"}:
+        if kind in {"stream_csv", "stream_malformed_csv"}:
             columns = [
                 "event_time", "event_id", "user_id", "event_type",
                 "region", "product_id", "revenue",
@@ -2182,21 +2228,26 @@ LIMIT 10
         show_sql("Content returned by ErrorURL", error_log)
         return error_log
 
-    def sync_mv_jobs(self, table, view, *, database="doris_course"):
-        """Return build jobs for one synchronous materialized view."""
+    def _sync_mv_jobs_sql(self, table, view, database="doris_course"):
         table = self._safe_table_name(table)
         view = self._safe_table_name(view)
         database = self._safe_table_name(database)
-        return [row for row in self._metadata_rows(
-            f"SHOW ALTER TABLE MATERIALIZED VIEW FROM `{database}`"
-        ) if row["TableName"] == table and row["RollupIndexName"] == view]
+        return (f"SHOW ALTER TABLE MATERIALIZED VIEW FROM `{database}`\n"
+                f"WHERE TableName = '{table}' AND RollupIndexName = '{view}'")
+
+    def _async_mv_tasks_sql(self, view, database="doris_course"):
+        view = self._safe_table_name(view)
+        database = self._safe_table_name(database)
+        return (f'SELECT * FROM tasks("type"="mv")\n'
+                f"WHERE MvDatabaseName = '{database}' AND MvName = '{view}'")
+
+    def sync_mv_jobs(self, table, view, *, database="doris_course"):
+        """Return build jobs for one synchronous materialized view."""
+        return self._metadata_rows(self._sync_mv_jobs_sql(table, view, database))
 
     def async_mv_tasks(self, view, *, database="doris_course"):
         """Return refresh tasks for one asynchronous materialized view."""
-        view = self._safe_table_name(view)
-        database = self._safe_table_name(database)
-        return self._metadata_rows(f"""SELECT * FROM tasks("type"="mv")
-            WHERE MvDatabaseName = '{database}' AND MvName = '{view}'""")
+        return self._metadata_rows(self._async_mv_tasks_sql(view, database))
 
     def capture_query(self, statement, *, settings=None):
         """Capture the result, plan and fresh runtime Profile on this lab session."""
@@ -2247,7 +2298,14 @@ LIMIT 10
                 if state in failures:
                     raise RuntimeError(f"Background job failed: {row}")
             time.sleep(0.5)
-        raise TimeoutError(f"Background job did not finish within {timeout}s. Last matching rows: {last}")
+        last_state = pd.DataFrame(last) if last else None
+        raise DorisLab._timed_out(
+            "The background job did not finish",
+            f"The background job did not finish within {timeout}s; its last state was "
+            f"{', '.join(str(row.get(state_key)) for row in last) or 'not listed yet'}.",
+            last_state,
+            hint="Rerun this cell to wait again.",
+        )
 
     def wait_for_sync_mv(self, table, view, before, *, database="doris_course", timeout=120):
         row = self._wait_mv_job(
@@ -2261,6 +2319,10 @@ LIMIT 10
             "Build state": row["State"],
         }]))
         show_log("Complete synchronous build task", json.dumps(row, indent=2, default=str))
+        self.show_statements(
+            self._sync_mv_jobs_sql(table, view, database),
+            title="SQL that reads the build job (repeated until the job finishes)",
+        )
         return row
 
     def wait_for_async_refresh(self, view, before, *, database="doris_course", timeout=120):
@@ -2275,6 +2337,10 @@ LIMIT 10
             "RefreshMode": row.get("RefreshMode"),
             "Progress": row.get("Progress"),
         }]))
+        self.show_statements(
+            self._async_mv_tasks_sql(view, database),
+            title="SQL that reads the refresh task (repeated until the task finishes)",
+        )
         return row
 
     def wait_for_mv_jobs(self, table, sync_view, async_view, *, database="doris_course", timeout=120):
@@ -2641,14 +2707,29 @@ LIMIT 10
 
         Without a name, this is the course's single-node Doris sandbox.
         """
-        state = labkit_docker.start_container(
-            container,
-            wait_for_healthy=wait_for_healthy,
-            timeout_seconds=timeout_seconds,
-            missing_hint=(
-                "Run that module's environment preparation before using its restart cell."
-            ),
+        creator = (
+            "Create it with Lab 1, Section 2 (Prepare the environment)."
+            if container == env.DORIS_CONTAINER
+            else "Create it with that module's environment preparation cell."
         )
+        try:
+            state = labkit_docker.start_container(
+                container,
+                wait_for_healthy=wait_for_healthy,
+                timeout_seconds=timeout_seconds,
+                missing_hint=creator,
+            )
+        except (RuntimeError, TimeoutError) as exc:
+            if "does not exist" in str(exc):
+                card(str(exc), "fail", "The container is missing")
+                raise EnvironmentNotReady(f"Container {container} does not exist.") from exc
+            card(
+                f"{exc} Check Docker Desktop (or Docker Engine on Linux) and `docker logs --tail 100 "
+                f"{container}`, then rerun this cell.",
+                "fail",
+                f"{container} did not start",
+            )
+            raise EnvironmentNotReady(f"{container} did not start.") from exc
         container_state = state.get("State", {})
         show_frame("Sandbox container", pd.DataFrame([{
             "container": container,
@@ -2670,19 +2751,96 @@ LIMIT 10
 
         Without arguments, this is the course's single-node Doris sandbox.
         """
-        wait_for_health(container, timeout_seconds=300, report=False)
+        self._connection_host = host
+        self._connection_port = port
+        state = container_inspect(container)
+        status = (state or {}).get("State", {}).get("Status")
+        if status != "running":
+            problem = "does not exist" if state is None else f"is {status}"
+            card(f"Container {container} {problem}. {self._start_hint()}", "fail",
+                 "The Doris container is not running")
+            raise EnvironmentNotReady(f"Container {container} {problem}.")
+        try:
+            wait_for_health(container, timeout_seconds=300, report=False)
+        except (RuntimeError, TimeoutError) as exc:
+            card(f"{exc}. Read `docker logs --tail 200 {container}`, then rerun this cell.",
+                 "fail", "Doris did not become healthy")
+            raise EnvironmentNotReady(f"{container} did not become healthy.") from exc
         if self.connection is not None:
             try:
                 self.connection.close()
             except Exception:
                 pass
         self.DORIS_CONTAINER = container
-        self._connection_host = host
-        self._connection_port = port
         self._profile_http_host = http_host or host
         self._profile_http_port = http_port
-        self.connection = connect_doris(host=host, port=port)
+        self.connection = None
+        try:
+            self.connection = connect_doris(host=host, port=port)
+        except (OSError, TimeoutError, pymysql.MySQLError) as exc:
+            card(f"{container} is healthy, but nothing answers on {host}:{port}. {self._start_hint()}",
+                 "fail", "Doris is not reachable")
+            raise EnvironmentNotReady(f"Doris is not reachable on {host}:{port}.") from exc
         return self.connection
+
+    def check_prerequisites(self, lab_number: int) -> pd.DataFrame:
+        """Check that the tables this Lab reads from earlier Labs are complete."""
+        rows = []
+        statements = []
+        for table, (expected, made_by) in PREREQUISITES[lab_number].items():
+            exists = bool(self._metadata_rows(f"SHOW TABLES LIKE '{table}'"))
+            count = None
+            if exists:
+                statement = f"SELECT COUNT(*) AS row_count FROM {table}"
+                statements.append(statement)
+                count = int(self._metadata_rows(statement)[0]["row_count"])
+            rows.append({
+                "table": table,
+                "rows": "missing" if count is None else f"{count:,}",
+                "expected rows": f"{expected:,}",
+                "built by": made_by,
+                "status": "missing" if count is None else ("ready" if count == expected else "incomplete"),
+            })
+        frame = pd.DataFrame(rows)
+        missing = frame.loc[frame["status"] != "ready"]
+        if not missing.empty:
+            show_frame(f"Tables Lab {lab_number} reads from earlier Labs", frame)
+            labs = list(dict.fromkeys(missing["built by"]))
+            card(
+                f"Complete {' and then '.join(labs)} in this sandbox, then rerun this cell. "
+                "Nothing has been changed.",
+                "fail",
+                f"Lab {lab_number} needs data from an earlier Lab",
+            )
+            raise EnvironmentNotReady(
+                f"{', '.join(missing['table'])} {'is' if len(missing) == 1 else 'are'} missing or incomplete."
+            )
+        card(
+            ", ".join(f"{row['table']} ({row['rows']} rows)" for row in rows),
+            "ok",
+            f"The tables Lab {lab_number} reads are ready",
+        )
+        self.show_statements(*statements)
+        return frame
+
+    def check_module9_stopped(self) -> None:
+        """Refuse to start the single-node sandbox while the Module 9 cluster runs."""
+        running = run(
+            ["docker", "ps", "--filter", f"label=com.docker.compose.project={env.M09_PROJECT}",
+             "--format", "{{.Names}}"],
+            check=False,
+        )
+        names = running.stdout.split()
+        if names:
+            card(
+                f"{len(names)} container(s) of the Module 9 cluster are still running. Together with "
+                f"the single-node sandbox they need more memory than the course minimum. Stop them "
+                f"with `docker compose --file level3/module09-sharding-replication/compose.multinode.yml "
+                f"stop` (or the Stop cell at the end of Lab 9), then rerun this cell.",
+                "fail",
+                "Stop the Module 9 cluster first",
+            )
+            raise EnvironmentNotReady("The Module 9 cluster is still running.")
 
     @property
     def fe_http_url(self) -> str:
@@ -2876,34 +3034,6 @@ LIMIT 10
         card("Environment ready: Doris is healthy and both FE and BE are available.", "ok")
         return self.connection
 
-    def load_s3_credentials(self, filename: str = "course_secrets.env") -> bool:
-        secret_path = self.lab_dir / filename
-        try:
-            secrets = load_env_file(secret_path)
-        except (FileNotFoundError, ValueError) as exc:
-            self._failure("S3 credential file is unavailable", str(exc))
-            return False
-        access_key = secrets.get("S3_READ_ONLY_ACCESS_KEY", "")
-        secret_key = secrets.get("S3_READ_ONLY_SECRET_KEY", "")
-        if not access_key or not secret_key:
-            self._failure(
-                "S3 credentials are incomplete",
-                f"Fill both credential fields in {secret_path.name}, then rerun this cell.",
-            )
-            return False
-        self._s3_access_key = access_key
-        self._s3_secret_key = secret_key
-        self._source_tvf = s3_tvf(self.S3_CONFIG, access_key, secret_key)
-        return True
-
-    def preview_s3(self, statement: str):
-        if not self.load_s3_credentials():
-            return None
-        result = self.sql(statement, title="Ten remote event rows")
-        if len(result) != 10:
-            raise AssertionError(f"Expected a 10-row preview; Doris returned {len(result)} rows.")
-        return result
-
     def load_events_once(self, statement: str):
         connection = self._require_connection()
         # This is a rerun guard, not a learner-facing query result.
@@ -3043,6 +3173,7 @@ LIMIT 10
         frame = pd.DataFrame(rows).sort_values("host").reset_index(drop=True)
         if show:
             show_frame(title or f"{table_name} replicas by BE", frame)
+            self.show_statements(f"SHOW REPLICA DISTRIBUTION FROM {table_name}", "SHOW BACKENDS")
         return frame
 
     def wait_for_replica_distribution(
@@ -3076,12 +3207,15 @@ LIMIT 10
             ):
                 if show:
                     show_frame(title or f"{table_name} replica placement is ready", frame)
+                    self.show_statements(f"SHOW REPLICA DISTRIBUTION FROM {table_name}", "SHOW BACKENDS")
                 return frame
             time.sleep(1)
-        raise TimeoutError(
-            f"Replica distribution for {table_name} did not reach "
-            f"backends={expected_backends}, total={expected_total_replicas}, "
-            f"spread<={max_replica_spread}; last rows={frame.to_dict('records')!r}"
+        raise self._timed_out(
+            "Replicas were not rebalanced in time",
+            f"After {timeout_seconds} seconds, the {expected_total_replicas} replicas of {table_name} "
+            f"were not spread over {expected_backends} BEs.",
+            frame,
+            hint="Doris moves replicas in the background; rerun this cell to wait again. " + "Check the containers with `docker compose --file level3/module09-sharding-replication/compose.multinode.yml ps` and read the logs of the one that is not running.",
         )
 
     def wait_for_colocation_group(
@@ -3112,11 +3246,14 @@ LIMIT 10
                         "stable": selected.get("IsStable"),
                     }])
                     show_frame(title, frame)
+                    self.show_statements('SHOW PROC "/colocation_group"')
                     return frame
             time.sleep(1)
-        raise TimeoutError(
-            f"Colocation Group {group_name!r} did not become stable within "
-            f"{timeout_seconds} seconds; last metadata={selected!r}"
+        raise self._timed_out(
+            "The Colocation Group is not stable yet",
+            f"After {timeout_seconds} seconds, Colocation Group {group_name} was not stable.",
+            pd.DataFrame([selected]) if selected else None,
+            hint="Doris is still moving replicas into the group; rerun this cell to wait again.",
         )
 
     @staticmethod
@@ -3203,9 +3340,12 @@ LIMIT 10
                     show_frame(title or f"HAProxy marks {server_name} {expected}", frame)
                 return frame
             time.sleep(1)
-        raise TimeoutError(
-            f"HAProxy did not mark {server_name} {expected}; "
-            f"last rows={frame.to_dict('records')!r}; last error={last_error!r}"
+        error = f" The last read failed: {last_error}." if last_error else ""
+        raise self._timed_out(
+            "HAProxy did not report the expected FE state",
+            f"After {timeout_seconds} seconds, HAProxy did not mark {server_name} {expected}.{error}",
+            frame,
+            hint="Check the containers with `docker compose --file level3/module09-sharding-replication/compose.multinode.yml ps` and read the logs of the one that is not running.",
         )
 
     def expect_current_connection_failure(
@@ -3257,9 +3397,8 @@ LIMIT 10
             raise ValueError("expected_strategy must be 'bucket_shuffle' or 'colocate'.")
 
         connection = self._require_connection()
-        executable, _visible = self._expand_sql(normalized)
         with connection.cursor() as cursor:
-            cursor.execute(executable)
+            cursor.execute(normalized)
             records = cursor.fetchall()
         plan = "\n".join(str(next(iter(record.values()))) for record in records)
         if not re.search(strategy_patterns[expected_strategy], plan, re.IGNORECASE):
@@ -3348,9 +3487,13 @@ LIMIT 10
             if ready:
                 return
             time.sleep(2)
-        raise TimeoutError(
-            "Doris had not reported nonzero storage metadata for every table within "
-            f"{timeout_seconds} seconds. Last SHOW DATA rows: {last!r}"
+        raise self._timed_out(
+            "Storage reports are late",
+            f"After {timeout_seconds} seconds, SHOW DATA did not yet report all rows and a nonzero "
+            "size for every table.",
+            pd.DataFrame([{"table": name, "RowCount": row.get("RowCount"), "Size": row.get("Size")}
+                          for name, row in last.items()]),
+            hint="The BE reports sizes about once a minute; rerun this cell.",
         )
 
     def compression_storage_summary(
@@ -3429,6 +3572,13 @@ LIMIT 10
             row.pop("_reported_bytes", None)
         frame = pd.DataFrame(summary)
         show_frame(title, frame)
+        self.show_statements(
+            "SHOW FRONTEND CONFIG LIKE 'default_compression_type'",
+            *(statement for name in table_names for statement in (
+                f"SHOW CREATE TABLE {name}", f"SHOW DATA FROM {name}",
+                f"SHOW PARTITIONS FROM {name}", f"SHOW TABLETS FROM {name}",
+            )),
+        )
         return frame
 
     @contextmanager
@@ -3486,9 +3636,11 @@ LIMIT 10
                 return pd.DataFrame(rows)
             time.sleep(1)
         names = [str(row.get("PartitionName", "")) for row in rows]
-        raise TimeoutError(
-            f"{table_name} exposed {len(rows)} partitions after {timeout_seconds} seconds; "
-            f"expected {expected_count}. Last names: {names!r}"
+        raise self._timed_out(
+            "Partitions were not created in time",
+            f"After {timeout_seconds} seconds, {table_name} had {len(rows)} partitions instead of "
+            f"{expected_count}: {', '.join(names) or 'none'}.",
+            hint="Read the table's row in SHOW DYNAMIC PARTITION TABLES for the scheduler's message.",
         )
 
     def wait_for_partition_removal(
@@ -3538,9 +3690,9 @@ LIMIT 10
                 return pd.DataFrame(rows)
             if elapsed >= timeout_seconds:
                 handle.update(timer_html(elapsed, names, "failure"))
-                raise TimeoutError(
-                    f"{partition_name} remains in {table_name} after "
-                    f"{timeout_seconds} seconds; online Partitions: {names!r}"
+                raise WaitTimedOut(
+                    f"{partition_name} is still in {table_name} after {timeout_seconds} seconds; "
+                    "rerun this cell to wait again."
                 )
             handle.update(timer_html(elapsed, names, "running"))
             time.sleep(min(5.0, timeout_seconds - elapsed))
@@ -3573,20 +3725,28 @@ LIMIT 10
 
         event_hour = pd.Timestamp(marker[0]["event_time"]).floor("h")
         expiry_at = event_hour + pd.Timedelta(hours=1 - start_offset)
-        clock = self._metadata_rows("SELECT NOW() AS server_now")
+        clock = self._metadata_rows("SELECT NOW() AS server_now, @@time_zone AS time_zone")
         server_now = pd.Timestamp(clock[0]["server_now"])
+        zone = clock[0]["time_zone"]
         if server_now < expiry_at:
             remaining = expiry_at - server_now
             minutes = max(1, int(remaining.total_seconds() // 60) + 1)
             card(f"Return at or after {expiry_at:%Y-%m-%d %H:%M:%S} "
-                 f"(Asia/Shanghai); about {minutes} minute(s) remain until the "
+                 f"({zone}); about {minutes} minute(s) remain until the "
                  "whole hour becomes ineligible. Keep the container running and "
                  "rerun this cell then; do not rerun Section 2.",
                  "info", "The hourly retention boundary has not arrived")
             raise ReturnLater(
-                f"rerun this cell at or after {expiry_at:%Y-%m-%d %H:%M} (Asia/Shanghai)."
+                f"rerun this cell at or after {expiry_at:%Y-%m-%d %H:%M} ({zone})."
             )
 
+        partition = self._partition_containing(table_name, event_hour, event_id)
+        self.wait_for_partition_removal(
+            table_name, partition, timeout_seconds=timeout_seconds
+        )
+
+    def _partition_containing(self, table_name: str, moment: pd.Timestamp, event_id: int) -> str:
+        """Return the one Range Partition whose half-open bounds hold ``moment``."""
         partitions = self._metadata_rows(
             f"SHOW PARTITIONS FROM `{table_name}` ORDER BY PartitionName"
         )
@@ -3596,16 +3756,47 @@ LIMIT 10
                 r"\b\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}\b",
                 str(partition.get("Range", "")),
             )
-            if len(bounds) >= 2 and pd.Timestamp(bounds[0]) <= event_hour < pd.Timestamp(bounds[1]):
+            if len(bounds) >= 2 and pd.Timestamp(bounds[0]) <= moment < pd.Timestamp(bounds[1]):
                 matches.append(str(partition["PartitionName"]))
         if len(matches) != 1:
             raise RuntimeError(
-                f"Expected one Partition containing event {event_id} at {event_hour}; "
+                f"Expected one Partition containing event {event_id} at {moment}; "
                 f"found {matches!r}. Inspect SHOW PARTITIONS before continuing."
             )
-        self.wait_for_partition_removal(
-            table_name, matches[0], timeout_seconds=timeout_seconds
-        )
+        return matches[0]
+
+    def partition_holding_event(self, table_name: str, *, event_id: int) -> str | None:
+        """Show and return the Partition that holds one event, or None when the event is gone."""
+        table_name = self._safe_table_name(table_name)
+        if not isinstance(event_id, int) or event_id < 0:
+            raise ValueError("event_id must be a nonnegative integer.")
+        lookup = f"SELECT event_time FROM {table_name} WHERE event_id = {event_id}"
+        marker = self._metadata_rows(lookup)
+        if not marker:
+            card(f"Event {event_id} is no longer in {table_name}.", "skip", "The event is already gone")
+            return None
+        event_time = pd.Timestamp(marker[0]["event_time"])
+        partition = self._partition_containing(table_name, event_time, event_id)
+        card(f"Event {event_id} at {event_time} is in Partition {partition}.", "info",
+             "The Partition to watch")
+        self.show_statements(lookup, f"SHOW PARTITIONS FROM {table_name} ORDER BY PartitionName")
+        return partition
+
+    @staticmethod
+    def _session_time(value: str, system_zone: str, session_zone: str) -> str:
+        """Express a time that the FE writes in its system time zone in the session's time zone.
+
+        SHOW DYNAMIC PARTITION TABLES reports scheduler times in the FE's own
+        time zone, while partition bounds follow the table's time zone.
+        """
+        try:
+            moment = pd.Timestamp(value).tz_localize(system_zone).tz_convert(session_zone)
+        except (ValueError, TypeError, KeyError):
+            return f"{value} ({system_zone}, the FE's system time zone)"
+        if moment.utcoffset() == pd.Timestamp(value).tz_localize(system_zone).utcoffset():
+            return f"{moment:%Y-%m-%d %H:%M:%S} ({session_zone})"
+        return (f"{moment:%Y-%m-%d %H:%M:%S} {session_zone} "
+                f"(the FE reports {value} in its system time zone, {system_zone})")
 
     def dynamic_partition_status(
         self,
@@ -3626,10 +3817,18 @@ LIMIT 10
         row = rows[0]
         state = str(row.get("State") or "not reported")
         last_run = str(row.get("LastSchedulerTime") or "not reported")
+        zones = self._metadata_rows(
+            "SELECT @@system_time_zone AS system_time_zone, @@time_zone AS time_zone"
+        )[0]
         card(
-            f"State: {state} · Last scheduler run: {last_run}",
+            f"State: {state} · Last scheduler run: "
+            f"{self._session_time(last_run, zones['system_time_zone'], zones['time_zone'])}",
             "ok" if state.upper() == "NORMAL" else "fail",
             title,
+        )
+        self.show_statements(
+            "SHOW DYNAMIC PARTITION TABLES",
+            "SELECT @@system_time_zone AS system_time_zone, @@time_zone AS time_zone",
         )
         if state.upper() != "NORMAL":
             details = "\n".join(
@@ -3670,6 +3869,10 @@ LIMIT 10
             })
         frame = pd.DataFrame(rows)
         show_frame(title, frame)
+        self.show_statements(
+            f"SHOW PARTITIONS FROM {table_name} ORDER BY PartitionName",
+            *(f"SELECT COUNT(*) AS row_count FROM {table_name} PARTITION ({row['partition']})" for row in rows),
+        )
         return frame
 
     def expect_statement_error(
@@ -3720,4 +3923,5 @@ LIMIT 10
             )
         frame = pd.DataFrame(rows)[["Type", "Name", "PartitionId", "DropTime"]]
         show_frame(title, frame)
+        self.show_statements(f"SHOW CATALOG RECYCLE BIN WHERE NAME = '{partition_name}'")
         return frame

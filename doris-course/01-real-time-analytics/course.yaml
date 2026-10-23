@@ -1,0 +1,93 @@
+# Release manifest: the course's modules in order, with their lesson, Lab, quiz,
+# and time, for a course catalog to publish. tools/check_course_manifests.py
+# checks it against the files, the lessons, and the course README.
+slug: real-time-analytics
+title: Real-time Analytics with Apache Doris
+status: published
+language: en
+doris_version: "4.1.3"
+estimated_minutes: 950
+modules:
+  - slug: introduction
+    level: 1
+    order: 1
+    title: Introduction to Apache Doris
+    course: level1/module01-introduction/course.md
+    lab: level1/module01-introduction/lab01_start_doris_and_build_baseline.ipynb
+    quiz: level1/module01-introduction/quiz01_doris_fundamentals.yaml
+    estimated_minutes: 70
+    optional:
+      - title: "Lab 1 Optional: Connect Metabase and Build a Dashboard"
+        path: level1/module01-introduction/optional01_metabase_dashboard.ipynb
+  - slug: architecture
+    level: 1
+    order: 2
+    title: Deep Dive into Apache Doris Architecture
+    course: level1/module02-architecture/course.md
+    lab: level1/module02-architecture/lab02_scan_less_data.ipynb
+    quiz: level1/module02-architecture/quiz02_doris_architecture_and_physical_design.yaml
+    estimated_minutes: 75
+  - slug: loading-data
+    level: 1
+    order: 3
+    title: Loading Data into Apache Doris
+    course: level1/module03-loading-data/course.md
+    lab: level1/module03-loading-data/lab03_load_data.ipynb
+    quiz: level1/module03-loading-data/quiz03_load_methods_and_retry_safety.yaml
+    estimated_minutes: 85
+  - slug: modeling
+    level: 2
+    order: 4
+    title: Modeling Data in Apache Doris
+    course: level2/module04-modeling/course.md
+    lab: level2/module04-modeling/lab04_model_data.ipynb
+    quiz: level2/module04-modeling/quiz04_schema_and_modeling_choices.yaml
+    estimated_minutes: 90
+  - slug: analyzing
+    level: 2
+    order: 5
+    title: Analyzing Data in Apache Doris
+    course: level2/module05-analyzing/course.md
+    lab: level2/module05-analyzing/lab05_analyze_data.ipynb
+    quiz: level2/module05-analyzing/quiz05_analytical_query_semantics.yaml
+    estimated_minutes: 90
+  - slug: joining
+    level: 2
+    order: 6
+    title: Joining Data in Apache Doris
+    course: level2/module06-joining/course.md
+    lab: level2/module06-joining/lab06_join_data.ipynb
+    quiz: level2/module06-joining/quiz06_join_semantics_and_execution.yaml
+    estimated_minutes: 95
+  - slug: updating-deleting
+    level: 2
+    order: 7
+    title: Updating and Deleting Data in Apache Doris
+    course: level2/module07-updating-deleting/course.md
+    lab: level2/module07-updating-deleting/lab07_update_delete_data.ipynb
+    quiz: level2/module07-updating-deleting/quiz07_state_changes_and_deletion.yaml
+    estimated_minutes: 65
+  - slug: query-acceleration
+    level: 3
+    order: 8
+    title: Accelerating Queries in Apache Doris
+    course: level3/module08-query-acceleration/course.md
+    lab: level3/module08-query-acceleration/lab08_accelerate_queries.ipynb
+    quiz: level3/module08-query-acceleration/quiz08_acceleration_choices.yaml
+    estimated_minutes: 120
+  - slug: sharding-replication
+    level: 3
+    order: 9
+    title: Sharding, Replication, and Distributed Execution in Apache Doris
+    course: level3/module09-sharding-replication/course.md
+    lab: level3/module09-sharding-replication/lab09_observe_sharding_and_replication.ipynb
+    quiz: level3/module09-sharding-replication/quiz09_distribution_and_availability.yaml
+    estimated_minutes: 145
+  - slug: managing-data
+    level: 3
+    order: 10
+    title: Controlling Storage Cost and Data Lifecycle in Apache Doris
+    course: level3/module10-managing-data/course.md
+    lab: level3/module10-managing-data/lab10_manage_data.ipynb
+    quiz: level3/module10-managing-data/quiz10_data_lifecycle_and_recovery.yaml
+    estimated_minutes: 115

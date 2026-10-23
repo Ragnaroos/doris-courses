@@ -1,0 +1,35 @@
+# A local model for Module 7's optional lab: the server of llama.cpp
+# (https://github.com/ggml-org/llama.cpp, MIT), which answers OpenAI's chat
+# completions API, with Qwen2.5 0.5B Instruct (Apache 2.0), quantized to 4 bits.
+# It runs on the CPU and needs no account or key.
+#
+# ObservabilityLab.start_local_model() first downloads the model file into the
+# volume models, once, and checks its SHA-256; then it runs, from the course root:
+#
+#   docker compose -p doris-obs-llm -f environments/llm/compose.llm.yml up -d
+#
+# The host port can be changed with the variable named in it;
+# doris_course/environment.py uses the same name and default, and the same file
+# name and model name.
+services:
+  llm:
+    image: ghcr.io/ggml-org/llama.cpp:server-b11429
+    container_name: doris-obs-llm
+    restart: unless-stopped
+    command:
+      - --model
+      - /models/qwen2.5-0.5b-instruct-q4_k_m.gguf
+      # The model name that the API lists and that requests use.
+      - --alias
+      - qwen2.5-0.5b-instruct
+      - --ctx-size
+      - "4096"
+      - --parallel
+      - "1"
+    ports:
+      - "127.0.0.1:${DORIS_OBS_LLM_PORT:-28080}:8080"
+    volumes:
+      - models:/models
+
+volumes:
+  models:

@@ -1,124 +1,87 @@
 title: "Module 12 Quiz: Publishing, Permissions, and Audit"
-description: Six scenario-based single-choice questions. No database connection is required. Submit each answer
-  to read feedback on every option.
+description: "Six single-choice questions; no database connection required. View explanations after submitting."
 questions:
-- id: q1
-  objective: Plan a validated publication cutoff and distinguish safe rollback from a stale retained copy
-  prompt: A same-schema replacement table has reconciled with the current table at a paused-writer cutoff. The release
-    swaps table names and retains the old copy. Writers then resume and add 12 new orders only to the released table.
-    What must happen before using the retained copy as a rollback target?
+- id: contract_first
+  objective: "Write a consumer contract and choose the object to publish before granting any privilege."
+  prompt: "The BI team asks for an account before Monday's dashboard launch. What comes before the GRANT?"
   options:
-  - id: a
-    text: A. Swap names back immediately; retaining the old table automatically mirrors later writes.
-  - id: b
-    text: B. Compare only the column types; a matching schema proves that the old copy contains the new orders.
-  - id: c
-    text: C. Establish a new controlled write boundary, catch up the retained copy and reconcile it before reverting
-      the publication.
-  - id: d
-    text: D. Revoke the dashboard role; changing reader permissions also copies the missing orders.
-  answer: c
-  explanation: 'A: Retention preserves the old cutoff, not automatic replication of post-release writes. B: Schema
-    compatibility is not data reconciliation. C: Correct. Rollback must account for writes since the earlier cutoff;
-    name replacement alone does not perform catch-up. D: Revocation changes authorization, not the retained data.'
-- id: q2
-  objective: Distinguish users, roles, privileges, and object scopes, including data access and administrative privileges
-  prompt: Company policy requires an authorization administrator to approve dashboard-access changes. The business
-    intelligence (BI) team has five members and will keep growing. Its owner wants to grant newcomers access without
-    approval. Which approach follows the policy while reducing repeated per-user configuration?
+  - id: contract_object
+    text: "A contract naming the object, bi_order_metrics_l2, its grain, meanings, scope, and owners"
+  - id: root_password
+    text: "Root's password for the launch week, and a narrower account once the dashboard works without errors"
+  - id: global_select
+    text: "An account with SELECT_PRIV on *.*.*, so that every chart can read what it needs"
+  - id: detail_table
+    text: "Access to orders_fact_l2, so that each chart can compute its own daily totals"
+  answer: contract_object
+  explanation: "The grant's object and scope follow from the contract: one semantic view, read only, with owners who approve changes. Root lets the dashboard's users change and drop anything, and its audit records cannot tell them apart. A global SELECT reads every table, also those created later. The detail makes every chart repeat the contract and lets consumers bypass it."
+- id: role_select
+  objective: "Grant only the needed object privilege through a role, and tell read privileges from administrative ones."
+  prompt: "Five people of the BI team must read bi_order_metrics_l2. Which grant fits?"
   options:
-  - id: a
-    text: A. Grant the owner GRANT_PRIV so they can authorize newcomers independently
-  - id: b
-    text: B. Grant the owner ADMIN_PRIV so they can resolve every access problem themselves
-  - id: c
-    text: C. Create a dedicated role with SELECT_PRIV on the dashboard view; the administrator changes approved
-      role memberships
-  - id: d
-    text: D. Skip roles and grant view SELECT_PRIV to each of the five users separately, revoking each grant when
-      they leave
-  answer: c
-  explanation: 'A: Delegation capability would allow access changes outside the required approval process; GRANT_PRIV
-    does not itself supply read access. B: ADMIN_PRIV provides broad administrative capabilities, including reading
-    and changing privileges, far beyond one-view access. C: Correct. Keep reading privileges separate from administration,
-    define scope once in a role, and change membership after approval. D: Direct grants can follow approval policy,
-    but duplicate the same configuration and increase the chance of incomplete revocation.'
-- id: q3
-  objective: Grant only the required object privileges through a dedicated role
-  prompt: A dashboard must read only the semantic view bi_order_metrics_l2, with no direct access to order details.
-    The same database also contains other teams' tables. Which grant scope meets that requirement?
+  - id: role_select
+    text: "SELECT_PRIV on internal.<db>.bi_order_metrics_l2 to a role; the role to the five"
+  - id: user_admin
+    text: "ADMIN_PRIV to each of the five accounts, since an administrator can read every view"
+  - id: role_grant
+    text: "GRANT_PRIV on the view to a role, which lets its members read that view and no other object"
+  - id: database_scope
+    text: "SELECT_PRIV on internal.<db>.* to a role, which covers the view and its sources"
+  answer: role_select
+  explanation: "SELECT_PRIV is the read privilege and the one view is the scope; a role gives one grant to review and one membership to change per person, and its members can read the view without privileges on its sources. ADMIN_PRIV gives far more than reading. GRANT_PRIV lets an account grant privileges; it does not read data. A database scope covers every table, the view's sources and later tables too."
+- id: kinds_of_evidence
+  objective: "Tell what SHOW GRANTS, SHOW ROLES, a consumer's queries, a change record, and the audit table each prove."
+  prompt: "A reviewer asks whether the dashboard's account actually read the order detail last week. Which evidence answers that?"
   options:
-  - id: a
-    text: A. internal.dw_course_l1_demo.bi_order_metrics_l2, granting only this view
-  - id: b
-    text: B. *.*.*, so future dashboard objects do not require another request
-  - id: c
-    text: C. internal.dw_course_l1_demo.*, covering the entire database
-  - id: d
-    text: D. The view plus daily_order_metrics_l2 and orders_imported, because the view requires its base tables
-      to be granted too
-  answer: a
-  explanation: 'A: Correct. Grant SELECT_PRIV on the contract''s view only; a view-only role can query it. B: The
-    global scope includes all Catalogs and future objects. C: A database-wide grant exposes order details and future
-    tables in that database. D: Querying the view does not require direct base-table privileges; those extra grants
-    would let the consumer bypass the interface.'
-- id: q4
-  objective: Retain release evidence using SHOW GRANTS, SHOW ROLES, and a change record, and distinguish it from
-    audit logs
-  prompt: After release, the role listing shows that reader can select only sales_view. A temporary ordinary account
-    holding the role successfully queries the view and is denied direct access to its base table. The approval system
-    has no record of the change. Which conclusion does this evidence support?
+  - id: audit_table
+    text: "The account's queries in __internal_schema.audit_log, with their statements, states, and errors"
+  - id: show_grants
+    text: "SHOW GRANTS FOR the account, which lists the tables that the account has read so far"
+  - id: change_record
+    text: "The grant's change record, which says which object the account was given"
+  - id: show_roles
+    text: "SHOW ROLES, which shows each role's members and the tables that they read"
+  answer: audit_table
+  explanation: "The audit table records what ran, who ran it, and with what outcome, so it answers what the account did. SHOW GRANTS lists what an account may do, its own and its roles' privileges merged, not what it did. A change record documents a change and its reason; it records no queries. SHOW ROLES shows configuration, not execution."
+- id: retire_one
+  objective: "Retire access by revoking a membership or a role's privilege, and verify the effect as the consumer."
+  prompt: "Dashboards A and B read through the same role, and A is retired. What should be revoked, and how is it checked?"
   options:
-  - id: a
-    text: A. Every BI user's access has been verified from every host
-  - id: b
-    text: B. The change was approved because the role listing shows current privileges
-  - id: c
-    text: C. The view's row count and amount have been reconciled with the business source
-  - id: d
-    text: D. The role scope and this test account's access boundary have been checked, but approval has not been
-      established
-  answer: d
-  explanation: 'A: One account''s test does not establish outcomes for other identities or hosts. B: Current configuration
-    does not prove approval. C: Access tests do not reconcile business values. D: Correct. The role listing describes
-    scope and the ordinary account''s positive and negative queries describe its access; approval still needs separate
-    evidence.'
-- id: q5
-  objective: Distinguish revoking role membership from revoking a role's privileges, and verify the effect of each
-  prompt: An old dashboard is retiring. Its account and another team's active dashboard account both hold course_bi_reader_l3
-    and need the same view. Neither has another access path. How can only the retiring dashboard lose access?
+  - id: membership
+    text: "A's membership; then a query as A is refused and one as B still reads"
+  - id: role_privilege
+    text: "The role's SELECT_PRIV on the view, which removes A's access at once"
+  - id: drop_role
+    text: "The role itself, since A no longer needs it, and B can request a new role when it needs one"
+  - id: root_check
+    text: "A's membership; then a query as root confirms that the view is still readable"
+  answer: membership
+  explanation: "Revoking A's membership affects A alone, and queries as A and as B show the effect on each. Revoking the role's privilege or dropping the role cuts off B too. Root can read everything, so a query as root proves nothing about either consumer."
+- id: rollback_window
+  objective: "Release a table with a validated cutover, and say when its rollback stops being safe."
+  prompt: "A candidate table was reconciled while the writer was paused and swapped in with swap = true. Then the writer resumed and wrote one order. Can the team swap back to the old table now?"
   options:
-  - id: a
-    text: A. Drop the role; the active dashboard has already read the view, so future access is unaffected
-  - id: b
-    text: B. Revoke the role only from the retiring account and test both accounts; retain the role and its view
-      grant while the active dashboard needs them
-  - id: c
-    text: C. Revoke the view's SELECT_PRIV from the role; this affects only the retiring dashboard
-  - id: d
-    text: D. Keep the grant but remove the view name from the old dashboard configuration; direct database queries
-      will then be denied
-  answer: b
-  explanation: 'A: Removing a shared role affects privileges relied on by its active consumers. B: Correct. Remove
-    only the departing account''s membership, then verify that it is denied while the active account still succeeds.
-    C: Revoking the role''s privilege affects all members. D: Dashboard configuration is not a database authorization
-    boundary; the account could still query directly.'
-- id: q6
-  objective: Decide when table privileges need column privileges, a Row Policy, or data masking
-  prompt: An ordinary analyst account can read the order table. Compliance requires every database query by that
-    account to show only orders for its assigned region; all columns of those visible orders may remain readable.
-    Which mechanism matches the restriction?
+  - id: not_blindly
+    text: "Not before it catches up: the old table lacks the order written after the release"
+  - id: yes_atomic
+    text: "Yes: the swap is atomic, so a swap back restores exactly the published state"
+  - id: yes_retained
+    text: "Yes: swap = true kept the old table, and Doris keeps it in step with the published one"
+  - id: never
+    text: "No: once a table is swapped in and published, it cannot be swapped back"
+  answer: not_blindly
+  explanation: "The rollback was safe while the writer was paused; after the first write the retained table misses that write, and swapping it back would lose it. Atomic means that readers see one table or the other, not that the old one has the new writes. A retained table does not follow the published one. The swap can be repeated; the data is what makes it unsafe."
+- id: rows_columns
+  objective: "Choose between table privileges, column privileges, a Row Policy, and masking for a restriction."
+  prompt: "The EAST team may read only EAST orders of orders_fact_l2 and must not see paid_amount or refund_amount. Which combination fits?"
   options:
-  - id: a
-    text: A. Apply a region-based Row Policy and verify it using the ordinary account
-  - id: b
-    text: B. Revoke access only to the region column so other regions' rows disappear automatically
-  - id: c
-    text: C. Mask the region value so other regions' rows are no longer returned
-  - id: d
-    text: D. Add a region filter only to the dashboard; it will also constrain direct base-table queries
-  answer: a
-  explanation: 'A: Correct. A Row Policy restricts rows with a predicate; test it as the intended ordinary consumer.
-    B: Column privileges choose readable columns, not allowed rows. C: Masking changes field presentation rather
-    than removing disallowed rows. D: A dashboard filter controls that dashboard''s queries, not every query issued
-    by the account.'
+  - id: policy_and_columns
+    text: "A Row Policy on region for the team's role, and SELECT_PRIV on the table's other columns only"
+  - id: dashboard_filter
+    text: "A dashboard filter on region, and charts that leave the two columns out"
+  - id: table_select
+    text: "SELECT_PRIV on the whole table, since the team's queries will ask only for EAST"
+  - id: masking_only
+    text: "Masking of the two payment columns, which also hides the orders of the WEST region from the team"
+  answer: policy_and_columns
+  explanation: "A RESTRICTIVE Row Policy for the role keeps only the EAST rows in every query of its members, and column privileges leave out the two payment columns, so that SELECT * and COUNT(*) are refused too. A dashboard filter is not enforced: a query can still ask for WEST. A table privilege covers every row and column. Masking hides parts of values; it filters no rows."

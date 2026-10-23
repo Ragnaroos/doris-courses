@@ -1,0 +1,18 @@
+# Release manifest: the course's modules in order, with their lesson, Lab, quiz,
+# and time, for a course catalog to publish. tools/check_course_manifests.py
+# checks it against the files, the lessons, and the course README.
+slug: ai-integrations
+title: AI Integrations with Apache Doris
+status: preview
+language: en
+doris_version: "4.1.3"
+estimated_minutes: 90
+modules:
+  - slug: doris-mcp
+    level: 1
+    order: 1
+    title: Connect AI Agents to Apache Doris with MCP
+    course: level1/module01-doris-mcp/course.md
+    lab: level1/module01-doris-mcp/lab01_connect_agent_to_doris.ipynb
+    quiz: level1/module01-doris-mcp/quiz01_doris_mcp.yaml
+    estimated_minutes: 90

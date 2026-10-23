@@ -1,12 +1,15 @@
 from __future__ import annotations
 
+import base64
 import http.client
 import json
+import os
 import re
 import shlex
 import subprocess
 import time
 import urllib.error
+import urllib.parse
 import urllib.request
 from datetime import datetime
 from pathlib import Path
@@ -50,6 +53,35 @@ DEMO_PORTS = ((env.DEMO_PORT, "DORIS_OBS_DEMO_PORT", "Demo storefront"),)
 TRACE_COLLECTOR_PORTS = (
     (env.TRACES_OTLP_HTTP_PORT, "DORIS_OBS_TRACES_OTLP_HTTP_PORT", "Module 2 trace collector OTLP HTTP"),
 )
+LITEFUSE_PORTS = ((env.LITEFUSE_PORT, "DORIS_OBS_LITEFUSE_PORT", "Litefuse web UI and API"),)
+LITEFUSE_COMPOSE_FILE = "environments/litefuse/compose.litefuse.yml"
+LITEFUSE_HINT = (f"Read the log with docker logs {env.LITEFUSE_WEB_CONTAINER}, start Litefuse again with "
+                 "lab.start_litefuse(), then rerun this cell.")
+LOCAL_MODEL_PORTS = ((env.LOCAL_MODEL_PORT, "DORIS_OBS_LLM_PORT", "Local model server (llama.cpp)"),)
+LOCAL_MODEL_COMPOSE_FILE = "environments/llm/compose.llm.yml"
+
+# Download the model file into the volume of the model server, once, and check it.
+# It runs in the server's image, which has curl and sha256sum; $0 is the URL.
+DOWNLOAD_LOCAL_MODEL = r"""
+set -e
+model=/models/$MODEL_FILE
+if [ -f "$model" ]; then
+  echo "Already downloaded: $model"
+else
+  curl -fsSL -o "$model.part" "$0" &
+  download=$!
+  while kill -0 "$download" 2>/dev/null; do
+    sleep 5
+    echo "Downloaded $(( $(stat -c %s "$model.part" 2>/dev/null || echo 0) / 1000000 )) MB of $MODEL_MB MB"
+  done
+  if ! wait "$download"; then
+    echo "The download failed. If $0 cannot be reached, set DORIS_OBS_LLM_MODEL_URL to the same file on a mirror before starting Jupyter."
+    exit 1
+  fi
+  mv "$model.part" "$model"
+fi
+echo "$MODEL_SHA256  $model" | sha256sum -c -
+"""
 
 # The override files replace upstream lists with the !override merge tag (Compose 2.24.4).
 MIN_COMPOSE_VERSION = (2, 24, 4)
@@ -69,14 +101,19 @@ fi
 """
 
 
-# Row counters of a table scan in a Query Profile. For a filter that Doris checks
-# against zone maps and an inverted index, such as service_name = 'cart' in
-# Module 6, each row of the scanned partitions is counted in exactly one of them.
-# Filters on leading key columns and bloom filters have counters of their own.
+# Row counters of a table scan in a Query Profile. For filters that Doris checks
+# against zone maps, inverted indexes, and the values it reads, such as the
+# access-log search of Module 6, each row of the scanned partitions is counted in
+# exactly one of them. A filter on a column's value, such as service_name = 'cart',
+# drops rows in RowsVectorPredFiltered; a filter expression, such as LIKE or a
+# MATCH_PHRASE that Doris evaluates without the index, in RowsExprPredFiltered
+# (SegmentIterator::_execute_common_expr in 4.1.3). Filters on leading key columns
+# and bloom filters have counters of their own.
 SCAN_FILTER_COUNTERS = (
     ("RowsStatsFiltered", "Skipped unread: the zone map (minimum and maximum) of their segment or page rules out a match"),
     ("RowsInvertedIndexFiltered", "Skipped unread: the inverted index shows that they do not match"),
-    ("RowsVectorPredFiltered", "Read, then dropped: their values did not match the filter"),
+    ("RowsVectorPredFiltered", "Read, then dropped: their values did not match a filter on a column"),
+    ("RowsExprPredFiltered", "Read, then dropped: a filter expression, such as LIKE or a MATCH without its index, did not match"),
     ("RowsRead", "Read, and passed every filter"),
 )
 
@@ -86,10 +123,56 @@ def _scan_reported(profile: str) -> bool:
     return "DetailProfile" in profile and "OLAP_SCAN_OPERATOR" in profile.split("DetailProfile", 1)[1]
 
 
+# The sections in which an EXPLAIN plan lists the materialized views that Doris tried.
+VIEW_REWRITE_RESULTS = {
+    "MaterializedViewRewriteSuccessAndChose:": "chosen",
+    "MaterializedViewRewriteSuccessButNotChose:": "usable, not chosen",
+    "MaterializedViewRewriteFail:": "not usable",
+}
+
+
+def _plan_scans(lines: Sequence[str]) -> tuple[list[dict], list[dict]]:
+    """The table scans and the materialized views that a Doris EXPLAIN plan lists.
+
+    A scan reads a table, or one of its materialized views, which TABLE: names in
+    parentheses; its partitions= and tablets= lines say how many it reads of how
+    many there are. Doris lists each materialized view that it considered under
+    one of VIEW_REWRITE_RESULTS, with the reason when it could not use it.
+    """
+    scans, views, result = [], [], None
+    for line in lines:
+        text = line.strip()
+        if "VOlapScanNode" in text:
+            scans.append({"table": "", "reads": "", "partitions": "", "tablets": "", "predicates": ""})
+        elif scans and result is None and text.startswith("TABLE:"):
+            name = text[len("TABLE:"):].split(",")[0].strip()
+            scans[-1]["table"], _, index = name.partition("(")
+            scans[-1]["reads"] = index.rstrip(")")
+        elif scans and result is None and text.startswith("PREDICATES:"):
+            scans[-1]["predicates"] = text[len("PREDICATES:"):].strip()
+        elif scans and result is None and text.startswith("partitions="):
+            scans[-1]["partitions"] = text[len("partitions="):]
+        elif scans and result is None and text.startswith("tablets="):
+            scans[-1]["tablets"] = text[len("tablets="):].split(",")[0]
+        elif text in VIEW_REWRITE_RESULTS:
+            result = VIEW_REWRITE_RESULTS[text]
+        elif text.startswith("FailInfo:") and views:
+            views[-1]["reason"] = text[len("FailInfo:"):].strip()
+        elif result and text.startswith(("CBO.", "RBO.")):
+            views.append({"materialized_view": text.split()[0].rsplit(".", 1)[-1], "result": result, "reason": ""})
+        elif text.startswith("========== STATISTICS"):  # the plan and its materializations end here
+            break
+    return scans, views
+
+
 # Grafana's rules API lists every Grafana-managed alert rule with the instances of
 # its last evaluation. Grafana's anonymous viewer, which the DOG stack enables, may
 # read it, so the Labs do not depend on the admin password.
 GRAFANA_RULES_PATH = "/api/prometheus/grafana/api/v1/rules"
+# The demo's flag service, flagd, answers through the storefront's proxy, which
+# routes /flagservice/ to it; the flag page, /feature, edits FLAGS_FILE.
+FLAGD_RESOLVE_ALL_PATH = "/flagservice/flagd.evaluation.v1.Service/ResolveAll"
+FLAGS_FILE = "doris-opentelemetry-demo/src/flagd/demo.flagd.json"  # in the upstream checkout
 GRAFANA_HINT = "Check that the DOG stack is running with the cells in Module 1, then rerun this cell."
 MAILPIT_HINT = ("Mailpit starts with the DOG stack: run lab.prepare_environment() in Module 1 again, "
                 "then rerun this cell.")
@@ -145,6 +228,8 @@ class ObservabilityLab:
     RUNTIME_DIRECTORY = ".runtime"
     STACK_DIRECTORY = "ai-observe-stack"
     DORIS_LOG_DIRECTORY = "doris-logs"
+    # Where the Module 2 log collector keeps its read position (file_storage).
+    COLLECTOR_STATE_DIRECTORY = "collector-state"
     DEMO_PORT = env.DEMO_PORT
 
     def __init__(
@@ -210,6 +295,16 @@ class ObservabilityLab:
     def mailpit_url(self) -> str:
         """The Mailpit inbox on this host, which receives every email that Grafana sends."""
         return f"http://127.0.0.1:{env.MAILPIT_PORT}"
+
+    @property
+    def litefuse_url(self) -> str:
+        """The Litefuse web UI and API on this host."""
+        return f"http://127.0.0.1:{env.LITEFUSE_PORT}"
+
+    @property
+    def local_model_url(self) -> str:
+        """The local model server on this host; its OpenAI-compatible API is under /v1."""
+        return f"http://127.0.0.1:{env.LOCAL_MODEL_PORT}"
 
     def sql(
         self,
@@ -372,14 +467,107 @@ class ObservabilityLab:
         ))
         return pd.Series(totals, name="rows")
 
-    def _read(self, url: str, service: str, hint: str) -> str:
-        """GET a page from Grafana or Mailpit; stop with a card when the service does not answer."""
+    def show_create_table(self, table: str) -> str:
+        """Show the statement that SHOW CREATE TABLE returns for ``table``, as text, and return it."""
+        statement = str(self.query(f"SHOW CREATE TABLE {table}").iloc[0, 1])
+        show_sql(f"SHOW CREATE TABLE {table} returns", statement)
+        return statement
+
+    def explain_scan(self, statement: str, *, title: str = "Which partitions and tablets the query reads") -> pd.DataFrame:
+        """Show which partitions and tablets each table scan of a query reads, and return the scans.
+
+        Runs EXPLAIN, which plans the query without running it, and shows one row
+        per scan, then the whole plan in a collapsed box. When Doris considered
+        materialized views for the query, a second table lists them with the
+        result and the reason.
+        """
+        clean = statement.strip().rstrip(";")
+        show_sql(title, f"EXPLAIN {clean}")
+        lines = [str(line) for line in self.query(f"EXPLAIN {clean}").iloc[:, 0]]
+        scans, views = _plan_scans(lines)
+        frame = pd.DataFrame(scans, columns=["table", "reads", "partitions", "tablets", "predicates"])
+        if frame.empty:
+            card("The plan reads no table: the partitions that the query's filters select hold no rows, "
+                 "so Doris answers without reading any data.", "info", "No table scan")
+        else:
+            show_frame(f"{title} · {len(frame)} scan(s)", frame)
+        if views:
+            show_frame("The materialized views that Doris considered",
+                       pd.DataFrame(views, columns=["materialized_view", "result", "reason"]))
+        show_log("The whole plan", "\n".join(lines))
+        return frame
+
+    def tablet_rows(self, table: str, *, title: str | None = None) -> pd.DataFrame:
+        """Count the rows of each tablet in the partitions of ``table`` that have data, and return them.
+
+        SHOW TABLETS shows a tablet's row count only after its BE reports it, so
+        each tablet is counted with SELECT COUNT(*) ... TABLET(<id>), which reads
+        that tablet now. The statements are shown first.
+        """
+        show_sql(title or f"Count the rows in each tablet of {table}", "\n".join((
+            f"SHOW PARTITIONS FROM {table}",
+            f"SHOW TABLETS FROM {table} PARTITION (<partition>)",
+            f"SELECT COUNT(*) FROM {table} TABLET(<tablet id>)",
+        )))
+        partitions = self.query(f"SHOW PARTITIONS FROM {table}")
+        rows = []
+        for partition, version in zip(partitions["PartitionName"], partitions["VisibleVersion"]):
+            if int(version) <= 1:  # every load adds a version: version 1 has no data
+                continue
+            for tablet in self.query(f"SHOW TABLETS FROM {table} PARTITION ({partition})")["TabletId"]:
+                count = self.query(f"SELECT COUNT(*) AS row_count FROM {table} TABLET({tablet})")["row_count"].iloc[0]
+                rows.append({"partition": partition, "tablet": str(tablet), "rows": int(count)})
+        frame = pd.DataFrame(rows, columns=["partition", "tablet", "rows"])
+        totals = frame.groupby("partition")["rows"].transform("sum")
+        frame["percent_of_partition"] = (100 * frame["rows"] / totals.where(totals > 0)).round(1)
+        show_frame(f"Rows in each tablet of {table} · {len(frame)} tablet(s) in "
+                   f"{frame['partition'].nunique()} partition(s) with data", frame)
+        return frame
+
+    def _read(self, url: str, service: str, hint: str, *, auth: tuple[str, str] | None = None) -> str:
+        """GET a page from Grafana, Mailpit, or Litefuse; stop with a card when the service does not answer.
+
+        ``auth`` is a user name and password for HTTP basic authentication.
+        """
+        headers = {}
+        if auth:
+            headers["Authorization"] = "Basic " + base64.b64encode(":".join(auth).encode()).decode()
         try:
-            with urllib.request.urlopen(url, timeout=10) as response:
+            with urllib.request.urlopen(urllib.request.Request(url, headers=headers), timeout=10) as response:
                 return response.read().decode("utf-8")
         except (OSError, http.client.HTTPException) as error:
             self._failure(f"{service} does not answer", f"Could not read {url} ({error}). {hint}")
             raise EnvironmentNotReady(f"{service} does not answer.")
+
+    def _send(self, method: str, url: str, body: Mapping | None = None, *, auth: tuple[str, str],
+              headers: Mapping[str, str] | None = None, missing_ok: bool = False) -> str | None:
+        """Send a request with a JSON body to Grafana as a signed-in user; stop with a card when Grafana refuses it.
+
+        With ``missing_ok``, a 404 answer returns None instead.
+        """
+        request_headers = {"Content-Type": "application/json", **(headers or {}),
+                           "Authorization": "Basic " + base64.b64encode(":".join(auth).encode()).decode()}
+        data = None if body is None else json.dumps(body).encode("utf-8")
+        request = urllib.request.Request(url, data=data, headers=request_headers, method=method)
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return response.read().decode("utf-8")
+        except urllib.error.HTTPError as error:
+            if missing_ok and error.code == 404:
+                return None
+            if error.code in (401, 403):
+                self._failure(
+                    "Grafana refused the admin password",
+                    f"Grafana answered {error.code}. Set GRAFANA_ADMIN_PASSWORD to the password of the user admin: "
+                    "admin, unless you set a new one when you first signed in. Then rerun this cell.",
+                )
+                raise EnvironmentNotReady("Grafana refused the admin password.")
+            detail = error.read().decode("utf-8", "replace")
+            self._failure(f"Grafana refused the request ({error.code})", f"{method} {url}: {detail}")
+            raise EnvironmentNotReady(f"Grafana refused the request ({error.code}).")
+        except (OSError, http.client.HTTPException) as error:
+            self._failure("Grafana does not answer", f"Could not reach {url} ({error}). {GRAFANA_HINT}")
+            raise EnvironmentNotReady("Grafana does not answer.")
 
     def _no_rule(self, rule: str) -> None:
         self._failure(
@@ -505,6 +693,80 @@ class ObservabilityLab:
         show_log(f"The rule {rule!r} as provisioning YAML", text, opened=True)
         return text
 
+    def provision_alert_rule_group(self, folder: str, group: str, rules: Sequence[Mapping], *,
+                                   interval_seconds: int, admin_password: str) -> dict:
+        """Create or replace a Grafana alert rule group from code, with Grafana's provisioning API.
+
+        Finds the folder by its title, creating it when it is missing. A rule with
+        a fixed "uid" that Grafana does not have yet is created with POST, because
+        a group's PUT only updates the rules whose uid exists. Then the group is
+        sent with PUT: afterwards it holds exactly ``rules``, evaluated every
+        ``interval_seconds``, and a rerun updates the same rules. The header
+        X-Disable-Provenance keeps the rules editable in Grafana's web page.
+        Writing needs the admin's password; the requests are shown first, without it.
+        """
+        auth = ("admin", admin_password)
+        headers = {"X-Disable-Provenance": "true"}
+        folders_url = f"{self.grafana_url}/api/folders"
+        rules_url = f"{self.grafana_url}/api/v1/provisioning/alert-rules"
+        group_url = f"{self.grafana_url}/api/v1/provisioning/folder/<folder uid>/rule-groups/{group}"
+        show_sql(
+            f"Create or replace the rule group {group!r} in the folder {folder!r}",
+            f'curl -s -u admin:<password> "{folders_url}"\n'
+            f'curl -s -u admin:<password> -X POST -H "Content-Type: application/json" '
+            f'-H "X-Disable-Provenance: true" --data @rule.json "{rules_url}"   # once for each new rule\n'
+            f'curl -s -u admin:<password> -X PUT -H "Content-Type: application/json" '
+            f'-H "X-Disable-Provenance: true" --data @rule-group.json "{group_url}"',
+        )
+        folders = json.loads(self._send("GET", folders_url, auth=auth))
+        uid = next((item.get("uid") for item in folders if item.get("title") == folder), None)
+        if uid is None:
+            uid = json.loads(self._send("POST", folders_url, {"title": folder}, auth=auth))["uid"]
+        for rule in rules:
+            if rule.get("uid") and self._send("GET", f"{rules_url}/{rule['uid']}", auth=auth, missing_ok=True) is None:
+                self._send("POST", rules_url, {**rule, "folderUID": uid, "ruleGroup": group}, auth=auth, headers=headers)
+        body = {"title": group, "interval": interval_seconds, "rules": list(rules)}
+        answer = json.loads(self._send("PUT", group_url.replace("<folder uid>", uid), body, auth=auth, headers=headers))
+        show_frame(f"The rule group {group!r} in {folder!r}, evaluated every {interval_seconds} seconds", pd.DataFrame([
+            {"rule": rule.get("title"), "uid": rule.get("uid"), "pending_period": rule.get("for"),
+             "labels": ", ".join(f"{key}={value}" for key, value in sorted((rule.get("labels") or {}).items()))}
+            for rule in answer.get("rules") or []
+        ], columns=["rule", "uid", "pending_period", "labels"]))
+        return answer
+
+    def grafana_dashboard(self, title: str) -> pd.DataFrame:
+        """Show the panels of a saved Grafana dashboard, with the SQL of each, and return them.
+
+        Reads the dashboard from Grafana's API as Grafana's anonymous viewer, so
+        it does not depend on the admin password; the requests are shown first,
+        so that they can be repeated with curl.
+        """
+        search = f"{self.grafana_url}/api/search?type=dash-db&query={urllib.parse.quote(title)}"
+        show_sql(
+            f"Find the dashboard {title!r}, then read it, from Grafana's API",
+            f'curl -s "{search}"\ncurl -s "{self.grafana_url}/api/dashboards/uid/<uid of the dashboard>"',
+        )
+        found = [item for item in json.loads(self._read(search, "Grafana", GRAFANA_HINT)) if item.get("title") == title]
+        if not found:
+            self._failure(
+                f"Grafana has no dashboard named {title!r}",
+                "Save the dashboard in Grafana: click Save dashboard, enter exactly this title, and click Save. "
+                "Then rerun this cell.",
+            )
+            raise EnvironmentNotReady(f"Grafana has no dashboard named {title!r}.")
+        uid = found[0]["uid"]
+        dashboard = json.loads(self._read(f"{self.grafana_url}/api/dashboards/uid/{uid}", "Grafana",
+                                          GRAFANA_HINT)).get("dashboard") or {}
+        rows = [
+            {"panel": panel.get("title"), "visualization": panel.get("type"),
+             "format": target.get("format"), "sql": target.get("rawSql", "")}
+            for panel in dashboard.get("panels") or []
+            for target in panel.get("targets") or [{}]
+        ]
+        frame = pd.DataFrame(rows, columns=["panel", "visualization", "format", "sql"])
+        show_frame(f"The panels of {title} · {self.grafana_url}/d/{uid}", frame)
+        return frame
+
     def connect(
         self,
         *,
@@ -616,7 +878,7 @@ demo_compose() {{
                                        env.MAILPIT_CONTAINER))
         script = self._compose_script(r"""
 echo "[1/4] Prepare the local runtime directory"
-mkdir -p .runtime/doris-logs/fe .runtime/doris-logs/be
+mkdir -p .runtime/doris-logs/fe
 
 echo "[2/4] Check out the pinned DOG stack"
 """ + CHECKOUT_STACK + r"""
@@ -693,16 +955,24 @@ demo_compose ps
         ]
         return pd.DataFrame(rows, columns=["container", "state", "restarts"]).sort_values("container", ignore_index=True)
 
-    def _storefront_status(self) -> int | None:
-        """The HTTP status of the storefront page, or None when it does not answer."""
+    @staticmethod
+    def _http_status(url: str) -> int | None:
+        """The HTTP status of a page, or None when the server does not answer."""
         try:
-            with urllib.request.urlopen(self.demo_url, timeout=5) as response:
+            with urllib.request.urlopen(url, timeout=5) as response:
                 return response.status
         except urllib.error.HTTPError as error:
             return error.code
         except (OSError, http.client.HTTPException):
-            # The proxy keeps the connection open while the frontend starts, so this is often a timeout.
             return None
+
+    def _storefront_status(self) -> int | None:
+        """The HTTP status of the storefront page, or None when it does not answer."""
+        # The proxy keeps the connection open while the frontend starts, so no answer is often a timeout.
+        # Ask for the page "/", not the bare host: through an HTTP proxy, such as a system proxy on macOS
+        # that does not exempt 127.0.0.1, urllib sends the URL as written, and Envoy rejects a request
+        # target without a path with HTTP 400.
+        return self._http_status(f"{self.demo_url}/")
 
     def _wait_for_demo(self, timeout_seconds: int) -> None:
         """Wait until every demo container is running and the storefront answers; stop with a card otherwise."""
@@ -746,9 +1016,263 @@ demo_compose ps
         )
 
     def stop_demo(self) -> None:
-        """Stop and remove the demo containers. The telemetry already in Doris stays."""
-        # Compose finds a project's containers and networks by their labels, without the files.
-        self.shell(f"docker compose -p {env.DEMO_PROJECT} down", title="Stop the OpenTelemetry demo")
+        """Stop and remove the demo's containers and volumes.
+
+        The telemetry already in Doris stays, and so do the demo's feature flags.
+        """
+        # Compose finds a project's containers, networks, and volumes by their labels, without the files.
+        # The images of jaeger, kafka, and prometheus declare volumes that the demo's Compose file does
+        # not name, so Docker creates anonymous ones; the next start creates new ones instead of reusing them.
+        self.shell(f"docker compose -p {env.DEMO_PROJECT} down --volumes", title="Stop the OpenTelemetry demo")
+
+    def _feature_flags(self, url: str) -> dict:
+        """Every feature flag of the demo, as the flag service resolves it now."""
+        request = urllib.request.Request(url, data=b'{"context": {}}', method="POST",
+                                         headers={"Content-Type": "application/json"})
+        try:
+            with urllib.request.urlopen(request, timeout=10) as response:
+                return json.loads(response.read().decode("utf-8")).get("flags") or {}
+        except (OSError, http.client.HTTPException, ValueError) as error:
+            self._failure(
+                "The demo's flag service does not answer",
+                f"Could not read {url} ({error}). Check that the demo runs: run lab.start_demo() in "
+                "Module 1, then rerun this cell.",
+            )
+            raise EnvironmentNotReady("the demo's flag service does not answer.")
+
+    def wait_for_feature_flag(self, flag: str, variant: str, *, timeout_seconds: int = 180) -> pd.DataFrame:
+        """Wait until the demo's flag service serves ``variant`` for ``flag``, then show the flag.
+
+        Set the flag in the demo's flag page, {demo_url}/feature. This asks the
+        flag service, flagd, through the storefront's proxy, as the storefront's
+        pages do in the browser; the request is shown first, so that it can be
+        repeated with curl.
+        """
+        url = self.demo_url + FLAGD_RESOLVE_ALL_PATH
+        show_sql(
+            f"Ask the demo's flag service for its flags until {flag} is {variant} "
+            f"(every 2 seconds for up to {timeout_seconds} seconds)",
+            f"curl -s -X POST -H 'Content-Type: application/json' -d '{{\"context\": {{}}}}' \"{url}\"",
+        )
+        started = time.monotonic()
+        while True:
+            found = self._feature_flags(url).get(flag)
+            elapsed = time.monotonic() - started
+            if found is not None and found.get("variant") == variant:
+                break
+            if elapsed >= timeout_seconds:
+                if found is None:
+                    message = f"The demo has no feature flag named {flag}. Check the name in {self.demo_url}/feature."
+                else:
+                    message = (f"{flag} is {found.get('variant')}, not {variant}. Open {self.demo_url}/feature, "
+                               f"choose {variant} in the {flag} card, click save, then rerun this cell.")
+                self._failure(f"{flag} is not {variant}", message)
+                raise EnvironmentNotReady(f"{flag} was not {variant} within {timeout_seconds} seconds.")
+            time.sleep(2)
+        value = next((found[key] for key in ("doubleValue", "boolValue", "stringValue", "intValue") if key in found),
+                     None)
+        frame = pd.DataFrame([{"flag": flag, "variant": found.get("variant"), "value": value}])
+        show_frame(f"{flag} in the demo's flag service · after {elapsed:.0f} seconds", frame)
+        return frame
+
+    def _set_be_private_endpoint(self) -> None:
+        """Make the FE redirect Stream Loads from other containers to an address where they reach the BE.
+
+        Clients such as Litefuse send a Stream Load to the FE, which redirects it
+        to the BE. In the single-container Doris the BE is registered as
+        127.0.0.1, which another container cannot reach. When a BE has a private
+        endpoint, the FE redirects to the host that the client used for the FE,
+        doris-obs, with the port of the endpoint. MODIFY BACKEND replaces all
+        tags of the BE, so the statement repeats the ones it has.
+        """
+        for backend in self.query("SHOW BACKENDS").to_dict("records"):
+            tags = json.loads(backend.get("Tag") or "{}")
+            tags["private_endpoint"] = env.DORIS_BE_HTTP_ENDPOINT
+            ordered = sorted(tags.items(), key=lambda item: item[0] != "location")
+            assignments = ",\n     ".join(f'"tag.{name}" = "{value}"' for name, value in ordered)
+            self.execute(
+                f'ALTER SYSTEM MODIFY BACKEND "{backend["Host"]}:{backend["HeartbeatPort"]}"\n'
+                f"SET ({assignments})",
+                title="Give the BE an address that the other containers can reach",
+            )
+
+    def start_litefuse(self, *, timeout_seconds: int = 180) -> None:
+        """Start Litefuse, which keeps its LLM traces in this course's Doris, in the database litefuse.
+
+        Returns once its web UI and API answer and accept the course's API keys.
+        """
+        self.ensure_docker_ready()
+        if not self._dog_stack_running():
+            self._failure(
+                "The DOG stack is not running",
+                "Litefuse keeps its tables in the DOG stack's Doris. Run lab.prepare_environment() "
+                "in Module 1 first, then rerun this cell.",
+            )
+            raise EnvironmentNotReady("the DOG stack is not running.")
+        self._check_compose_version()
+        self._check_ports(LITEFUSE_PORTS, (env.LITEFUSE_WEB_CONTAINER,))
+        self._set_be_private_endpoint()
+        compose = f"docker compose -p {env.LITEFUSE_PROJECT} -f {LITEFUSE_COMPOSE_FILE}"
+        self.shell(f"""set -euo pipefail
+
+echo "[1/2] Start Litefuse"
+{compose} up -d
+
+echo "[2/2] Show the Litefuse services"
+{compose} ps
+""", title="Start Litefuse")
+        self._wait_for_litefuse(timeout_seconds)
+
+    def _wait_for_litefuse(self, timeout_seconds: int) -> None:
+        """Wait until Litefuse answers, then check its project with the course's API keys."""
+        health = f"{self.litefuse_url}/api/public/health"
+        projects = f"{self.litefuse_url}/api/public/projects"
+        keys = (env.LITEFUSE_PUBLIC_KEY, env.LITEFUSE_SECRET_KEY)
+        show_sql(
+            f"Wait until Litefuse answers (every 3 seconds for up to {timeout_seconds} seconds), "
+            "then read the project that the API keys belong to",
+            f'curl -s "{health}"\ncurl -s -u {":".join(keys)} "{projects}"',
+        )
+        started = time.monotonic()
+        while self._http_status(health) != 200:
+            if time.monotonic() - started >= timeout_seconds:
+                self._failure(
+                    "Litefuse does not answer",
+                    f"{health} did not answer with HTTP 200 within {timeout_seconds} seconds. On its first "
+                    "start, Litefuse creates its database in Postgres and its tables in Doris before it "
+                    f"answers. Read the log with docker logs {env.LITEFUSE_WEB_CONTAINER}, then rerun this cell.",
+                )
+                raise EnvironmentNotReady(f"Litefuse did not answer within {timeout_seconds} seconds.")
+            time.sleep(3)
+        elapsed = time.monotonic() - started
+        found = json.loads(self._read(projects, "Litefuse", LITEFUSE_HINT, auth=keys)).get("data") or []
+        project = next((item for item in found if item.get("id") == env.LITEFUSE_PROJECT_ID), None)
+        if project is None:
+            self._failure(
+                "The API keys do not belong to the course's project",
+                f"Litefuse answers, but the keys belong to no project with the ID {env.LITEFUSE_PROJECT_ID}. "
+                f"Remove Litefuse with docker compose -p {env.LITEFUSE_PROJECT} down --volumes, then rerun "
+                "this cell: Litefuse creates the project, its keys, and the user when it starts on empty volumes.",
+            )
+            raise EnvironmentNotReady("the course's Litefuse project is missing.")
+        show_frame("The project that the API keys belong to", pd.DataFrame([{
+            "organization": (project.get("organization") or {}).get("name"),
+            "project": project.get("name"),
+            "project_id": project.get("id"),
+        }]))
+        card(
+            f"Litefuse answers at {self.litefuse_url} (waited {elapsed:.0f} seconds). Sign in with "
+            f"{env.LITEFUSE_USER_EMAIL} and the password {env.LITEFUSE_USER_PASSWORD}. Its tables are in "
+            f"the Doris database {env.LITEFUSE_DATABASE}.",
+            "ok",
+            "Litefuse is running",
+        )
+
+    def litefuse_trace(self, trace_id: str) -> dict:
+        """Show a trace as Litefuse's public API returns it, one row per observation, and return it."""
+        url = f"{self.litefuse_url}/api/public/traces/{trace_id}"
+        show_sql(
+            "Read the trace from Litefuse's public API",
+            f'curl -s -u {env.LITEFUSE_PUBLIC_KEY}:{env.LITEFUSE_SECRET_KEY} "{url}"',
+        )
+        trace = json.loads(self._read(url, "Litefuse", LITEFUSE_HINT,
+                                      auth=(env.LITEFUSE_PUBLIC_KEY, env.LITEFUSE_SECRET_KEY)))
+        observations = sorted(trace.get("observations") or [], key=lambda item: item.get("startTime") or "")
+        show_frame(
+            f"Trace {trace.get('name')} ({trace_id}) · latency {trace.get('latency')} s · "
+            f"total cost {trace.get('totalCost')} USD",
+            pd.DataFrame([{
+                "type": item.get("type"),
+                "name": item.get("name"),
+                "start_time_utc": _utc(item.get("startTime")),
+                "latency_s": item.get("latency"),
+                "model": item.get("model"),
+                "usage": item.get("usageDetails"),
+                "cost_usd": (item.get("costDetails") or {}).get("total"),
+            } for item in observations], columns=["type", "name", "start_time_utc", "latency_s", "model",
+                                                   "usage", "cost_usd"]),
+        )
+        return trace
+
+    def stop_litefuse(self) -> None:
+        """Stop and remove the Litefuse containers. Its user, keys, and traces stay for the next start."""
+        self.shell(f"docker compose -p {env.LITEFUSE_PROJECT} down", title="Stop Litefuse")
+
+    def start_local_model(self, *, timeout_seconds: int = 120) -> None:
+        """Download the course's small open model once, then serve it with llama.cpp's server.
+
+        Returns once the server answers and lists the model. The model file is
+        checked against its SHA-256 at every start.
+        """
+        self.ensure_docker_ready()
+        self._check_compose_version()
+        self._check_ports(LOCAL_MODEL_PORTS, (env.LOCAL_MODEL_CONTAINER,))
+        compose = f"docker compose -p {env.LOCAL_MODEL_PROJECT} -f {LOCAL_MODEL_COMPOSE_FILE}"
+        self.shell(f"""set -euo pipefail
+
+echo "[1/3] Download the model file once ({env.LOCAL_MODEL_FILE}, 491 MB)"
+{compose} run --rm --no-deps --entrypoint sh \\
+  -e MODEL_FILE={env.LOCAL_MODEL_FILE} -e MODEL_SHA256={env.LOCAL_MODEL_SHA256} -e MODEL_MB=491 \\
+  llm -c {shlex.quote(DOWNLOAD_LOCAL_MODEL)} {shlex.quote(env.LOCAL_MODEL_URL)}
+
+echo "[2/3] Start the model server"
+{compose} up -d
+
+echo "[3/3] Show the model server"
+{compose} ps
+""", title="Start the local model")
+        self._wait_for_local_model(timeout_seconds)
+
+    def _wait_for_local_model(self, timeout_seconds: int) -> None:
+        """Wait until the model server answers, then show the models that it serves."""
+        health = f"{self.local_model_url}/health"
+        models = f"{self.local_model_url}/v1/models"
+        show_sql(
+            f"Wait until the model server answers (every 2 seconds for up to {timeout_seconds} seconds), "
+            "then list its models",
+            f'curl -s "{health}"\ncurl -s "{models}"',
+        )
+        started = time.monotonic()
+        while self._http_status(health) != 200:
+            if time.monotonic() - started >= timeout_seconds:
+                self._failure(
+                    "The model server does not answer",
+                    f"{health} did not answer with HTTP 200 within {timeout_seconds} seconds. Read the log with "
+                    f"docker logs {env.LOCAL_MODEL_CONTAINER}, then rerun this cell.",
+                )
+                raise EnvironmentNotReady(f"the model server did not answer within {timeout_seconds} seconds.")
+            time.sleep(2)
+        elapsed = time.monotonic() - started
+        served = [item.get("id") for item in json.loads(self._read(
+            models, "The model server", f"Read the log with docker logs {env.LOCAL_MODEL_CONTAINER}, "
+            "then rerun this cell.")).get("data") or []]
+        show_frame("Models that the server offers", pd.DataFrame({"model": served}))
+        card(
+            f"The model {env.LOCAL_MODEL} answers at {self.local_model_url}/v1, the OpenAI chat completions "
+            f"API (waited {elapsed:.0f} seconds).",
+            "ok",
+            "The local model is running",
+        )
+
+    def stop_local_model(self) -> None:
+        """Stop and remove the model server. The downloaded model file stays for the next start."""
+        self.shell(f"docker compose -p {env.LOCAL_MODEL_PROJECT} down", title="Stop the local model")
+
+    def openai_api_key(self) -> str:
+        """The OpenAI API key from the environment variable OPENAI_API_KEY; stop with a card when it is not set.
+
+        The key is read from the environment, not written in a notebook, so that
+        it never ends up in a file that is saved or shared.
+        """
+        key = os.environ.get("OPENAI_API_KEY", "").strip()
+        if not key:
+            self._failure(
+                "OPENAI_API_KEY is not set",
+                "Stop Jupyter, set the variable in the terminal, for example export OPENAI_API_KEY=sk-..., "
+                "start Jupyter again from that terminal, and rerun the cells. Or choose the local model.",
+            )
+            raise EnvironmentNotReady("OPENAI_API_KEY is not set.")
+        return key
 
     def check_trace_collector_port(self) -> None:
         """Show the host port of the Module 2 trace collector; stop when another program holds it."""
@@ -757,32 +1281,77 @@ demo_compose ps
     def teardown(self, *, keep_data: bool = False) -> None:
         """Remove every container and network of this course, and its volumes unless keep_data.
 
-        With keep_data=True, prepare_environment() later starts Doris and Grafana
-        again with the same data.
+        With keep_data=True, prepare_environment() and start_litefuse() later
+        start Doris, Grafana, and Litefuse again with the same data, and
+        start_local_model() does not download the model again. Without it, the
+        Module 2 log collector's read position goes too, since it describes how
+        much of the FE log the removed Doris had loaded, and the demo's feature
+        flags go back to off. The demo's volumes go in either case, as in
+        stop_demo(): a later start does not reuse them. The Doris logs stay in
+        .runtime/, given to the learner's user so that they can be deleted.
         """
         volumes = "" if keep_data else " --volumes"
+        state = f"{self.RUNTIME_DIRECTORY}/{self.COLLECTOR_STATE_DIRECTORY}"
+        stack = f"{self.RUNTIME_DIRECTORY}/{self.STACK_DIRECTORY}"
+        logs = f"{self.RUNTIME_DIRECTORY}/{self.DORIS_LOG_DIRECTORY}"
+        if keep_data:
+            forget = ('echo "[7/7] Keep the Module 2 log collector\'s read position and the demo\'s feature flags"\n'
+                      f'echo "Kept {state}/ and the flags for the next start."')
+        else:
+            # The flag page saves the flags to a file of the upstream checkout; the pinned commit has them all off.
+            forget = f"""echo "[7/7] Forget where the Module 2 log collector stopped reading, and turn the demo's feature flags off"
+rm -rf {state}
+if [ -d {stack}/.git ]; then
+  git -C {stack} checkout -- {FLAGS_FILE}
+fi"""
         containers = " ".join((*env.MODULE2_COLLECTORS, env.CPU_LOAD_CONTAINER))
         # Compose finds each project's containers, networks, and volumes by their labels,
-        # so this also works after .runtime/ was deleted. The demo Collector and the
-        # Module 2 collectors are attached to the doris-obs network: remove them first.
+        # so this also works after .runtime/ was deleted. The demo Collector, Litefuse,
+        # and the Module 2 collectors are attached to the doris-obs network: remove them first.
+        # Step 6 gives the files that Doris wrote as root in the bind mount of its FE logs to the
+        # owner of the directory, which prepare_environment() created as the learner. With Docker
+        # Engine on Linux, they would otherwise stay root's, and the learner could not delete
+        # .runtime/ without sudo; Docker Desktop already shows them as the learner's. --reference,
+        # rather than the learner's uid, also leaves them alone with rootless Docker, where the
+        # directory is root's inside the container. The Doris image is there whenever Doris ran.
         script = f"""set -euo pipefail
 
-echo "[1/3] Remove the OpenTelemetry demo"
-docker compose -p {env.DEMO_PROJECT} down
+echo "[1/7] Remove the OpenTelemetry demo"
+docker compose -p {env.DEMO_PROJECT} down --volumes
 
-echo "[2/3] Remove the Module 2 collectors and the Module 8 CPU load"
+echo "[2/7] Remove Litefuse"
+docker compose -p {env.LITEFUSE_PROJECT} down{volumes}
+
+echo "[3/7] Remove the local model of Module 7's optional lab"
+docker compose -p {env.LOCAL_MODEL_PROJECT} down{volumes}
+
+echo "[4/7] Remove the Module 2 collectors and the Module 8 CPU load"
 for name in {containers}; do
   if docker container inspect "$name" >/dev/null 2>&1; then
-    docker rm -f "$name"
+    # Stop first, so that the log collector saves its read position.
+    docker stop -t 5 "$name" >/dev/null 2>&1 || true
+    docker rm -f "$name" >/dev/null 2>&1 || true
+    echo "$name"
   fi
 done
 
-echo "[3/3] Remove the DOG core services"
+echo "[5/7] Remove the DOG core services"
 docker compose -p {env.PROJECT} down{volumes}
+
+echo "[6/7] Give the Doris logs in {logs}/ to your user, so that you can delete them"
+# Doris writes them as root; on Linux, they would stay root's files on this computer.
+if [ -d {logs} ] && docker image inspect {env.DORIS_IMAGE} >/dev/null 2>&1; then
+  docker run --rm --entrypoint chown -v "$(pwd -P)/{logs}:/logs" {env.DORIS_IMAGE} -R --reference=/logs /logs
+fi
+
+{forget}
 """
         self.shell(script, title="Remove the observability environment")
         self.connection = None
-        kept = "The Doris and Grafana volumes were kept." if keep_data else "Their volumes were removed too."
+        kept = ("The volumes of Doris, Grafana, Litefuse, and the local model were kept, and so were the "
+                "Module 2 log collector's read position and the demo's feature flags." if keep_data
+                else "Their volumes were removed too, and so was the Module 2 log collector's read position; "
+                "the demo's feature flags are off again.")
         card(
             f"Removed the course containers and networks. {kept} The upstream checkout and the "
             f"Doris logs stay in {self.RUNTIME_DIRECTORY}/; delete that directory if you no longer need them.",
@@ -791,7 +1360,7 @@ docker compose -p {env.PROJECT} down{volumes}
         )
 
     def show_containers(self) -> None:
-        """Display the containers of this course: the DOG stack, the collectors, and the demo."""
+        """Display the containers of this course: the DOG stack, the collectors, the demo, Litefuse, and the model."""
         self.shell(
             f'docker ps -a --filter name={env.PROJECT} '
             '--format "table {{.Names}}\\t{{.Image}}\\t{{.Status}}\\t{{.Ports}}"',

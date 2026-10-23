@@ -1,4 +1,4 @@
-"""Offline checks for DorisLab results, credential masking, and expected errors.
+"""Offline checks for DorisLab results, error cards, and expected errors.
 
 The shared behavior (empty results, NULL display, error cards) is tested in
 doris-course/common/tests.
@@ -40,7 +40,6 @@ def failing_cursor(message):
 
 def lab_with(cursor):
     lab = DorisLab.__new__(DorisLab)
-    lab._redacted_tvf = ""
     lab.connection = connection_for(cursor)
     return lab
 
@@ -63,27 +62,16 @@ class LabQueryTests(unittest.TestCase):
 
 
 class LabErrorTests(unittest.TestCase):
-    def test_lab_errors_show_the_redacted_statement_and_mask_credentials(self):
-        cursor = failing_cursor(
-            "errCode = 2, detailMessage = Access denied for s3.access_key=AKIAEXAMPLEACCESS"
-        )
+    def test_s3_statements_run_as_written_and_errors_show_them(self):
+        cursor = failing_cursor("errCode = 2, detailMessage = Access Denied")
         lab = lab_with(cursor)
-        lab._s3_access_key = "AKIAEXAMPLEACCESS"
-        lab._s3_secret_key = "example-secret-value"
-        lab._source_tvf = client.s3_tvf(
-            DorisLab.S3_CONFIG, lab._s3_access_key, lab._s3_secret_key
-        )
-        lab._redacted_tvf = client.s3_tvf(
-            DorisLab.S3_CONFIG, "{{S3_READ_ONLY_ACCESS_KEY}}", "{{S3_READ_ONLY_SECRET_KEY}}"
-        )
+        statement = f"SELECT COUNT(*) FROM {client.s3_tvf(DorisLab.S3_CONFIG)}"
         with patch.object(db, "card") as card, patch.object(db, "show_log") as log:
             with self.assertRaises(pymysql.err.ProgrammingError):
-                lab.sql("SELECT COUNT(*) FROM {{COURSE_S3}}", title="Remote preview")
-        shown = card.call_args.args[0] + log.call_args.args[1]
-        self.assertNotIn("AKIAEXAMPLEACCESS", shown)
-        self.assertNotIn("example-secret-value", shown)
-        self.assertIn("{{S3_READ_ONLY_SECRET_KEY}}", log.call_args.args[1])
-        self.assertIn("example-secret-value", cursor.execute.call_args.args[0])
+                lab.sql(statement, title="Remote preview")
+        card.assert_called_once_with("Access Denied", "fail", "Remote preview failed")
+        self.assertIn('"s3.credentials_provider_type" = "ANONYMOUS"', log.call_args.args[1])
+        self.assertEqual(cursor.execute.call_args.args[0], statement)
 
     def test_lab_query_errors_are_reported(self):
         lab = lab_with(failing_cursor("errCode = 2, detailMessage = Unknown column 'x'"))

@@ -1,0 +1,97 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="960" height="640" viewBox="0 0 960 640" role="img" aria-labelledby="title desc">
+  <title id="title">How the demo's telemetry reaches Doris and Grafana</title>
+  <desc id="desc">On your computer, a browser opens the storefront and its flag page on port 28082 and Grafana on port 23000, and the Jupyter notebooks send SQL to Doris on port 29030. In the OpenTelemetry demo, requests pass through the storefront proxy to services that use the OpenTelemetry SDK; flagd serves their feature flags. The services send spans, logs, and metrics over OTLP to the demo's Collector, which adds span, host, and container metrics and forwards everything over OTLP to the DOG Collector. The DOG Collector adds the Docker host's metrics, and its Doris exporter loads the rows into the otel database of Doris with Stream Load. Grafana reads them from Doris with SQL.</desc>
+  <defs>
+    <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
+      <path d="M0,0 L10,5 L0,10 z" fill="#334155"/>
+    </marker>
+  </defs>
+  <style>
+    text { font-family: -apple-system, "Segoe UI", Helvetica, Arial, sans-serif; fill: #0f172a; }
+    .title { font-size: 15px; font-weight: 700; }
+    .body { font-size: 13px; fill: #334155; }
+    .small { font-size: 12px; fill: #475569; }
+    .mono { font-family: "SF Mono", Menlo, Consolas, monospace; font-size: 12px; fill: #0f172a; }
+    .boundary { font-size: 13px; font-weight: 700; letter-spacing: 0.5px; }
+  </style>
+
+  <rect x="0" y="0" width="960" height="640" fill="#ffffff"/>
+
+  <!-- Your computer -->
+  <rect x="16" y="16" width="928" height="118" rx="10" fill="#f8fafc" stroke="#94a3b8" stroke-width="1.5" stroke-dasharray="7 5"/>
+  <text x="32" y="40" class="boundary" style="fill:#475569">YOUR COMPUTER (127.0.0.1)</text>
+  <rect x="40" y="52" width="270" height="66" rx="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1.2"/>
+  <text x="56" y="74" class="title">Browser</text>
+  <text x="56" y="93" class="body">Storefront on port 28082</text>
+  <text x="56" y="110" class="body">Flag page at /feature</text>
+  <rect x="345" y="52" width="270" height="66" rx="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1.2"/>
+  <text x="361" y="74" class="title">Browser</text>
+  <text x="361" y="93" class="body">Grafana on port 23000</text>
+  <rect x="650" y="52" width="270" height="66" rx="6" fill="#ffffff" stroke="#94a3b8" stroke-width="1.2"/>
+  <text x="666" y="74" class="title">Jupyter</text>
+  <text x="666" y="93" class="body">The Lab notebooks send SQL</text>
+  <text x="666" y="110" class="body">to Doris on port 29030</text>
+
+  <!-- OpenTelemetry demo -->
+  <rect x="16" y="170" width="440" height="454" rx="10" fill="#f0fdf4" stroke="#16a34a" stroke-width="1.5"/>
+  <text x="32" y="194" class="boundary" style="fill:#166534">OPENTELEMETRY DEMO</text>
+  <text x="32" y="214" class="small">Compose project doris-obs-demo · 23 containers</text>
+
+  <rect x="40" y="232" width="392" height="56" rx="6" fill="#ffffff" stroke="#16a34a" stroke-width="1.2"/>
+  <text x="56" y="254" class="title">Storefront proxy (frontend-proxy)</text>
+  <text x="56" y="274" class="body">Passes each request on and writes an access log line</text>
+
+  <rect x="40" y="304" width="392" height="96" rx="6" fill="#ffffff" stroke="#16a34a" stroke-width="1.2"/>
+  <text x="56" y="326" class="title">Services with the OpenTelemetry SDK</text>
+  <text x="56" y="346" class="body">frontend · checkout · payment · cart · currency</text>
+  <text x="56" y="364" class="body">product-catalog · shipping · quote · email · ...</text>
+  <text x="56" y="384" class="body">The load generator places orders like a shopper</text>
+
+  <rect x="40" y="416" width="330" height="50" rx="6" fill="#ffffff" stroke="#16a34a" stroke-width="1.2"/>
+  <text x="56" y="437" class="title">flagd</text>
+  <text x="56" y="455" class="body">Serves feature flags, such as paymentFailure</text>
+
+  <rect x="40" y="482" width="392" height="120" rx="6" fill="#ffffff" stroke="#16a34a" stroke-width="1.2"/>
+  <text x="56" y="504" class="title">Demo Collector</text>
+  <text x="56" y="524" class="body">Receives the services' spans, logs, and metrics</text>
+  <text x="56" y="542" class="body">Adds span metrics, and host and container metrics</text>
+  <text x="56" y="560" class="body">Forwards everything to the DOG Collector</text>
+
+  <line x1="175" y1="118" x2="175" y2="231" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="236" y1="288" x2="236" y2="303" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="405" y1="400" x2="405" y2="481" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="380" y="444" class="mono" text-anchor="end" transform="rotate(-90 388 444)">OTLP</text>
+
+  <!-- DOG stack -->
+  <rect x="496" y="170" width="448" height="454" rx="10" fill="#eff6ff" stroke="#2563eb" stroke-width="1.5"/>
+  <text x="512" y="194" class="boundary" style="fill:#1e40af">DOG STACK</text>
+  <text x="512" y="214" class="small">Compose project doris-obs</text>
+
+  <rect x="520" y="232" width="300" height="72" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
+  <text x="536" y="254" class="title">Grafana 11.4</text>
+  <text x="536" y="274" class="body">Doris App: Discover and Traces</text>
+  <text x="536" y="292" class="body">Dashboards and alerts</text>
+
+  <rect x="520" y="340" width="400" height="110" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
+  <text x="536" y="362" class="title">Apache Doris 4.1.3 (doris-obs)</text>
+  <text x="536" y="382" class="body">Database otel: otel_traces · otel_logs</text>
+  <text x="536" y="400" class="body">otel_metrics_gauge · otel_metrics_sum · ...</text>
+  <text x="536" y="420" class="body">A table for spans, one for logs, and one</text>
+  <text x="536" y="438" class="body">for each type of metric</text>
+
+  <rect x="520" y="482" width="400" height="120" rx="6" fill="#ffffff" stroke="#2563eb" stroke-width="1.2"/>
+  <text x="536" y="504" class="title">DOG Collector (doris-obs-otel-collector)</text>
+  <text x="536" y="524" class="body">Receives OTLP on ports 4317 and 4318</text>
+  <text x="536" y="542" class="body">Adds the Docker host's metrics</text>
+  <text x="536" y="560" class="body">Doris exporter: loads the rows into Doris</text>
+
+  <line x1="432" y1="580" x2="519" y2="580" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="476" y="572" class="mono" text-anchor="middle">OTLP</text>
+  <line x1="580" y1="118" x2="580" y2="231" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <line x1="640" y1="304" x2="640" y2="339" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="650" y="327" class="mono">SQL</text>
+  <line x1="870" y1="118" x2="870" y2="339" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="862" y="244" class="mono" text-anchor="end">SQL</text>
+  <line x1="720" y1="482" x2="720" y2="451" stroke="#334155" stroke-width="2" marker-end="url(#arrow)"/>
+  <text x="730" y="472" class="mono">Stream Load</text>
+</svg>

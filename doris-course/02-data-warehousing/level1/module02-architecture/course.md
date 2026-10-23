@@ -1,46 +1,44 @@
 # Module 2: Doris Storage Architecture and Write Mechanisms
 
-| Course Information | Details |
+| Course information | Value |
 | --- | --- |
 | Course | Data Warehousing with Apache Doris · Level 1 |
-| Product Version | Apache Doris 4.x |
-| Lab Version | Apache Doris 4.1.3 |
-| Estimated Time | About 60 minutes, including reading, the hands-on lab, and the quiz |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox from Module 1 |
+| Estimated time | About 55 minutes: reading 25, Lab 20, quiz 10 |
 
-[Course contents](../README.md) · [Open Lab 2](lab02_observe_storage.ipynb) · [Open Quiz 2](quiz02_storage_and_write_batches.ipynb)
+[Course README](../../README.md) · [Open Lab 2](lab02_observe_storage.ipynb) · [Open Quiz 2](quiz02_storage_and_write_batches.ipynb)
 
-## Module Goal
+## Module goal
 
-This module introduces the Doris query path, storage structure, and the relationship between different write batches and background compaction.
+Follow a query from the FE to the BE, and see how Doris stores what you write: in tablets, as versioned rowsets of columnar segments, which compaction later merges.
 
-After completing this module, you will be able to compare batch and row-by-row writes and observe storage metadata such as Tablet information.
+## Learning objectives
 
-## Learning Objectives
+After completing this module, you will be able to:
 
-After completing this module, you should be able to:
+1. Trace a query to explain FE planning and BE execution.
+2. Explain the hierarchy of table, partition, tablet, rowset, and segment.
+3. Explain when loaded rows become visible, and what compaction changes afterward.
+4. Compare batch and row-by-row writes with everything else held constant.
+5. Read a tablet's versions and rowsets, and explain what they show about write batches and compaction.
+6. Use EXPLAIN for what a query plans and the Query Profile for what its scan read.
 
-1. Trace a query to explain FE planning and BE execution responsibilities.
-2. Explain the hierarchy of Table, Partition, Tablet, Rowset, and Segment.
-3. Explain the relationship between write batches, data visibility, and background Compaction.
-4. Keep table structure and data constant while comparing batch and row-by-row writes.
-5. Distinguish what query plans, storage metadata, and runtime evidence can each tell you.
+## Module structure
 
-## Module Schedule
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 2.1 The Query Path and Columnar Storage | 5 min | What the FE and the BE do for one query, and why it reads few columns |
+| 2.2 Tablets, Rowsets, and Segments | 6 min | Where a written row ends up |
+| 2.3 Visibility and Compaction | 4 min | When rows can be queried, and what compaction changes |
+| 2.4 One Batch or Ten Writes | 4 min | A fair comparison, and what versions and rowsets show |
+| 2.5 The Plan and the Work | 6 min | EXPLAIN against the Query Profile's scan counters |
+| Lab 2 | 20 min | Write ten orders two ways and read their versions, rowsets, and scans |
+| Quiz 2 | 10 min | Six questions on these objectives |
 
-| Section | Learning Format | Suggested Time | Learning Outcome |
-| --- | --- | --- | --- |
-| 2.1 Columnar Storage and the Query Path | Query flow diagram | 5 minutes | Trace an order query to explain FE, BE, and columnar reads |
-| 2.2 Tablet, Rowset, Segment, and Compaction | Hierarchy diagram and examples | 8 minutes | Distinguish shards, write versions, and columnar files |
-| 2.3 Write Batches and Visibility | Comparative analysis and status inspection | 12 minutes | Explain why different transaction counts produce the same business results |
-| Lab 2 | Hands-on practice | 30 minutes | Complete both write methods and verify ten rows and 12220.60 |
-| Quiz 2 | Interactive quiz | 5 minutes | Check the query path, storage hierarchy, and observation methods |
+## 2.1 The Query Path and Columnar Storage
 
-## 2.1 Columnar Storage and the Query Path
-
-### Trace a Query to Understand Component Responsibilities
-
-Suppose an analyst wants only the amount for order 1, rather than the entire order table. After completing Lab 2,
-you can run the following read-only example directly in the same lab database:
+Suppose an analyst wants the amount of order 1, not the whole order table. After Lab 2, you can run:
 
 ```sql
 SELECT order_id, order_amount
@@ -48,118 +46,82 @@ FROM orders_batch
 WHERE order_id = 1;
 ```
 
-Expect one row: order 1, with a pre-tax amount of 2300.00. The client sees one SQL statement,
-but internally the system must parse, plan, read, and compute.
+Expect one row: order 1, 2300.00. The client sends one SQL statement; inside Doris, the work is split:
 
 ```text
-Notebook / SQL client
+Notebook or SQL client
         │ SQL
         ▼
-FE: Resolve fields → Optimize query → Generate and distribute execution plan
-        │ Plan fragments
+FE: parse the statement → optimize it → build and send the execution plan
+        │ plan fragments
         ▼
-BE: Scan required columns → Filter order ID → Return amount
+BE: scan the needed columns → filter on the order ID → return the amount
         │
         ▼
-Client: Display results
+Client: show the result
 ```
 
-FE decides what work to perform, and BE carries out its assigned work. Large queries may also scan and aggregate
-across several BEs before combining results. The single-node lab helps explain responsibilities but does not demonstrate multi-node scaling.
+The FE decides what work to do; each BE does its share. A large query can scan and aggregate on several BEs and combine their results; the course's single node shows the roles, not scaling. Planning and executing are separate stages: a query that the FE planned can still fail while a BE runs its part.
 
-### Why Does Analytics Usually Read Only Some Columns?
+### Why analysis reads only some columns
 
-The order table also contains the customer, date, line count, and source, but this query needs only the order ID and amount.
-Columnar storage organizes values from the same column together, making it easier to read only the columns a query needs.
-Column pruning answers "which columns to read," while filtering and data skipping answer "which rows or data blocks to process." They are different.
+The order table also holds the customer, the date, the line count, and the source, but this query needs only two columns. **Columnar storage** keeps the values of each column together, so a scan can read just the columns that a query uses. Reading fewer columns (column pruning) and skipping rows or blocks that cannot match (filtering) are two different savings; 2.5 measures both.
 
-```sql
-EXPLAIN SELECT order_id, order_amount
-FROM orders_batch
-WHERE order_id = 1;
-```
+## 2.2 Tablets, Rowsets, and Segments
 
-Find the scanned table, output columns, and filter conditions in the plan. EXPLAIN shows a plan; it does not mean the query has run,
-nor does it provide the actual number of bytes read by this query. Use Query Profile to understand runtime work.
-
-## 2.2 Tablet, Rowset, Segment, and Compaction
-
-When an order reaches Doris, partitioning and bucketing rules first locate the shard responsible for storing it, and then it is written to columnar files.
-Follow this process to understand the storage terms: Tablet answers "which shard," Rowset answers
-"which data set this write batch created," and Segment answers "which files ultimately hold the data."
-
-### First, Understand Each Layer's Role
+When rows reach Doris, the table's partitioning and bucketing decide which tablet stores each row, and the BE writes them into columnar files.
 
 ```text
-Table: A table in SQL
-└── Partition: Organizes data by rules such as ranges
-    └── Bucket / Tablet: The data shard corresponding to the bucketing rules
-        └── Rowset: A versioned data set created by a write or compaction
-            └── Segment: An immutable columnar data file
+Table: a table in SQL
+└── Partition: a range of rows, such as one day
+    └── Bucket = Tablet: one shard of a partition, stored by a BE
+        └── Rowset: the versioned set of rows that one write (or one compaction) produced
+            └── Segment: an immutable columnar file of a rowset
 ```
 
-| Layer | Understanding it through the order table | Do not confuse it with |
+| Layer | In the order tables | Not to be confused with |
 | --- | --- | --- |
-| Partition | Divides data ranges by order date; a default partition exists even without explicit partitioning | Not a BE node |
-| Bucket / Tablet | Bucketing divides data within a partition into shards; a Tablet is the corresponding physical shard | Bucket count is not replica count |
-| Rowset | A write involving a Tablet creates a versioned data set within that Tablet | Not a single file shared by the entire table |
-| Segment | A file that stores column data in a Rowset; a Rowset can have multiple Segments | Not a business order |
+| Partition | One range of order dates; a table without `PARTITION BY` has one partition | A BE node |
+| Bucket / Tablet | A shard of a partition; each bucket of each partition is a tablet | A replica: replicas are copies of a tablet |
+| Rowset | What one write added to a tablet, with its version | A file shared by the whole table |
+| Segment | A file that holds a rowset's columns; a large rowset has several | A business order |
 
-For example, one partition for each of two days, with four buckets per partition, gives eight Tablets;
-configuring replicas adds physical copies, not additional logical orders.
-The course sandbox uses a single replica to make it easier to observe writes to one copy of the data.
+Two days as two partitions, with four buckets each, give eight tablets. Replicas add copies of each tablet on other BEs, not more data; the course's sandbox has one BE, so one replica. The count above assumes only the table's own data, its base index: a synchronous materialized view or a rollup stores its own copy in more tablets.
 
-For the lab's single-bucket order table, submitting ten orders at once writes all of them to the same Tablet;
-submitting them in ten separate requests sends ten successive batches to that same Tablet. Each write batch creates its own Rowset,
-whose column data is stored in Segments. A large batch can generate multiple Segments,
-so business row counts, submission counts, and file counts must be understood separately.
+For Lab 2's single-bucket table, a write of ten orders adds one rowset to the one tablet; ten writes of one order add ten rowsets. A large write can produce several segments. Business rows, write requests, and files are three different counts.
 
-### Why Compact After Writing?
+## 2.3 Visibility and Compaction
 
-Continuous small-batch writes create multiple data fragments. Reading the same Tablet requires processing these fragments;
-Compaction merges multiple Rowsets in the background, reducing the number of fragments that reads must process.
-**Compaction changes physical organization and should not change logical query results.**
+A write is a load transaction. Once it commits and is published as a new **version**, queries can read its rows. Nothing else has to happen first.
+
+Many small writes leave many small rowsets, and a query of the tablet has to read and merge all of them. **Compaction** merges rowsets in the background into fewer, larger ones:
 
 ```text
-Within one Tablet:
-Write A → Rowset A ┐
-Write B → Rowset B ├─ Compaction → Compacted Rowset
-Write C → Rowset C ┘
+Within one tablet:
+Write A → rowset [2-2] ┐
+Write B → rowset [3-3] ├─ cumulative compaction → rowset [2-4]
+Write C → rowset [4-4] ┘
 ```
 
-Once a write transaction is published as a visible version, queries can read the new data. Background compaction organizes the files afterward:
-even if the three batches remain in three separate Rowsets, a query can still return the complete order summary.
-Thus, "when business results become visible" and "when files are compacted" are two separate questions.
-This is also why write troubleshooting starts with transaction results before checking Compaction.
-See [Compaction principles](https://doris.apache.org/docs/4.x/admin-manual/trouble-shooting/compaction-principles/) for the storage-layer compaction process.
+Compaction changes how the rows are stored, never which rows a query returns: whether a load is visible and whether its files were compacted are two separate questions. When a load seems to be missing, check its transaction first, then its files. The merged-away rowsets stay listed as **stale** for a while before the BE deletes them. See [Compaction principles](https://doris.apache.org/docs/4.x/admin-manual/trouble-shooting/compaction-principles/).
 
-## 2.3 Write Batches and Visibility
+## 2.4 One Batch or Ten Writes
 
-### Fairly Compare One Ten-Row Write with Ten Separate Writes
+Lab 2 writes the same ten orders twice, into two tables that differ only in how they are written:
 
-The lab uses the same WWI historical orders as Module 1, without changing amounts or dates.
-
-| Comparison item | orders_batch | orders_rowwise |
+| Compared | orders_batch | orders_rowwise |
 | --- | --- | --- |
-| Data and fields | The same ten orders | The same ten orders |
+| Data and columns | The same ten orders | The same ten orders |
 | Buckets and replicas | One bucket, one replica | One bucket, one replica |
-| Write method | One batch of ten rows | One row at a time, ten times |
+| Writes | One `INSERT` of ten rows | Ten `INSERT` statements of one row |
 | Group Commit | off_mode | off_mode |
-| Final business result | Ten rows, 12220.60 | Ten rows, 12220.60 |
+| Business result | Ten rows, 12220.60 | Ten rows, 12220.60 |
 
-Group Commit is disabled so that server-side batching does not mask differences between the write methods.
-This is not a recommended setting for every production load.
+Only the writes differ: changing the bucket count or the data at the same time would leave no way to say which change caused what. Group Commit, which can merge small writes on the server (Module 5), is off so that each write commits on its own.
 
-After completing both write methods, check business results before inspecting metadata:
+### What versions and rowsets show
 
-```sql
-SELECT 'batch' AS write_mode, COUNT(*) AS orders, SUM(order_amount) AS amount
-FROM orders_batch
-UNION ALL
-SELECT 'small' AS write_mode, COUNT(*) AS orders, SUM(order_amount) AS amount
-FROM orders_rowwise
-ORDER BY write_mode;
-```
+Check the business result first, then the storage:
 
 ```sql
 SHOW PARTITIONS FROM orders_batch;
@@ -167,108 +129,78 @@ SHOW TABLETS FROM orders_batch;
 SHOW TABLETS FROM orders_rowwise;
 ```
 
-### From Tablet Information to Rowsets
-
-First run SHOW TABLETS above and find each table's TabletId, Version, and VersionCount:
-
-| Field | How to read it | What it does not mean |
+| Field | How to read it | What it is not |
 | --- | --- | --- |
-| TabletId | Use it to locate this shard for further inspection | Not a business order ID |
-| Version | The data version position reported by this replica | Not the current file count; Compaction does not reset it to 1 |
-| VersionCount | The number of versions reported at sampling time, related to compaction state | Not the submission count or Segment file count |
+| TabletId | Identifies the tablet for further inspection | An order ID |
+| Version | The last committed version: an empty tablet starts at 1, and each load adds one | A count of files; compaction does not lower it |
+| VersionCount | The number of versions that the BE reported at its last report, about once a minute | A count of writes or of segments |
 
-For example, if one sample shows a higher VersionCount for the row-by-row table than for the batch table, investigate whether it retains more
-uncompacted Rowsets. This number alone cannot tell you how much slower a query is. Metadata reporting and background compaction have their own timing;
-record the sampling time, and do not expect identical counts on every run.
+The batch table is at version 2 and the row-by-row table at version 11: ten writes, ten transactions. A tablet's rowsets are listed by the BE that stores it: `SHOW TABLET <TabletId>` returns a `DetailCmd`, a `SHOW PROC` statement that lists the tablet's replicas, and each replica has a `CompactionStatus` URL on its BE. Lab 2 reads it for both tables:
 
-The following shows the command format; replace the angle-bracketed placeholder with the value returned in this run:
+| Table | Rowsets right after the writes | After cumulative compaction |
+| --- | --- | --- |
+| orders_batch | `[0-1]`, the empty start, and `[2-2]`, the ten rows | Unchanged: one load rowset has nothing to merge |
+| orders_rowwise | `[0-1]` and `[2-2]` … `[11-11]`, one per write | `[0-1]` and `[2-11]`, with the ten old rowsets listed as stale |
 
-```text
-SHOW TABLET <TabletId>;
-Execute the returned DetailCmd (SHOW PROC ...)
-Read the returned CompactionStatus URL to inspect rowsets
+`[2-11]` is a range of versions, not ten orders. On the sandbox, compaction usually merges the ten small rowsets within seconds, so what you see depends on when you look; the business result does not. Only read the status here: do not trigger compaction or touch storage files. See [Tablet status access](https://doris.apache.org/docs/4.x/admin-manual/trouble-shooting/tablet-local-debug/).
+
+Ten rows show the mechanism, not throughput: measuring write performance needs large data, fixed concurrency, and observation over time of versions, latency, and whether compaction keeps up.
+
+## 2.5 The Plan and the Work
+
+`EXPLAIN` shows the plan that the FE built, without running it: the table, the columns, the filter, and how many partitions and tablets it will read.
+
+```sql
+EXPLAIN SELECT order_id, order_amount
+FROM orders_batch
+WHERE order_id = 1;
 ```
 
-Version ranges in the Rowset list help you understand which batches have been compacted. For example, `[2-4]` covers that range of versions,
-not three orders. This is only an illustration of how to read the list, not a fixed output for this lab.
-URLs returned by the course container may use an internal container IP. When viewing them from the host, replace only this course BE's address with
-`http://127.0.0.1:51040`, keeping the `/api/compaction/show?tablet_id=...` path.
-Only read status here; do not trigger Compaction or modify storage files.
-[Tablet status access](https://doris.apache.org/docs/4.x/admin-manual/trouble-shooting/tablet-local-debug/)
+A plan is not a measurement: it says nothing about how many rows or bytes a scan actually read. The **Query Profile** records that. With `enable_profile = true` in a session, Doris keeps a Profile for each query; `SELECT last_query_id()` right after a query returns its query ID, which is also its Profile ID, and the FE serves the Profile's text and shows it on the QueryProfile page of its Web UI. Lab 2 turns Profiles on for its session, turns off the SQL cache so that a repeated query really scans, and restores both settings afterwards.
 
-### How Can You Obtain a Profile for a Real Query?
+A scan's row counters tell how it found its rows:
 
-After completing Lab 2, run the following observation code in a temporary code cell in the same Notebook.
-It enables Profile collection only for this session, does not rebuild tables, and restores the original setting afterward:
+| Counter | What it counts |
+| --- | --- |
+| ScanRows | Rows the scan read from its segments |
+| RowsKeyRangeFiltered | Rows the sort key's index let it skip without reading |
+| RowsVectorPredFiltered | Rows it read and then dropped with the filter |
+| RowsRead | Rows that passed the filter |
 
-```python
-previous_profile = lab.query("SELECT @@enable_profile")[0][0]
-try:
-    lab.execute("SET enable_profile = true")
-    lab.sql("SELECT order_id, order_amount FROM orders_batch WHERE order_id = 1")
-    lab.sql("SHOW QUERY PROFILE")
-finally:
-    lab.execute("SET enable_profile = %s", (previous_profile,))
-```
+All three of Lab 2's queries return order 1, but they do different work. `WHERE order_id = 1` reads one row: `order_id` is the sort key, and its index narrows the range. `WHERE customer_id = 832` reads all ten rows and drops nine. Selecting all columns instead of two, with the same filter, reads more bytes. On ten rows, these counters describe the kind of work, not its speed; compare speed only on the same machine, data, and cache. See [Query Profile](https://doris.apache.org/docs/4.x/query-acceleration/query-profile/).
 
-Find the query you just ran by database name, SQL, and start time; do not use someone else's query for comparison.
-Profile collection may finish slightly later. Check the list again, or open the details on the QueryProfile page of the course FE Web UI.
-First find the scan operator's row count, bytes read, and elapsed time, then inspect the output after filtering: this query returns one row,
-but that does not mean it read only one row underneath. When comparing column pruning, keep the filter conditions the same and change only the SELECT columns.
-This section does not require tuning; full slow-query analysis is covered in Level 2, Module 10.
-[Configuring and viewing Profiles](https://doris.apache.org/docs/4.x/query-acceleration/query-profile/)
+## Lab 2: Observe Storage and Write Batches
 
-### How Should You Interpret Observations?
+Open [Lab 2: Observe Storage and Write Batches](lab02_observe_storage.ipynb). You:
 
-| Observation | Main purpose | What to keep in mind |
-| --- | --- | --- |
-| Row counts, details, amounts | Check the business data saved by both write methods | Confirm matching results before comparing write throughput |
-| EXPLAIN | Inspect planned scan scope and filter conditions | Query duration and disk IO require runtime statistics |
-| Version-related Tablet metadata | Inspect storage state at sampling time | Complete Rowset/Segment lists require further storage inspection |
-| Query Profile | Inspect actual operator durations, scan statistics, and other execution metrics | Keep machine, cache, data size, and other conditions consistent when comparing performance |
+1. Create two tables with the same definition and write the same ten orders as one batch and as ten single-row writes.
+2. Check that both tables contain ten rows and 12220.60.
+3. Read the partitions' and tablets' versions, then the rowsets of each tablet and what compaction did with them.
+4. Compare a query's plan with the scan counters of its Query Profile.
+5. Practice: one date in both tables, and why the sort key does not help that filter.
 
-Background compaction may finish before sampling. If the two tables have similar version-related information, first confirm the write methods,
-then interpret the result in light of the sampling time; one sample reflects storage state at that moment.
-This section uses ten rows to understand write mechanisms. Evaluating production throughput also requires fixed data size, concurrency, and machine resources,
-with sustained observation of write latency, version accumulation, and whether compaction keeps up with writes.
+You need the course sandbox from Module 1. The optional [extension Lab on batches, partitions, and Profile](../extensions/extension23_physical_design.ipynb) repeats these observations on 100,000 rows.
 
-## Hands-on Lab 2: Observe Storage and Write Batches
+## Summary
 
-Before starting, complete Module 1, be able to connect to the lab instance and verify order totals, and use the course's dedicated lab database.
+- The client sends SQL, the FE plans the query and distributes it, and the BE reads the needed columns and filters and aggregates them; a planned query can still fail while it runs.
+- A table's partitions hold ranges of rows, each bucket of a partition is a tablet, each write adds a versioned rowset to a tablet, and a rowset's columns are in segment files.
+- Rows are visible once their transaction is published; compaction merges rowsets afterward and never changes which rows a query returns.
+- Compare write methods with the same data, table definition, and settings: both of Lab 2's tables hold ten rows and 12220.60.
+- One batch made version 2 and one rowset; ten writes made version 11 and ten rowsets, which compaction merges into `[2-11]`.
+- EXPLAIN shows what a query plans to read, and the Query Profile what its scan read and skipped; ten rows show mechanisms, not speed.
 
-Open [Lab 2](lab02_observe_storage.ipynb) and complete these steps in order:
+## Quiz 2
 
-1. Create identically structured tables for batch and row-by-row writes.
-2. Apply both write methods to the same order sample and observe Tablet metadata.
-3. Verify that both tables contain ten rows and 12220.60, and record sampling times and the effects of background compaction.
-
-### Data Source and Notes
-
-The lab uses a historical subset of Microsoft's official WWI simulated wholesale business, retaining the original customer and product identifiers.
-See the [data notes](../../datasets/README.md) for fields, business definitions, and expected results.
-
-See the [Level 1 extension labs](../extensions/README.md) for additional operations. They use separate `ext_*` tables rather than repeatedly rewriting this lab's business results.
-
-## Module Summary
-
-- The client submits SQL, FE plans and distributes tasks, and BE reads column data and performs filtering, aggregation, and other computation.
-- Table, Partition, Tablet, Rowset, and Segment represent different levels: table, range, shard, versioned data set, and columnar file.
-- Write visibility depends on transaction publication and interface semantics. Compaction improves physical organization in the background and should not change business results.
-- Keep data, table structure, and configuration consistent when comparing batches. Both tables in this lab must contain ten rows and 12220.60.
-- Plans, metadata, and runtime statistics serve different purposes; small samples and a single observation cannot prove a fixed performance gain.
-
-## Knowledge Quiz 2: Doris Storage Architecture and Write Mechanisms
-
-After completing the notes and lab, open [Quiz 2](quiz02_storage_and_write_batches.ipynb).
-The quiz contains five single-choice questions and does not depend on Doris or external services. Read the answer explanations after submitting.
+Open [Quiz 2: Doris Storage Architecture and Write Mechanisms](quiz02_storage_and_write_batches.ipynb). It has six single-choice questions and needs no running environment.
 
 Next module: [Module 3: Doris Table Models, Partitioning, and Bucketing](../module03-table-design/course.md).
 
-## Official References
+## References
 
-- [System architecture](https://doris.apache.org/docs/4.x/features-architecture/system-architecture/)
-- [Partitioning and bucketing basics](https://doris.apache.org/docs/4.x/table-design/data-partitioning/basic-concepts/)
-- [Compaction principles](https://doris.apache.org/docs/4.x/admin-manual/trouble-shooting/compaction-principles/)
-- [EXPLAIN](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-query/EXPLAIN/)
-- [Query Profile](https://doris.apache.org/docs/4.x/query-acceleration/query-profile/)
-- [Group Commit](https://doris.apache.org/docs/4.x/data-operate/import/load-best-practices/group-commit-manual/)
+- [Apache Doris: System architecture](https://doris.apache.org/docs/4.x/features-architecture/system-architecture/)
+- [Apache Doris: Partitioning and bucketing basics](https://doris.apache.org/docs/4.x/table-design/data-partitioning/basic-concepts/)
+- [Apache Doris: Compaction principles](https://doris.apache.org/docs/4.x/admin-manual/trouble-shooting/compaction-principles/)
+- [Apache Doris: EXPLAIN](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-query/EXPLAIN/)
+- [Apache Doris: Query Profile](https://doris.apache.org/docs/4.x/query-acceleration/query-profile/)
+- [Apache Doris: Group Commit](https://doris.apache.org/docs/4.x/data-operate/import/load-best-practices/group-commit-manual/)

@@ -49,6 +49,32 @@ class StartContainerTests(unittest.TestCase):
             docker.start_container("doris; rm -rf /")
 
 
+class WaitForHealthTests(unittest.TestCase):
+    def test_a_restarting_container_is_waited_for(self):
+        # Grafana exits when a plugin download times out at startup, and its restart policy
+        # starts it again: the wait goes on until it is healthy.
+        states = [
+            {"State": {"Status": "restarting", "Health": {"Status": "unhealthy"}}},
+            {"State": {"Status": "running", "Health": {"Status": "starting"}}},
+            RUNNING,
+        ]
+        with patch.object(docker, "container_inspect", side_effect=states) as inspect, \
+             patch.object(docker.time, "sleep"):
+            docker.wait_for_health("doris-obs-grafana", report=False)
+        self.assertEqual(inspect.call_count, 3)
+
+    def test_an_unhealthy_or_exited_container_fails_at_once(self):
+        unhealthy = {"State": {"Status": "running", "Health": {"Status": "unhealthy"}}}
+        for state in (unhealthy, STOPPED):
+            with self.subTest(status=state["State"]["Status"]), \
+                 patch.object(docker, "container_inspect", return_value=state) as inspect, \
+                 patch.object(docker, "run", return_value=subprocess.CompletedProcess([], 0, "log", "")), \
+                 patch.object(docker, "show_log"), patch.object(docker.time, "sleep"):
+                with self.assertRaisesRegex(RuntimeError, "entered state"):
+                    docker.wait_for_health("doris-x", report=False)
+                self.assertEqual(inspect.call_count, 1)
+
+
 class DockerReadyTests(unittest.TestCase):
     def test_stopped_docker_desktop_is_opened_and_waited_for(self):
         open_result = subprocess.CompletedProcess(["open", "-a", "Docker"], 0, "", "")

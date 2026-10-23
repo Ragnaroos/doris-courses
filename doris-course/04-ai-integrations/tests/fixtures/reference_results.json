@@ -1,0 +1,502 @@
+{
+ "doris_catalog.discovery": {
+  "children": [
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "list_catalogs"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "list_databases"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "list_tables"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "get_table_context"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "get_table_size"
+   }
+  ],
+  "domain": "doris_catalog",
+  "generated_at": "2026-10-20T18:30:10.812838Z",
+  "manifest_version": "catalog.6c948ca49041",
+  "mode": "manifest"
+ },
+ "doris_catalog.get_table_context": {
+  "child_tool": "get_table_context",
+  "data": {
+   "data": {
+    "basic": {
+     "data": {
+      "average_row_length": 5,
+      "catalog": "internal",
+      "comment": "Synthetic storefront events for the AI Integrations course",
+      "created_at": "2026-10-20 18:04:53",
+      "data_size_bytes": 80761,
+      "database": "ai_course",
+      "engine": "Doris",
+      "index_size_bytes": 0,
+      "raw_type": "BASE TABLE",
+      "row_count": 14307,
+      "table": "events",
+      "type": "table",
+      "updated_at": "2026-10-20 18:24:35"
+     },
+     "source": "_get_table_basic_info_tool",
+     "status": "success",
+     "warnings": []
+    },
+    "comments": {
+     "data": {
+      "columns": {
+       "event_id": "Unique event identifier",
+       "event_time": "When the event happened",
+       "event_type": "view, cart, or purchase",
+       "product_id": "Product identifier",
+       "region": "Sales region of the shopper",
+       "revenue": "Order value in USD for purchase events, otherwise 0.00",
+       "user_id": "Anonymous shopper identifier"
+      },
+      "table": {
+       "comment": "Synthetic storefront events for the AI Integrations course"
+      }
+     },
+     "source": "_get_table_comment_tool,_get_table_column_comments_tool",
+     "status": "success",
+     "warnings": []
+    },
+    "indexes": {
+     "data": {
+      "index_count": 0,
+      "items": []
+     },
+     "source": "_get_table_indexes_tool",
+     "status": "success",
+     "warnings": []
+    },
+    "schema": {
+     "data": {
+      "catalog": "internal",
+      "column_count": 7,
+      "columns": [
+       {
+        "column_name": "event_time",
+        "comment": "When the event happened",
+        "data_type": "datetime",
+        "default_value": null,
+        "extra": "",
+        "is_nullable": false,
+        "key": "YES"
+       },
+       {
+        "column_name": "event_id",
+        "comment": "Unique event identifier",
+        "data_type": "bigint",
+        "default_value": null,
+        "extra": "",
+        "is_nullable": false,
+        "key": "YES"
+       },
+       {
+        "column_name": "user_id",
+        "comment": "Anonymous shopper identifier",
+        "data_type": "bigint",
+        "default_value": null,
+        "extra": "NONE",
+        "is_nullable": false,
+        "key": "NO"
+       },
+       {
+        "column_name": "event_type",
+        "comment": "view, cart, or purchase",
+        "data_type": "varchar(16)",
+        "default_value": null,
+        "extra": "NONE",
+        "is_nullable": false,
+        "key": "NO"
+       },
+       {
+        "column_name": "region",
+        "comment": "Sales region of the shopper",
+        "data_type": "varchar(16)",
+        "default_value": null,
+        "extra": "NONE",
+        "is_nullable": false,
+        "key": "NO"
+       },
+       {
+        "column_name": "product_id",
+        "comment": "Product identifier",
+        "data_type": "bigint",
+        "default_value": null,
+        "extra": "NONE",
+        "is_nullable": false,
+        "key": "NO"
+       },
+       {
+        "column_name": "revenue",
+        "comment": "Order value in USD for purchase events, otherwise 0.00",
+        "data_type": "decimal(12,2)",
+        "default_value": "0.00",
+        "extra": "NONE",
+        "is_nullable": false,
+        "key": "NO"
+       }
+      ],
+      "database": "ai_course",
+      "table": "events"
+     },
+     "source": "_get_table_schema_tool",
+     "status": "success",
+     "warnings": []
+    }
+   },
+   "evidence": [
+    {
+     "handler": "_get_table_schema_tool",
+     "reason_code": null,
+     "section": "schema",
+     "success": true
+    },
+    {
+     "handler": "_get_table_comment_tool",
+     "reason_code": null,
+     "section": "comments",
+     "success": true
+    },
+    {
+     "handler": "_get_table_column_comments_tool",
+     "reason_code": null,
+     "section": "comments",
+     "success": true
+    },
+    {
+     "handler": "_get_table_indexes_tool",
+     "reason_code": null,
+     "section": "indexes",
+     "success": true
+    },
+    {
+     "handler": "_get_table_basic_info_tool",
+     "reason_code": null,
+     "section": "basic",
+     "success": true
+    }
+   ],
+   "metadata": {
+    "requested_sections": [
+     "schema",
+     "comments",
+     "indexes",
+     "basic"
+    ],
+    "sections": [
+     "schema",
+     "comments",
+     "indexes",
+     "basic"
+    ]
+   },
+   "status": "success",
+   "warnings": []
+  },
+  "domain": "doris_catalog",
+  "manifest_version": "catalog.6c948ca49041",
+  "metadata": {
+   "duration_ms": 79.5,
+   "request_id": "req_7e2c9874931ef105",
+   "source": "doris",
+   "truncated": false
+  },
+  "mode": "result",
+  "warnings": []
+ },
+ "doris_cluster.discovery": {
+  "children": [
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "get_cluster_overview"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "list_cluster_nodes"
+   },
+   {
+    "availability": {
+     "callable": false,
+     "reason_code": "RUNTIME_PROBE_FAILED"
+    },
+    "name": "list_active_tasks"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "get_monitoring_metrics"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "get_memory_stats"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "get_cache_status"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_DEGRADED_UNCERTIFIED"
+    },
+    "name": "get_compaction_status"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "get_workload_group_status"
+   },
+   {
+    "availability": {
+     "callable": false,
+     "reason_code": "DEPLOYMENT_MODE_UNKNOWN"
+    },
+    "name": "get_compute_group_status"
+   },
+   {
+    "availability": {
+     "callable": false,
+     "reason_code": "RUNTIME_PROBE_FAILED"
+    },
+    "name": "analyze_resource_growth"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "get_runtime_capabilities"
+   }
+  ],
+  "domain": "doris_cluster",
+  "generated_at": "2026-10-20T18:30:11.487816Z",
+  "manifest_version": "cluster.9040d00a1953",
+  "mode": "manifest"
+ },
+ "doris_cluster.get_memory_stats": {
+  "child_tool": "get_memory_stats",
+  "data": {
+   "data": {
+    "detail": "summary",
+    "nodes": [
+     {
+      "host": "127.0.0.1",
+      "metrics": {
+       "doris_be_ann_index_in_memory_cnt": 0,
+       "doris_be_ann_index_in_memory_rows_cnt": 0,
+       "doris_be_memory_allocated_bytes": 1595621376,
+       "doris_be_memory_jemalloc_active_bytes": 1163984896,
+       "doris_be_memory_jemalloc_allocated_bytes": 1068884600,
+       "doris_be_memory_jemalloc_dirty_purged_num": 2360,
+       "doris_be_memory_jemalloc_mapped_bytes": 1209991168,
+       "doris_be_memory_jemalloc_metadata_bytes": 78660136,
+       "doris_be_memory_jemalloc_muzzy_purged_num": 2158,
+       "doris_be_memory_jemalloc_pactive_num": 17761,
+       "doris_be_memory_jemalloc_pdirty_num": 62,
+       "doris_be_memory_jemalloc_pmuzzy_num": 0,
+       "doris_be_memory_jemalloc_resident_bytes": 1180696576,
+       "doris_be_memory_jemalloc_retained_bytes": 342949888,
+       "doris_be_memory_jemalloc_tcache_bytes": 578217416,
+       "doris_be_memory_pgpgin": 1732169,
+       "doris_be_memory_pgpgout": 893660,
+       "doris_be_memory_pool_bytes_total": 0,
+       "doris_be_memory_pswpin": 0,
+       "doris_be_memory_pswpout": 0,
+       "doris_be_memtable_flush_duration_us": 9253,
+       "doris_be_memtable_flush_total": 2,
+       "doris_be_memtable_memory_limiter_mem_consumption": [
+        {
+         "labels": {
+          "type": "load"
+         },
+         "value": 0
+        }
+       ],
+       "doris_be_query_cache_memory_total_byte": 43
+      },
+      "node_id": "configured_0",
+      "role": "be"
+     }
+    ]
+   },
+   "metadata": {
+    "invented_values": false,
+    "source": "doris_be_metrics"
+   },
+   "status": "success",
+   "warnings": []
+  },
+  "domain": "doris_cluster",
+  "manifest_version": "cluster.9040d00a1953",
+  "metadata": {
+   "duration_ms": 4.544,
+   "request_id": "req_c41df45a8fef9a68",
+   "source": "doris",
+   "truncated": false
+  },
+  "mode": "result",
+  "warnings": []
+ },
+ "doris_query.discovery": {
+  "children": [
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "execute_query"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "explain_query"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "get_query_profile"
+   },
+   {
+    "availability": {
+     "callable": true,
+     "reason_code": "CAPABILITY_VERIFIED_UNCERTIFIED"
+    },
+    "name": "diagnose_query_performance"
+   },
+   {
+    "availability": {
+     "callable": false,
+     "reason_code": "RUNTIME_PROBE_FAILED"
+    },
+    "name": "list_slow_queries"
+   },
+   {
+    "availability": {
+     "callable": false,
+     "reason_code": "PROVIDER_NOT_CONFIGURED"
+    },
+    "name": "get_adbc_connection_info"
+   },
+   {
+    "availability": {
+     "callable": false,
+     "reason_code": "PROVIDER_NOT_CONFIGURED"
+    },
+    "name": "execute_adbc_query"
+   }
+  ],
+  "domain": "doris_query",
+  "generated_at": "2026-10-20T18:30:11.339646Z",
+  "manifest_version": "query.5eaae5b27664",
+  "mode": "manifest"
+ },
+ "doris_query.execute_query": {
+  "child_tool": "execute_query",
+  "data": {
+   "data": {
+    "columns": [
+     {
+      "name": "event_type"
+     },
+     {
+      "name": "event_count"
+     },
+     {
+      "name": "distinct_users"
+     }
+    ],
+    "row_count": 3,
+    "rows": [
+     {
+      "distinct_users": 453,
+      "event_count": 2904,
+      "event_type": "view"
+     },
+     {
+      "distinct_users": 204,
+      "event_count": 238,
+      "event_type": "cart"
+     },
+     {
+      "distinct_users": 94,
+      "event_count": 106,
+      "event_type": "purchase"
+     }
+    ],
+    "truncated": false
+   },
+   "metadata": {
+    "execution_time_seconds": 0.0682520866394043,
+    "limits": {
+     "max_bytes": 1048576,
+     "max_rows": 100,
+     "timeout_seconds": 30
+    },
+    "operation": "SELECT",
+    "protocol": "mysql",
+    "result_bytes": 188,
+    "source": "doris_query",
+    "truncation_reason": null
+   },
+   "status": "success",
+   "warnings": []
+  },
+  "domain": "doris_query",
+  "manifest_version": "query.5eaae5b27664",
+  "metadata": {
+   "duration_ms": 71.616,
+   "request_id": "req_273f96a96208b8b9",
+   "source": "doris",
+   "truncated": false
+  },
+  "mode": "result",
+  "warnings": []
+ }
+}

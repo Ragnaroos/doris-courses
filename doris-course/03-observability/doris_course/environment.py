@@ -12,6 +12,8 @@ The Compose override files read the same variables with the same defaults.
 
 from __future__ import annotations
 
+import os
+
 from doris_labkit.docker import env_port
 
 # Upstream DOG stack and demo. Update the Compose override files together with
@@ -51,3 +53,35 @@ DEMO_PROJECT = "doris-obs-demo"
 DEMO_NETWORK = "doris-obs-demo"
 DEMO_PROXY_CONTAINER = "doris-obs-demo-frontend-proxy"
 DEMO_PORT = env_port("DORIS_OBS_DEMO_PORT", 28082)  # forwards to the storefront proxy port 8080
+
+# Litefuse for Module 7: Compose project doris-obs-litefuse (environments/litefuse/compose.litefuse.yml).
+# It joins NETWORK and keeps its analytics tables in DORIS_CONTAINER, in LITEFUSE_DATABASE.
+# The project, keys, and user are created when Litefuse first starts (LITEFUSE_INIT_* in
+# the Compose file); Litefuse names the project's tables after LITEFUSE_PROJECT_ID.
+LITEFUSE_PROJECT = "doris-obs-litefuse"
+LITEFUSE_WEB_CONTAINER = "doris-obs-litefuse-web"
+LITEFUSE_PORT = env_port("DORIS_OBS_LITEFUSE_PORT", 23100)  # forwards to the Litefuse web port 3000
+LITEFUSE_DATABASE = "litefuse"
+LITEFUSE_PROJECT_ID = "llm_app"
+LITEFUSE_PUBLIC_KEY = "pk-lf-doris-course"
+LITEFUSE_SECRET_KEY = "sk-lf-doris-course"
+LITEFUSE_USER_EMAIL = "learner@example.com"
+LITEFUSE_USER_PASSWORD = "doris-course-1"
+# The address at which the other containers on NETWORK reach the Doris BE's HTTP port.
+DORIS_BE_HTTP_ENDPOINT = f"{DORIS_CONTAINER}:8040"
+
+# The local model for Module 7's optional lab: llama.cpp's server with a small open model,
+# Compose project doris-obs-llm (environments/llm/compose.llm.yml). The model file is
+# downloaded once into the project's volume, from a fixed commit of its Hugging Face
+# repository; DORIS_OBS_LLM_MODEL_URL may point to the same file on a mirror.
+LOCAL_MODEL_PROJECT = "doris-obs-llm"
+LOCAL_MODEL_CONTAINER = "doris-obs-llm"
+LOCAL_MODEL_PORT = env_port("DORIS_OBS_LLM_PORT", 28080)  # forwards to the llama.cpp server port 8080
+LOCAL_MODEL = "qwen2.5-0.5b-instruct"  # the name under which the server offers the model
+LOCAL_MODEL_FILE = "qwen2.5-0.5b-instruct-q4_k_m.gguf"  # Qwen2.5 0.5B Instruct, 4-bit, Apache 2.0
+LOCAL_MODEL_SHA256 = "74a4da8c9fdbcd15bd1f6d01d621410d31c6fc00986f5eb687824e7b93d7a9db"
+LOCAL_MODEL_URL = os.environ.get(
+    "DORIS_OBS_LLM_MODEL_URL",
+    "https://huggingface.co/Qwen/Qwen2.5-0.5B-Instruct-GGUF/resolve/"
+    f"9217f5db79a29953eb74d5343926648285ec7e67/{LOCAL_MODEL_FILE}",
+)

@@ -1,22 +1,27 @@
-"""Reusable single-choice quiz UI for course knowledge checks."""
+"""Reusable single-choice quiz UI for course knowledge checks.
+
+The questions come from the module's quiz YAML file; ``doris_labkit.quizbank``
+describes its structure and the fixed shuffled order of the options.
+"""
 
 from __future__ import annotations
 
-from dataclasses import dataclass
 from html import escape
 from pathlib import Path
-from typing import Any
 
 try:
     import ipywidgets as widgets
-    import yaml
     from IPython.display import display
+
+    from .quizbank import QuizOption, QuizQuestion, display_order, load_quiz
 except ImportError as exc:  # pragma: no cover - learner environment diagnostic
     raise RuntimeError(
         "Quiz dependencies are missing. From the course root, run "
         "`.venv/bin/python -m pip install -r requirements.txt`, restart the "
         "Jupyter kernel, and run the initialization cell again."
     ) from exc
+
+__all__ = ["CourseQuiz", "QuizOption", "QuizQuestion"]
 
 
 _QUIZ_STYLES = """
@@ -188,28 +193,6 @@ _QUIZ_STYLES = """
 """
 
 
-@dataclass(frozen=True)
-class QuizOption:
-    option_id: str
-    text: str
-
-
-@dataclass(frozen=True)
-class QuizQuestion:
-    question_id: str
-    objective: str
-    prompt: str
-    options: tuple[QuizOption, ...]
-    answer: str
-    explanation: str
-
-    def option_text(self, option_id: str | None) -> str:
-        for option in self.options:
-            if option.option_id == option_id:
-                return option.text
-        return "No answer"
-
-
 class CourseQuiz:
     """Render a one-question-at-a-time, self-assessed course quiz."""
 
@@ -233,56 +216,16 @@ class CourseQuiz:
 
     @classmethod
     def from_yaml(cls, path: str | Path) -> "CourseQuiz":
-        quiz_path = Path(path).expanduser().resolve()
-        with quiz_path.open("r", encoding="utf-8") as stream:
-            document = yaml.safe_load(stream)
-        if not isinstance(document, dict):
-            raise ValueError(f"Quiz file must contain a mapping: {quiz_path}")
+        """Load a quiz file and show its options in the quiz's fixed shuffled order.
 
-        raw_questions = document.get("questions")
-        if not isinstance(raw_questions, list):
-            raise ValueError(f"Quiz file has no questions list: {quiz_path}")
-
-        questions = tuple(
-            cls._parse_question(raw_question, index, quiz_path)
-            for index, raw_question in enumerate(raw_questions, start=1)
-        )
+        Raises ``doris_labkit.quizbank.QuizFormatError`` (a ValueError) listing
+        every problem when the file does not follow the quiz structure.
+        """
+        quiz = display_order(load_quiz(path))
         return cls(
-            title=str(document.get("title", "Course knowledge check")),
-            description=str(document.get("description", "")),
-            questions=questions,
-        )
-
-    @staticmethod
-    def _parse_question(
-        raw: Any,
-        index: int,
-        quiz_path: Path,
-    ) -> QuizQuestion:
-        if not isinstance(raw, dict):
-            raise ValueError(f"Question {index} must be a mapping: {quiz_path}")
-        raw_options = raw.get("options")
-        if not isinstance(raw_options, list) or len(raw_options) < 2:
-            raise ValueError(
-                f"Question {index} must contain at least two options: {quiz_path}"
-            )
-        options = tuple(
-            QuizOption(option_id=str(option["id"]), text=str(option["text"]))
-            for option in raw_options
-        )
-        option_ids = {option.option_id for option in options}
-        answer = str(raw.get("answer", ""))
-        if answer not in option_ids:
-            raise ValueError(
-                f"Question {index} answer does not match an option: {quiz_path}"
-            )
-        return QuizQuestion(
-            question_id=str(raw.get("id", f"question_{index}")),
-            objective=str(raw.get("objective", "Module knowledge")),
-            prompt=str(raw.get("prompt", "")),
-            options=options,
-            answer=answer,
-            explanation=str(raw.get("explanation", "")),
+            title=quiz.title,
+            description=quiz.description,
+            questions=quiz.questions,
         )
 
     def show(self) -> widgets.VBox:

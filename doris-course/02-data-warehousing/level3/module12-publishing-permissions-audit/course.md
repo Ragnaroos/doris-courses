@@ -1,310 +1,202 @@
 # Module 12: Publishing, Permissions, and Audit
 
-| Course Information | Details |
+| Course information | Value |
 | --- | --- |
 | Course | Data Warehousing with Apache Doris · Level 3 |
-| Product scope | Apache Doris 4.x; examples use the single-node course sandbox |
-| Prerequisites | Level 1 order tables; the Level 2 consumer view is used only in the independent exercise |
-| Suggested time | About 118 minutes: reading 40, Lab 70, Quiz 8; first-start image downloads/builds are additional |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox from Module 1; `orders_fact_l2` from Lab 9 and `bi_order_metrics_l2` from Lab 11 |
+| Estimated time | About 123 minutes: reading 38, Lab 75, quiz 10 |
 
-[Level 3 contents](../README.md) · [Open Lab 12](lab12_publishing_permissions_audit.ipynb) · [Open Quiz 12](quiz12_publishing_permissions_audit.ipynb)
+[Course README](../../README.md) · [Open Lab 12](lab12_publishing_permissions_audit.ipynb) · [Open Quiz 12](quiz12_publishing_permissions_audit.ipynb)
 
-## Module Goal
+## Module goal
 
-Level 2 ended by publishing the semantic view `bi_order_metrics_l2`. The business intelligence (BI) owner now asks: “The dashboard goes live next week. Can you give us an account?”
+Give a consumer exactly the access its contract needs, through a role, prove it as the consumer, keep records that another person can check, and take the access away again without breaking anyone else.
 
-Two quick approaches create problems later:
+## Learning objectives
 
-- Share the root password. BI users can now drop tables and change permissions. The audit log records root, so it cannot distinguish the people using that account.
-- Create an account with `SELECT_PRIV ON *.*.*`. The dashboard needs one view, but the account can read every detail table, including tables created later.
+After completing this module, you will be able to:
 
-When the dashboard is retired a few months later, nobody remembers which permissions were granted or which ones should be removed.
+1. Write a consumer contract and choose the object to publish before granting any privilege.
+2. Grant only the needed object privilege through a role, and tell read privileges from administrative ones.
+3. Tell what SHOW GRANTS, SHOW ROLES, a consumer's queries, a change record, and the audit table each prove.
+4. Retire access by revoking a membership or a role's privilege, and verify the effect as the consumer.
+5. Release a table with a validated cutover, and say when its rollback stops being safe.
+6. Choose between table privileges, column privileges, a Row Policy, and masking for a restriction.
 
-This module breaks account delivery into four steps: define the data product, grant only the required privileges through a dedicated role, retain evidence that another person can check, and revoke access when the product is retired.
+## Module structure
 
-### Learning Objectives
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 12.1 A Contract Before a Grant | 6 min | What the BI team needs, and which object to publish |
+| 12.2 Privileges, Roles, and Scope | 8 min | Read privileges against administrative ones, and grants through roles |
+| 12.3 Evidence | 7 min | Configuration, the consumer's own queries, records, and the audit table |
+| 12.4 Retire Access | 5 min | A membership or a privilege, and in which order |
+| 12.5 Release a Table and Roll It Back | 5 min | A swap of names, a validated cutover, and the end of a safe rollback |
+| 12.6 Rows and Columns | 7 min | Row Policies, column privileges, and masking |
+| Lab 12 | 75 min | Publish the view to a role, test it as a consumer, retire it, move a direct grant, release a table, and restrict rows and columns |
+| Quiz 12 | 10 min | Six questions on these objectives |
 
-After this module, you should be able to:
+## 12.1 A Contract Before a Grant
 
-1. Plan a validated publication cutoff and distinguish safe rollback from a stale retained copy.
-2. Distinguish users, roles, privileges, and object scopes, including data access and administrative privileges.
-3. Grant only the required object privileges through a dedicated role.
-4. Retain release evidence using SHOW GRANTS, SHOW ROLES, and a change record, and distinguish it from audit logs.
-5. Distinguish revoking role membership from revoking a role's privileges, and verify the effect of each.
-6. Decide when table privileges need column privileges, a Row Policy, or data masking.
+Module 11 published `bi_order_metrics_l2`, and the BI team asks for an account before the dashboard goes live. Two quick answers cause trouble later. Sharing root lets the dashboard's users drop tables and grant privileges, and the audit records show root for all of them. An account with `SELECT_PRIV ON *.*.*` can read every table, the detail and tables created later. And when the dashboard is retired, nobody remembers what was granted.
 
-## Module Schedule
+First decide what the consumer reads:
 
-| Section | Main question | Suggested time |
-| --- | --- | ---: |
-| 12.1 What does BI actually need? | How do object, grain, and field meanings become a contract? | 7 minutes |
-| 12.2 How much access should you grant? | How do roles, privilege types, and object scopes differ? | 8 minutes |
-| 12.3 How do you prove the grant is sufficient and scoped? | What can each piece of release evidence establish? | 6 minutes |
-| 12.4 How do you retire dashboard access? | What should be revoked, and who is affected? | 5 minutes |
-| 12.5 What if table privileges are too broad? | When do you need column privileges, a Row Policy, or masking? | 4 minutes |
-| Lab 12 | Existing foundations and extended core evidence | 70 minutes |
-| Quiz 12 | Check publishing and access-governance decisions | 8 minutes |
-
-## 12.1 What Does BI Actually Need?
-
-Before creating an account, identify the object the dashboard must read. The course provides two candidates:
-
-| Candidate object | What one row represents | Contents |
+| Candidate | One row is | What a dashboard on it must do |
 | --- | --- | --- |
-| `orders_imported` | One order | Customer, amount, status, event time, paid and refunded amounts, region, and other detail fields; 10 rows total 1400.00 |
-| `bi_order_metrics_l2` | One day | `order_date`, `order_count`, `gross_amount`, and `average_order_amount` |
+| `orders_fact_l2` | One order with its customer, status, payments, and region | Repeat the contract's filter and aggregation in every chart |
+| `bi_order_metrics_l2` | One day: orders, amount, and average order amount | Read the published measures |
 
-If the dashboard reads the detail table directly, each chart must repeat the aggregation logic. An upstream field change can then alter dashboard calculations. The Level 2 semantic view provides a stable interface, so that view is the object to deliver for this dashboard.
+The semantic view is the object to deliver: its contract (Module 11) says what each column means, and its implementation can change without the dashboard. Write down, before the grant: the object; its grain; what its fields mean, such as `gross_amount` being order value, not money received; its freshness; the consumer and the scope of its access, read this view only; the owners of the data, the dashboard, and the approval; and how the release will be checked. The grant then follows from the object and the scope.
 
-Once the object is chosen, record a consumer contract. Each item prevents a common misuse:
+## 12.2 Privileges, Roles, and Scope
 
-| Contract item | Example for `bi_order_metrics_l2` | What can go wrong if it is missing? |
+Doris grants **privileges** on objects to **roles**, and roles to **users**. Five people of the BI team then share one role; when one leaves, only a membership changes, and a review reads one role instead of five users.
+
+| Privilege | Allows | Does the dashboard need it? |
 | --- | --- | --- |
-| Object | The `bi_order_metrics_l2` view | BI connects to a different object with a similar name |
-| Grain | One row represents one day | BI averages daily average order amounts again, producing a different value from the overall average |
-| Field meanings | `gross_amount` is simulated pre-tax order value, not cash received | The dashboard labels it as revenue |
-| Freshness | Updated after each processing batch completes | A data delay is mistaken for a system failure |
-| Consumer and access scope | BI dashboard; read this view only | Detail-table access is granted along with the view |
-| Owners | Data product owner, BI owner, and approver | Nobody knows who should investigate a problem or approve retirement |
-| Acceptance evidence | Row counts, totals, date coverage, and grant records | Another person cannot verify the release |
+| `SELECT_PRIV` | Reading the objects in its scope | Yes |
+| `LOAD_PRIV`, `ALTER_PRIV`, `DROP_PRIV` | Loading, changing, dropping | No |
+| `GRANT_PRIV` | Granting privileges, managing users and roles | No |
+| `ADMIN_PRIV` | Administration, reading and granting included, not node management | No |
+| `NODE_PRIV` | Adding and removing FE and BE nodes | No |
 
-Write the contract before granting access. The object and scope in the grant statement come directly from the “Object” and “Consumer and access scope” rows.
+These are separate: `GRANT_PRIV` does not read, and `SELECT_PRIV` does not grant. Granting `ADMIN_PRIV` to read one view gives a consumer far more than it needs. The scope after `ON` decides what `SELECT_PRIV` covers:
 
-To reduce prerequisites, Lab 12 first demonstrates table-level authorization on Level 1's `orders_imported`. It then creates `course_bi_orders_view_l3`, narrows the role to that view, and verifies with an ordinary user that the base table is inaccessible. Level 2 is not required for the Lab; the independent exercise applies the same procedure to `bi_order_metrics_l2`.
-
-## 12.2 How Much Access Should You Grant?
-
-### Why grant privileges to a role?
-
-Five people on the BI team need this dashboard. Direct grants to individual users require five copies of the same configuration. Staff changes make it easy to leave access behind, and new employees lack a clear role to request.
-
-Doris built-in authorization follows **privileges → roles → users**. A privilege describes an allowed operation on an object. A role names a reusable set of privileges. Users obtain those privileges through role membership. Staff changes can therefore be handled by changing membership, while the role provides a common scope for grants, revocation, and review.
-
-Lab 12 creates `course_bi_reader_l3`, briefly assigns it to a randomly named test user, and removes the user after testing.
-
-### Which privileges does a dashboard need?
-
-| Privilege | Capability | Needed by the BI dashboard? |
+| Scope | Covers | Objects created later |
 | --- | --- | --- |
-| `SELECT_PRIV` | Read data within the granted scope | Yes |
-| `LOAD_PRIV`, `ALTER_PRIV`, `DROP_PRIV` | Write or delete data, change table structure, or delete objects | No; this dashboard is read-only |
-| `GRANT_PRIV` | Delegate privileges and manage users or roles | No; BI should not expand its own access |
-| `ADMIN_PRIV` | Administrative capabilities, including reading and granting access, but excluding node operations | No |
-| `NODE_PRIV` | Add, remove, and manage Frontend (FE) and Backend (BE) nodes | No |
+| `*.*.*` | Every table of every catalog | Readable too |
+| `internal.<db>.*` | Every table and view of one database | Readable too |
+| `internal.<db>.<table>` | One table or view | Not affected |
+| `SELECT_PRIV(col1, col2) ON internal.<db>.<table>` | Named columns of one table | New columns are not covered |
 
-These privileges have different responsibilities. `GRANT_PRIV` does not itself grant read access, and `SELECT_PRIV` does not permit delegation. `ADMIN_PRIV` includes read access but excludes `NODE_PRIV`; granting it to read one table gives the consumer far more capability than required.
-
-The grantor needs the appropriate `GRANT_PRIV` or administrative privilege. In Doris 4.x, a delegated grantor must also hold the object privilege being delegated; `GRANT_PRIV` alone does not permit granting `SELECT_PRIV` on an arbitrary table. The course uses root to make authorization experiments repeatable in a personal sandbox.
-
-### How much does the SELECT_PRIV scope matter?
-
-Even when the privilege is only `SELECT_PRIV`, the scope after `ON` determines which objects become readable:
-
-| Grant scope | Coverage | Effect on future objects |
-| --- | --- | --- |
-| `*.*.*` | All databases and tables in all Catalogs | New objects are automatically readable |
-| `internal.*.*` | All databases and tables in the internal Catalog | New internal objects are automatically readable |
-| `internal.<db>.*` | All tables and views in one database | New tables in that database are automatically readable |
-| `internal.<db>.<table>` | One table or view | Other new objects are unaffected |
-| `SELECT_PRIV(col1, col2) ON internal.<db>.<table>` | Named columns in one table | New columns are outside this grant |
-
-If the dashboard needs one object, grant that object. Lab 12 executes the following form; read it here rather than running it alongside the Lab:
+**SQL reading example: the grant of Lab 12. Do not rerun it after the Lab.**
+It grants the narrowest scope that the contract allows:
 
 <!-- reading-only-example -->
 ```sql
-GRANT SELECT_PRIV
-ON internal.dw_course_l1_demo.orders_imported
-TO ROLE 'course_bi_reader_l3';
+CREATE ROLE course_bi_reader_l3;
+GRANT SELECT_PRIV ON internal.dw_course_l1_demo.bi_order_metrics_l2 TO ROLE 'course_bi_reader_l3';
 ```
 
-Lab 12 first runs `CREATE ROLE IF NOT EXISTS course_bi_reader_l3` and generates the object name from `lab.database`, so your database name may differ. In production, an approved authorization administrator should perform the change. Consumers need separate identities, appropriate host scopes, and managed credentials.
+The Lab writes your own database's name. A member of the role can read the view without any privilege on its sources, `daily_order_metrics_l2` and `orders_fact_l2`: Doris checks the privilege on the object that the query names. The course runs the change as root, the sandbox's administrator; in production an approved administrator does, and consumers get accounts of their own with a host scope and managed credentials.
 
-See [Built-in Authorization](https://doris.apache.org/docs/4.x/admin-manual/auth/authorization/internal/), [GRANT TO](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/GRANT-TO), and [SHOW PRIVILEGES](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/SHOW-PRIVILEGES/) for syntax and privilege definitions.
+A privilege granted to a user directly, as Module 11's optional dashboard did, works too, but no review of the roles finds it, and the next account for the same purpose needs the grant again. Doris keeps a user's own privileges in a hidden role of the user, `default_role_rbac_<user>@<host>`. Lab 12 moves the dashboard's direct grant to a role in an order that never cuts it off: grant the role the privilege, grant the user the role, then revoke the user's own privilege.
 
-## 12.3 How Do You Prove the Grant Is Sufficient and Scoped?
+## 12.3 Evidence
 
-Three months after release, a reviewer asks: Who made the change? What was granted? Why? How did the role change? “The SQL succeeded” does not answer those questions.
+Three months after the release, a reviewer asks who changed what, why, and with what effect. "The SQL succeeded" answers none of it. Each kind of evidence answers part:
 
-Lab 12 deletes its dedicated role at startup, so it records a **baseline after reset**. It does not capture that role's earlier history. A real change must record the original configuration before modifying it.
-
-| Check | SQL or observation in Lab 12 | Question answered |
+| Evidence | What it shows | What it does not show |
 | --- | --- | --- |
-| Identity | `SELECT CURRENT_USER(), DATABASE()` | Who is executing the change, and in which database? |
-| Object | `SELECT COUNT(*), SUM(order_amount) FROM orders_imported` | Does the base table contain the expected 10 rows totaling 1400.00? |
-| Grantor privileges | `SHOW GRANTS` | What privileges does the current user hold? This is not the target role's previous grant state |
-| Role baseline | `SHOW ROLES` after reset | Is the course role currently absent? This does not mean it was never granted privileges |
-| After grants | Two `SHOW ROLES` results | First observe table access, then confirm that only view access remains |
-| Ordinary user | View, base-table, and post-revocation queries | Does actual access match the least-privilege design? |
-| Business values | Repeat the count and total query | Did the authorization change leave the data product unchanged? |
+| `SHOW ROLES` | Each role's privileges by scope, and its members | What a member can actually do with them |
+| `SHOW GRANTS` / `SHOW ALL GRANTS` | An account's privileges, its own and its roles' merged into one list | Which of them are its own and which come from a role |
+| Queries as the consumer | What that identity can and cannot read | Other identities, other hosts |
+| A change record | The change's ID, role, object, privilege, reason, and approval | That the change ran, or what it did |
+| The audit table, `__internal_schema.audit_log` | Who ran which statement, in which database, with which outcome | That the privileges are right, or who the person behind an account was |
 
-After the first grant, locate `course_bi_reader_l3` in `SHOW ROLES`. Its `TablePrivs` should contain `internal.<current_db>.orders_imported: Select_priv`. After narrowing access, that column should contain only `course_bi_orders_view_l3: Select_priv`, with no base-table grant.
+Lab 12's checks combine them. `SHOW ROLES` shows `course_bi_reader_l3` with `internal.<db>.bi_order_metrics_l2: Select_priv` in `TablePrivs` and nothing in `GlobalPrivs` or `DatabasePrivs`, where a grant would cover more. Then a temporary ordinary user, created with the role and dropped at the end, reads the view's two days and is refused both sources: `Access denied; you need (at least one of) the (Admin_priv,Select_priv) privilege(s) on table orders_fact_l2 for this operation`. Root's own queries prove nothing about a consumer: root may read everything.
 
-A grant in `GlobalPrivs`, `CatalogPrivs`, or `DatabasePrivs` is broader than the intended object. Initially, `Users` is empty; the test user holds the role only during the later acceptance step.
+Doris's audit plugin writes every statement, with the user, the database, its state, and its error code, to the table `__internal_schema.audit_log`, and to the FE's log file `fe.audit.log`. SQL can read the table up to about a minute after the statement, because the plugin writes in batches:
 
-Each kind of evidence answers part of the question:
+```sql
+SELECT `user`, db, state, error_code, return_rows, stmt
+FROM __internal_schema.audit_log
+WHERE `user` = 'course_orders_l3_<random>'
+ORDER BY `time`;
+```
 
-| Evidence | What it can establish | What it cannot establish |
+A query that returned its rows has the state `EOF` and error code 0; a refused one `ERR` and, in Lab 12, 1105. The record is execution evidence, not a review of the privileges: on a cluster every FE writes its own records, and keeping them, protecting them, and alerting on them is the job of an audit platform.
+
+## 12.4 Retire Access
+
+When a dashboard is retired, its account may still read through the role. Look at the role's `Users` first, then decide what to revoke:
+
+| Situation | Revoke | Affects |
 | --- | --- | --- |
-| `SHOW ROLES` | The role's privileges and their scopes | Whether a real consumer can log in and read the data |
-| Business query | The object exists and its values match expectations | That privileges are limited to the intended scope |
-| The Lab's change-record `SELECT` | An example record format: change ID, role, object, privilege, and teaching reason | Approval or execution of the grant; this is not a Doris audit log |
-| FE audit log and approval record | Executed SQL and the basis for approval, respectively | The resulting access scope or the consumer's actual query outcome on their own |
-| Query as a test consumer | What that identity can and cannot read | Access outcomes for other identities or hosts |
+| Dashboard A is retired, B shares the role | A's membership: `REVOKE 'course_bi_reader_l3' FROM 'dashboard_a'@'%'` | A only |
+| The role has no purpose left | Its privilege, then the role: `REVOKE SELECT_PRIV ON ... FROM ROLE ...`, `DROP ROLE ...` | Every member |
 
-Lab 12 checks actual access with a temporary ordinary user: view-only `SELECT_PRIV` allows the view query, direct access to the order details is denied, and revoking role membership denies the view query too. This distinguishes root's administrative capabilities from the consumer's privileges.
+Revoking the role's privilege while B still uses it cuts B off too. Check other paths before you call A retired: a direct grant or another role could still let it read. Then verify as the consumer: after Lab 12 revokes the role from its user, Doris refuses even the connection to the lab database, `Access denied for user '...' to database '...'`, because the user has no privilege left in it.
 
-The consumer test uses its own connection:
+Some objects outlive what they belong to. Dropping a role leaves its Row Policies, and dropping a Workload Group leaves the grants of its usage (Module 14): a role or group created later with the same name gets them back. Remove the policies and grants first, then the role or group, and check `SHOW ROW POLICY` and `SHOW ROLES` afterward. `DROP ROLE` removes an object; keep the approval and the record of why.
 
-| Test | Expected result | Meaning |
-| --- | --- | --- |
-| Query `course_bi_orders_view_l3` | Success | View access works |
-| Query `orders_imported` directly | Denied | The grant did not expose the base table |
-| Query the view after revoking membership | Denied | Revocation changes actual consumer access |
+## 12.5 Release a Table and Roll It Back
 
-All three assertions execute in the isolated sandbox. Production still requires approval, managed identities, and audit retention.
+A new version of a table can be built beside the published one and released by name.
 
-A complete release record links identity, object, privilege, reason, and release ID under one change identifier. Follow the production operating procedure for the FE's `fe.audit.log` and approval records. Auditing the Lab's constant `SELECT` proves that this `SELECT` ran; it does not turn the displayed reason into an approval or prove that `GRANT` ran. [FE Log Management](https://doris.apache.org/docs/4.x/admin-manual/log-management/fe-log/) describes the audit log's location and purpose.
-
-## 12.4 How Do You Retire Dashboard Access?
-
-When a dashboard is retired, its account may continue reading through `course_bi_reader_l3`. Inspect the role's `Users` first. Decide whether to remove **one user's role membership** or **the role's view privilege**. These operations affect different sets of consumers.
-
-If dashboard A is retired but dashboard B still uses the same role, revoke membership only from A's account. Keep the role's `SELECT_PRIV`, then verify that A is denied and B can still read. Check for direct grants or other roles that could still give A access; removing one membership does not remove every access path.
-
-The following is a reading-only example. Lab 12 does not use this account:
+**SQL reading example: the release of Lab 12. Do not rerun it after the Lab.**
 
 <!-- reading-only-example -->
 ```sql
-REVOKE 'course_bi_reader_l3' FROM 'dashboard_a'@'%';
+ALTER TABLE published_orders_l3 REPLACE WITH TABLE candidate_orders_l3 PROPERTIES ("swap" = "true");
 ```
 
-Retire the role itself only after confirming that no consumer still needs it. Record its users and grants, remove or migrate all memberships, revoke the role's view privilege, delete the role, and verify both configuration and ordinary-user access.
+The swap is atomic: queries see either the old table or the new one, never half of each. `swap = true` keeps the old version under the candidate's name, ready for a rollback. Doris does not backfill, reconcile, or catch up the writes for you: that is the procedure around the swap. Lab 12 pauses its simulated writer, applies the final delta to both tables, compares every row, swaps, rehearses the rollback while the writer is still paused, swaps again, and resumes writing. After one more write, the retained old version lacks it: 3 orders and 205.00 against the published 4 and 230.00. A rollback is safe only until the published table receives its first write; afterward, the old version must catch up before it can come back.
 
-Lab 12 executes the next two statements after revoking membership and deleting its test user:
+## 12.6 Rows and Columns
 
-<!-- reading-only-example -->
-```sql
-REVOKE SELECT_PRIV
-ON internal.dw_course_l1_demo.course_bi_orders_view_l3
-FROM ROLE 'course_bi_reader_l3';
+Two new requirements arrive: the EAST team may read only EAST orders, and only Finance may see what was paid and refunded. Table privileges cover every row and column, so neither fits:
 
-DROP ROLE IF EXISTS course_bi_reader_l3;
-```
-
-Revoking a shared role's privileges interrupts every consumer relying on those privileges. Confirm dependencies before that step. The initial role drill has only one temporary consumer: it tests access, removes that user's membership and account, then revokes the view grant and removes the role and Lab view.
-
-Revocation changes access:
-
-- The test user can no longer query `course_bi_orders_view_l3`; it never had direct access to `orders_imported`.
-- `orders_imported` still contains 10 rows totaling 1400.00, with the same grain and fields.
-- Users obtaining access through other roles keep those independent access paths.
-
-Retain approval and revocation records in production. `DROP ROLE` removes an object; it does not replace an audit record. Before-and-after `SHOW ROLES` results describe configuration changes, while ordinary-user queries describe their effects. See [REVOKE FROM](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/REVOKE-FROM) and [DROP ROLE](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/DROP-ROLE/).
-
-## 12.5 What If Table Privileges Are Too Broad?
-
-Two new requirements arrive: only Finance may see `paid_amount` and `refund_amount`, and the eastern regional team may read only orders with `region = 'EAST'`. Table-level `SELECT_PRIV` cannot express either restriction.
-
-| Requirement | Mechanism to consider | What to verify |
+| Requirement | Mechanism | Check |
 | --- | --- | --- |
-| Selected columns for particular roles | Column privileges, such as `SELECT_PRIV(order_id, order_amount)` | Review the grant when new columns are added |
-| Selected rows based on a condition | Row Policy, associated with a user or role | Test the filter with the intended consumer identity |
-| Hide part of a sensitive field | Data masking | Doris uses Apache Ranger for masking policies; this Lab does not install Ranger |
+| Some columns for some roles | Column privileges: `SELECT_PRIV(order_id, order_date, status, order_amount, region)` | A query of another column is refused; a column added later is not covered |
+| Some rows for some roles | A Row Policy on the table, for a role | The consumer sees only its rows, even when it asks for others |
+| A part of a value hidden, such as a card number | Masking, through Apache Ranger | Not in this course: Lab 12 installs no Ranger |
 
-Test each mechanism with an ordinary consumer. A successful root query does not establish the consumer's access boundary. Define the restriction, affected objects, and acceptance checks before choosing a mechanism. See [Data Access Control](https://doris.apache.org/docs/4.x/admin-manual/auth/authorization/data/).
+A **Row Policy** adds a condition that Doris applies to every query of the table by the roles or users that it names; a `RESTRICTIVE` policy keeps only the matching rows.
 
-## 12.6 Prove a Release Boundary and Its Consumer Controls
-
-A stable table name can switch to a prepared table atomically, but Doris does not thereby backfill data, validate a business contract, or catch up a change stream for you. The extended Lab pauses its simulated writer, applies a final delta, reconciles all rows, swaps the names with `swap=true`, and rehearses rollback before resuming writes. Once the released table receives another write, the retained old copy is no longer a current rollback target. See [ALTER TABLE REPLACE](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/table-and-view/table/ALTER-TABLE-REPLACE/).
-
-The next drill separates table privilege from row visibility. Two ordinary users have the same table-level read privilege, while restrictive Row Policies constrain them to different regions. A query asking for the other region still returns no rows. This is database enforcement, unlike a dashboard filter; `root` is not the correct identity for validating it. The scope and policy combination rules are in [CREATE ROW POLICY](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-governance/CREATE-ROW-POLICY/).
-
-Finally, the Lab reads real tagged query entries from the course FE audit file. Grant metadata answers what an identity may do, query results establish the controlled experiment's visible rows, and audit records describe observed execution. Keep those kinds of evidence separate. Collecting one local file does not establish multi-node coverage or compliant retention; consult [FE log management](https://doris.apache.org/docs/4.x/admin-manual/log-management/fe-log/) for production operation.
-
-## Hands-on Lab: Publish a Scoped BI Reader Role
-
-Open [Lab 12](lab12_publishing_permissions_audit.ipynb) and complete these steps:
-
-1. Check identity, database, grantor privileges, and the role baseline after reset.
-2. Create `course_bi_reader_l3`.
-3. Observe a table grant, then narrow the role to the course view.
-4. As a temporary ordinary user, verify that the view is readable, the base table is denied, and the view is denied after membership is revoked.
-5. Record the role configuration and example change record; clean up the test user, role, and Lab view.
-6. Rehearse a reconciled table cutover and paused-writer rollback, then identify the retained copy's post-release gap.
-7. Test two regional ordinary users against restrictive Row Policies, and inspect real tagged FE audit records.
-8. Remove the temporary regional users and policies; retain the isolated data tables for review.
-
-### Prerequisites and Scope
-
-Lab 12 needs only `orders_imported` from Level 1 Lab 5. The Level 2 serving view appears in the independent exercise. The Notebook checks the table before changing grants.
-
-Use the dedicated `dw_course_l1_*` database. The test account has a random name; its password stays in memory and is never printed. The account is removed after testing. Its `'%'` host scope supports connectivity inside the personal course container and is not a production account design.
-
-### Acceptance Criteria
-
-| Check | Expected result |
-| --- | --- |
-| Prerequisite data | 10 `orders_imported` rows totaling 1400.00 |
-| Release identity | Current course user and dedicated database displayed |
-| Grant scope | First, only the current database's `orders_imported` in `TablePrivs`; then, only `course_bi_orders_view_l3` |
-| Privilege type | `Select_priv`, without `Admin_priv` or `Grant_priv` |
-| Ordinary-user checks | View succeeds; base table is denied; view is denied after membership revocation |
-| Example change record | Change ID, role, object, privilege, and teaching reason, identified as an example rather than approval or audit evidence |
-| Cleanup | `course_bi_reader_l3` no longer appears in `SHOW ROLES` |
-
-## Independent Exercise
-
-The BI team needs Level 2's `bi_order_metrics_l2`, but must not read order details. Write down:
-
-1. The role's minimum object scope.
-2. Two pieces of privilege evidence to retain.
-3. The rollback steps if publication fails.
-4. Why `SELECT_PRIV ON internal.*.*` exceeds the requirement.
-
-<details>
-<summary>Reference Explanation</summary>
-
-Grant `SELECT_PRIV` on this view only. The following is a reading-only example:
+**SQL reading example: the EAST policy of Lab 12. Do not rerun it after the Lab.**
 
 <!-- reading-only-example -->
 ```sql
-GRANT SELECT_PRIV
-ON internal.dw_course_l1_demo.bi_order_metrics_l2
-TO ROLE 'course_bi_reader_l3';
+CREATE ROW POLICY region_east_l3 ON dw_course_l1_demo.orders_fact_l2
+AS RESTRICTIVE TO ROLE course_region_east_l3 USING (region = 'EAST');
 ```
 
-Do not grant its dependencies, `daily_order_metrics_l2` or `orders_imported`. A view-only role can query the view; granting the detail table too would allow the consumer to bypass that interface.
+The policy follows the role's members, as the role's privilege does. In Lab 12 the EAST user sees 6 orders and 830.00, and its `WHERE region = 'WEST'` returns nothing: unlike a dashboard filter, no query can widen it. Policies do not apply to root, so test them as the consumer.
 
-Retain `SHOW GRANTS` for the grantor and before-and-after `SHOW ROLES` for the target role. After the grant, confirm that `TablePrivs` contains only the view. `SHOW GRANTS` does not describe the role's previous state. In an isolated environment, also test that the consumer can read the view but not the details.
+With column privileges, a role that has five columns of `orders_fact_l2` reads them, and Doris refuses `SUM(paid_amount)`, `SELECT *`, which it refuses for the first column that the role lacks, and `COUNT(*)`: a count of rows needs the privilege on the whole table, so count a granted column instead, `COUNT(order_id)`. Decide the restriction, the objects it covers, and how you will test it before you choose the mechanism.
 
-For rollback, inspect memberships and other consumers first. If only the newly published account should lose access, revoke its membership and verify access as that user. Keep shared role privileges while other consumers need them. Once the role has no remaining purpose, revoke its privileges, drop it, and verify the resulting configuration and access.
+## Lab 12: Publish a View to a Role, and Audit Who Read What
 
-`internal.*.*` covers every existing and future database and table in the internal Catalog, including order details. That scope exceeds the contract and increases the impact of an incorrect grant.
+Open [Lab 12: Publish a View to a Role, and Audit Who Read What](lab12_publishing_permissions_audit.ipynb). You:
 
-</details>
+1. Record the identity, the object, and the role baseline.
+2. Grant a role `SELECT_PRIV` on `bi_order_metrics_l2` alone, and check it in `SHOW ROLES`.
+3. As a temporary ordinary user, read the view, be refused its sources, and be refused the view after the `REVOKE`.
+4. Retire the role.
+5. Move Module 11's direct grant, if you built the dashboard, to a role.
+6. Release a table with a validated cutover, and see when its rollback stops being safe.
+7. Restrict two regional roles with Row Policies, and a third role to five columns.
+8. Find the users' queries, and a refusal, in the audit table.
+9. Practice: retire one of two dashboards that share a role.
 
-## Module Summary
+You need the course sandbox, Lab 9's `orders_fact_l2`, and Lab 11's `bi_order_metrics_l2`. Roles, users, and policies belong to the whole Doris cluster; the Lab removes the ones it does not keep.
 
-- Define the consumer contract before choosing privilege scope.
-- Roles centralize grants, revocation, and review; read privileges and administrative privileges serve different purposes.
-- `SHOW GRANTS`, `SHOW ROLES`, business queries, ordinary-user tests, and audit logs provide different evidence.
-- Revoke one user's membership when only that consumer leaves; revoke the role's privileges when the entire role is retired.
-- Column privileges, a Row Policy, and masking address different restrictions.
-- A release procedure includes revocation and cleanup as well as grants.
+## Summary
 
-## Knowledge Quiz 12: Publishing, Permissions, and Audit
+- Write the consumer's contract first, and publish the semantic view rather than its detail: the grant's object and scope follow from it.
+- Grant `SELECT_PRIV` on the one object through a role; administrative and granting privileges are separate, and a direct grant moves to a role without cutting the account off.
+- `SHOW ROLES` shows configuration, `SHOW GRANTS` merges an account's own and its roles' privileges, queries as the consumer show what it can do, a change record documents, and `__internal_schema.audit_log` records what ran.
+- Revoke one membership to retire one consumer and a role's privilege to retire everyone; check other paths, verify as the consumer, and remove policies and grants before the role or group.
+- A swap of table names is atomic, the cutover around it is your procedure, and its rollback is safe only until the next write.
+- Column privileges limit columns, a Row Policy limits rows for its roles, masking hides parts of values; `COUNT(*)` needs the table's privilege.
 
-[Quiz 12](quiz12_publishing_permissions_audit.ipynb) contains six scenario-based single-choice questions covering consumer contracts, privilege scope, evidence, shared-role revocation, and fine-grained access.
+## Quiz 12
+
+Open [Quiz 12: Publishing, Permissions, and Audit](quiz12_publishing_permissions_audit.ipynb). It has six single-choice questions and needs no running environment.
 
 Next module: [Module 13: Storage and Lifecycle Management](../module13-storage-lifecycle/course.md).
 
-## Official References
+## References
 
-- [Built-in Authorization](https://doris.apache.org/docs/4.x/admin-manual/auth/authorization/internal/)
-- [Data Access Control](https://doris.apache.org/docs/4.x/admin-manual/auth/authorization/data/)
-- [GRANT TO](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/GRANT-TO)
-- [REVOKE FROM](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/REVOKE-FROM)
-- [DROP ROLE](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/DROP-ROLE/)
-- [SHOW GRANTS](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/SHOW-GRANTS/)
-- [SHOW ROLES](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/SHOW-ROLES/)
-- [FE Log Management](https://doris.apache.org/docs/4.x/admin-manual/log-management/fe-log/)
+- [Apache Doris: Built-in authorization](https://doris.apache.org/docs/4.x/admin-manual/auth/authorization/internal/)
+- [Apache Doris: Data access control](https://doris.apache.org/docs/4.x/admin-manual/auth/authorization/data/)
+- [Apache Doris: GRANT TO](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/GRANT-TO)
+- [Apache Doris: REVOKE FROM](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/REVOKE-FROM)
+- [Apache Doris: SHOW GRANTS](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/SHOW-GRANTS/)
+- [Apache Doris: CREATE ROW POLICY](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-governance/CREATE-ROW-POLICY/)
+- [Apache Doris: ALTER TABLE REPLACE](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/table-and-view/table/ALTER-TABLE-REPLACE/)
+- [Apache Doris: Audit log](https://doris.apache.org/docs/4.x/admin-manual/audit-plugin/)

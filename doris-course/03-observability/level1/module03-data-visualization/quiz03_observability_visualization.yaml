@@ -1,107 +1,118 @@
-title: "Module 3 Quiz: Visualizing Observability Data"
-description: Six questions check whether you can choose the right table and filters in Grafana, interpret
-  what a visible result does and does not prove, and switch between aggregate trends and request-level
-  detail.
+title: 'Module 3 Quiz: Visualizing Observability Data'
+description: Six questions check whether you can search logs in Discover, explain a quiet error search,
+  set a time range that matches Doris, find where a trace's error starts, measure a host's CPU, and use
+  Grafana's time macros.
 questions:
-- id: choose_error_log_filters
-  objective: Build a discriminating log query
-  prompt: An engineer needs ERROR logs from the otel_logs table that mention a configuration problem.
-    The table contains structured severity and body fields. Which filter set identifies the intended records?
+- id: search_failed_checkouts
+  objective: Search logs in the Discover page of the Doris App with Lucene and with SQL conditions.
+  prompt: The load generator sends POST /api/checkout, and the storefront page sends POST /api/checkout?currencyCode=USD.
+    Which Discover search finds the checkouts of both that ended with HTTP status 500, and only those?
   options:
-  - id: severity_and_body
-    text: severity_text = ERROR and a body match for the configuration keyword
-  - id: severity_only
-    text: Only severity_text = ERROR, because every ERROR is a configuration problem
-  - id: body_only
-    text: Only a body match for the configuration keyword, regardless of severity
-  - id: timestamp_only
-    text: Only a recent timestamp, because severity and body are display-only fields
-  answer: severity_and_body
-  explanation: 'The requirement has two conditions: ERROR severity and a configuration topic in the message.
-    Combining both filters excludes warnings and unrelated errors.'
-- id: predict_combined_filter_result
-  objective: Predict the result of combining filters
-  prompt: 'Three log rows arrive: A is ERROR with body config reload failed; B is WARN with body config
-    reload failed; C is ERROR with body request timed out. A dashboard filter requires ERROR severity
-    and the keyword config. Which row is returned?'
+  - id: two_phrases
+    text: body:"POST /api/checkout" AND body:"HTTP/1.1 500"
+  - id: one_phrase
+    text: body:"POST /api/checkout HTTP/1.1 500"
+  - id: either_phrase
+    text: body:"POST /api/checkout" OR body:"HTTP/1.1 500"
+  - id: severity
+    text: severity_number:>=17 AND body:checkout
+  answer: two_phrases
+  explanation: 'A quoted phrase matches its words next to each other, in order. Two phrases joined with
+    AND match both kinds of line: the page''s query string stands between checkout and HTTP, but each
+    phrase still matches. The single long phrase misses the page''s requests, because the words currencycode
+    and usd break it. OR finds every checkout and every response with status 500. The access log has no
+    severity, so a severity condition finds none of these lines.'
+- id: explain_quiet_error_search
+  objective: Explain why a search by severity misses failures that a service does not log as errors.
+  prompt: During the incident, severity_number:>=17 over the last hour finds only a few errors of the
+    Doris FE, none about payments. Which explanation is best supported?
   options:
-  - id: a_and_c
-    text: A and C
-  - id: all
-    text: A, B, and C
-  - id: a_only
-    text: Only A
-  - id: a_and_b
-    text: A and B
-  answer: a_only
-  explanation: Filters are combined as conditions that the same row must satisfy. B fails the severity
-    condition, and C fails the keyword condition.
-- id: scope_cpu_metric_by_node
-  objective: Keep the analysis grain aligned with the question
-  prompt: A team must find which Doris node exceeds 90% CPU utilization. The otel_metrics_gauge table
-    contains metric_name, value, and node-identifying dimensions. Which analysis preserves the required
-    grain?
+  - id: not_logged_as_errors
+    text: The failing services send no logs, and the access log lines of the failures have no severity
+  - id: no_failures
+    text: No orders failed during that hour, because every failure leaves a log record of severity ERROR
+  - id: hidden_from_visitors
+    text: Discover hides the error logs of the demo's services unless you sign in to Grafana
+  - id: other_scale
+    text: The demo's services use their own scale, on which severity_number 17 means INFO
+  answer: not_logged_as_errors
+  explanation: A severity search finds only what the sources log as errors. Payment and checkout send
+    no logs to a Collector, and the proxy's access log, which records every failed checkout with status
+    500, has severity_number 0. A quiet error search is therefore no evidence that nothing failed. Discover
+    shows the same rows to every visitor, and severity_number puts all sources on one OpenTelemetry scale,
+    on which 17 to 20 is ERROR.
+- id: fix_empty_time_range
+  objective: Set a time range that matches how Doris stores time.
+  prompt: On a computer in UTC+8, Discover shows no hits for Last 15 minutes, while a SQL query finds
+    rows stamped one minute ago. What explains it, and what fixes it?
   options:
-  - id: max_without_dimension
-    text: Take the maximum value without retaining the node dimension
-  - id: error_logs
-    text: Search ERROR log messages and assume the first service name is the overloaded node
-  - id: per_node
-    text: Filter to the CPU-utilization metric and evaluate each node's value separately
-  - id: cluster_average
-    text: Average CPU utilization across all nodes, then inspect the single average
-  answer: per_node
-  explanation: The question asks which node is above the threshold, so the node dimension must remain
-    in the result. A cluster-wide average can hide one saturated node.
-- id: interpret_single_cpu_spike
-  objective: Distinguish a spike from sustained saturation
-  prompt: A five-minute Grafana panel shows one CPU sample at 92%, surrounded by samples between 88% and
-    90%. The requirement is to notify only when utilization stays above 90% for ten minutes. What can
-    the team conclude from the single point?
+  - id: absolute_utc_range
+    text: The app compares local times with UTC times in Doris; set an absolute range in UTC
+  - id: rows_delayed
+    text: Doris makes new rows visible to text searches only after 15 minutes; wait, then search again
+  - id: cached_result
+    text: Grafana caches empty results for a range; restart the Grafana container
+  - id: rows_deleted
+    text: The rows were deleted after the SQL query ran; load the telemetry again
+  answer: absolute_utc_range
+  explanation: Doris stores UTC, while the Doris App turns its range into your computer's local time and
+    compares that with the UTC times in Doris; in UTC+8, Last 15 minutes asks for rows 8 hours in the
+    future. An absolute range typed in UTC finds the rows. Rows are searchable seconds after they load,
+    Grafana does not cache this result, and the SQL query has just found the rows, so they were not deleted.
+- id: find_error_origin
+  objective: Follow a trace from a log line to the span where an error starts.
+  prompt: In a failed checkout's waterfall, error icons mark load-generator POST, frontend-proxy ingress,
+    frontend POST, checkout PlaceOrder, checkout's call to payment, and payment's Charge server span.
+    Payment's child span, charge, has no error. Where does the failure start?
   options:
-  - id: one_sample
-    text: Only that one sample exceeded 90%; it does not establish a sustained ten-minute condition
-  - id: cannot_measure
-    text: Grafana cannot evaluate CPU utilization after the first spike
-  - id: lower_threshold
-    text: The threshold should be lowered immediately so the spike always alerts
-  - id: sustained
-    text: The condition has been sustained for ten minutes
-  answer: one_sample
-  explanation: A threshold crossed in one sample is evidence of a spike, not evidence that the condition
-    persisted for the required duration. The alert window and continuity must be evaluated separately.
-- id: interpret_time_range_result
-  objective: Separate query-window effects from data loss
-  prompt: An incident occurred yesterday, but a Grafana panel using the default last-5-minutes range is
-    empty. The underlying logs and metrics are still present in Doris when queried for yesterday. Which
-    explanation is best supported?
+  - id: payment_charge
+    text: In payment's Charge server span, the deepest span with an error
+  - id: root_span
+    text: In load-generator POST, because the root span is where every error begins
+  - id: place_order
+    text: In checkout's PlaceOrder span, because it has the most child spans
+  - id: charge_child
+    text: In the charge span, because it is the last span that payment recorded
+  answer: payment_charge
+  explanation: 'Errors pass upward, from callee to caller, so most red rows only report an error from
+    below. The failure starts at the deepest span with an error, the one whose children have none: payment''s
+    Charge server span, whose attributes hold the error message. The root span is where the request started,
+    not where it failed; the number of children says nothing about errors; and the charge span has no
+    error status.'
+- id: measure_host_cpu
+  objective: Measure a host's CPU from per-core, per-state samples.
+  prompt: Each row of system.cpu.utilization holds the share of time, from 0 to 1, that one CPU core spent
+    in one state. Which calculation gives the share of time that the host was busy in the last minute?
   options:
-  - id: alert_required
-    text: An alert rule must fire before historical data becomes queryable
-  - id: window
-    text: The panel's time range excludes the incident; adjust the range before concluding data is missing
-  - id: deleted
-    text: Doris deleted yesterday's data because the dashboard was empty
-  - id: trace_only
-    text: Only trace data can be displayed for a custom time range
-  answer: window
-  explanation: A panel is constrained by its query time range. An empty current window does not prove
-    that historical rows are absent, especially when direct historical queries return data.
-- id: choose_trend_and_detail_views
-  objective: Choose complementary visualization levels
-  prompt: A team needs to compare P99 request latency across services over 24 hours and then inspect the
-    individual spans behind one slow trace. Which view sequence is appropriate?
+  - id: one_minus_idle
+    text: 100 times 1 minus the average of the idle rows of all cores
+  - id: average_all_rows
+    text: 100 times the average of all rows, whatever their state
+  - id: largest_value
+    text: 100 times the largest value of any row in the last minute
+  - id: share_above_0_9
+    text: The number of rows above 0.9, as a percentage of all rows
+  answer: one_minus_idle
+  explanation: The states of a core add up to 1, so its busy share is 1 minus its idle share; averaged
+    over all cores and samples, this measures the host. The average of all rows mixes every state and
+    always gives the same fraction. The largest value is usually an idle core's idle share. Rows above
+    0.9 are mostly the idle rows of idle cores, which is why a filter such as value > 0.9 finds idle cores
+    rather than busy ones.
+- id: use_time_macros
+  objective: Build dashboard panels from SQL with Grafana's time macros.
+  prompt: A panel's SQL uses $__timeFilter(timestamp) and $__timeGroupAlias(timestamp, 1m), and its Format
+    is Time series. What do the two macros do?
   options:
-  - id: detail_only
-    text: Use only a single span table for all 24 hours and ignore the trend
-  - id: log_only
-    text: Use only ERROR logs, because every slow request emits an error
-  - id: static_panel
-    text: Use one static aggregate number and remove all trace identifiers
-  - id: trend_then_detail
-    text: Use a time-series view for the P99 trend, then open trace/span detail filtered to the selected
-      trace
-  answer: trend_then_detail
-  explanation: The trend answers when P99 changed and which service stands out. Trace detail answers what
-    happened inside one slow request. The two views answer different questions and should complement each
-    other.
+  - id: follow_time_range
+    text: They keep the rows of the dashboard's time range and group them by minute
+  - id: convert_to_local
+    text: They turn the stored timestamps into your computer's local time before the query
+  - id: last_minute_only
+    text: They limit the result to the last minute and drop the older rows of the range
+  - id: lucene_search
+    text: They let the panel run a Lucene search, as Discover does, on the timestamp column
+  answer: follow_time_range
+  explanation: Grafana replaces $__timeFilter(timestamp) with a condition for the dashboard's time range,
+    passed as exact moments, and $__timeGroupAlias(timestamp, 1m) with the start of each row's minute,
+    named time. The stored timestamps stay in UTC; Grafana converts only the times that it displays. The
+    query returns every minute of the range, and the macros belong to SQL, not to Lucene.

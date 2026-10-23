@@ -1,0 +1,170 @@
+# Litefuse for Module 7: a local Litefuse whose analytics tables live in the
+# DOG stack's Doris, in the database litefuse next to otel.
+#
+# Litefuse (https://github.com/litefuse/litefuse, MIT) is a fork of Langfuse
+# that stores traces, observations, and scores in Apache Doris. This file
+# follows the docker-compose.yml of its release 26.3.0 with these changes:
+# - Doris is the DOG stack's container doris-obs, not a separate FE and BE;
+# - every container has the doris-obs-litefuse prefix and joins the doris-obs
+#   network, where the other containers reach each other by container name;
+# - Silo, a maintained fork of MinIO, is the object storage: MinIO no longer
+#   publishes images;
+# - only the web UI is published, on 127.0.0.1; Postgres, Redis, and Silo are
+#   reachable only from the containers;
+# - the images are pinned, and the instance starts with one organization,
+#   project, user, and API key pair (LITEFUSE_INIT_*), so that no sign-up is
+#   needed. The secrets are fixed values for this local sandbox only.
+#
+# ObservabilityLab.start_litefuse() runs, from the course root:
+#
+#   docker compose -p doris-obs-litefuse -f environments/litefuse/compose.litefuse.yml up -d
+#
+# after the DOG stack is running. The host port can be changed with the
+# variable named in it; doris_course/environment.py uses the same name and default.
+x-litefuse-env: &litefuse-env
+  NEXTAUTH_URL: http://127.0.0.1:${DORIS_OBS_LITEFUSE_PORT:-23100}
+  NEXTAUTH_SECRET: doris-course-local-only
+  SALT: doris-course-local-only
+  ENCRYPTION_KEY: "0000000000000000000000000000000000000000000000000000000000000000"
+  # Next.js listens on $HOSTNAME; without this it binds the container ID only.
+  HOSTNAME: 0.0.0.0
+  PORT: "3000"
+  TELEMETRY_ENABLED: "false"
+  DATABASE_URL: postgresql://postgres:doris-course-local-only@doris-obs-litefuse-postgres:5432/postgres
+  # The analytics tables: Litefuse creates them in this Doris database on startup.
+  LITEFUSE_ANALYTICS_BACKEND: doris
+  LITEFUSE_AUTO_DORIS_MIGRATION_DISABLED: "false"
+  DORIS_FE_HTTP_URL: http://doris-obs:8030
+  DORIS_FE_QUERY_PORT: "9030"
+  DORIS_DB: litefuse
+  DORIS_USER: root
+  DORIS_PASSWORD: ""
+  # One BE, so one replica per tablet.
+  DORIS_REPLICATION_NUM: "1"
+  REDIS_HOST: doris-obs-litefuse-redis
+  REDIS_PORT: "6379"
+  REDIS_AUTH: doris-course-local-only
+  # Litefuse keeps each batch of events it receives in S3-compatible object
+  # storage (Silo) before it loads them into Doris.
+  LITEFUSE_S3_EVENT_UPLOAD_BUCKET: litefuse
+  LITEFUSE_S3_EVENT_UPLOAD_REGION: auto
+  LITEFUSE_S3_EVENT_UPLOAD_ACCESS_KEY_ID: litefuse
+  LITEFUSE_S3_EVENT_UPLOAD_SECRET_ACCESS_KEY: doris-course-local-only
+  LITEFUSE_S3_EVENT_UPLOAD_ENDPOINT: http://doris-obs-litefuse-silo:9000
+  LITEFUSE_S3_EVENT_UPLOAD_FORCE_PATH_STYLE: "true"
+  LITEFUSE_S3_EVENT_UPLOAD_PREFIX: events/
+  LITEFUSE_S3_MEDIA_UPLOAD_BUCKET: litefuse
+  LITEFUSE_S3_MEDIA_UPLOAD_REGION: auto
+  LITEFUSE_S3_MEDIA_UPLOAD_ACCESS_KEY_ID: litefuse
+  LITEFUSE_S3_MEDIA_UPLOAD_SECRET_ACCESS_KEY: doris-course-local-only
+  LITEFUSE_S3_MEDIA_UPLOAD_ENDPOINT: http://doris-obs-litefuse-silo:9000
+  LITEFUSE_S3_MEDIA_UPLOAD_FORCE_PATH_STYLE: "true"
+  LITEFUSE_S3_MEDIA_UPLOAD_PREFIX: media/
+  # The organization, project, API keys, and user that the Lab uses. Litefuse
+  # keeps each project's spans and traces in tables named after the project ID,
+  # spans_llm_app and traces_scalar_llm_app, so the ID has only letters, digits,
+  # and underscores.
+  LITEFUSE_INIT_ORG_ID: doris_course
+  LITEFUSE_INIT_ORG_NAME: Doris course
+  LITEFUSE_INIT_PROJECT_ID: llm_app
+  LITEFUSE_INIT_PROJECT_NAME: LLM app
+  LITEFUSE_INIT_PROJECT_PUBLIC_KEY: pk-lf-doris-course
+  LITEFUSE_INIT_PROJECT_SECRET_KEY: sk-lf-doris-course
+  LITEFUSE_INIT_USER_EMAIL: learner@example.com
+  LITEFUSE_INIT_USER_NAME: Learner
+  LITEFUSE_INIT_USER_PASSWORD: doris-course-1
+
+services:
+  litefuse-web:
+    image: litefuse/litefuse-web:26.3.0
+    container_name: doris-obs-litefuse-web
+    restart: unless-stopped
+    depends_on: &litefuse-depends-on
+      postgres:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      silo:
+        condition: service_healthy
+    environment: *litefuse-env
+    ports:
+      - "127.0.0.1:${DORIS_OBS_LITEFUSE_PORT:-23100}:3000"
+    networks:
+      - doris-obs
+
+  litefuse-worker:
+    image: litefuse/litefuse-worker:26.3.0
+    container_name: doris-obs-litefuse-worker
+    restart: unless-stopped
+    depends_on: *litefuse-depends-on
+    environment: *litefuse-env
+    networks:
+      - doris-obs
+
+  postgres:
+    image: postgres:17.11
+    container_name: doris-obs-litefuse-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: doris-course-local-only
+      POSTGRES_DB: postgres
+      TZ: UTC
+      PGTZ: UTC
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 3s
+      timeout: 3s
+      retries: 10
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - doris-obs
+
+  redis:
+    image: redis:7.4.11
+    container_name: doris-obs-litefuse-redis
+    restart: unless-stopped
+    command: ["--requirepass", "doris-course-local-only", "--maxmemory-policy", "noeviction"]
+    healthcheck:
+      test: ["CMD", "redis-cli", "-a", "doris-course-local-only", "--no-auth-warning", "ping"]
+      interval: 3s
+      timeout: 10s
+      retries: 10
+    volumes:
+      - redis_data:/data
+    networks:
+      - doris-obs
+
+  silo:
+    # Silo (https://github.com/pgsty/silo, AGPLv3), a fork of the MinIO server
+    # maintained by Pigsty, in place of the MinIO image in Litefuse's compose
+    # file. It reads the same MINIO_* variables and speaks the same S3 protocol.
+    image: pgsty/silo:RELEASE.2026-10-18T00-00-00Z
+    container_name: doris-obs-litefuse-silo
+    restart: unless-stopped
+    # Create the bucket litefuse before the server starts.
+    entrypoint: sh
+    command: -c 'mkdir -p /data/litefuse && exec silo server --address ":9000" --console-address ":9001" /data'
+    environment:
+      MINIO_ROOT_USER: litefuse
+      MINIO_ROOT_PASSWORD: doris-course-local-only
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://127.0.0.1:9000/minio/health/live"]
+      interval: 2s
+      timeout: 5s
+      retries: 15
+    volumes:
+      - silo_data:/data
+    networks:
+      - doris-obs
+
+volumes:
+  postgres_data:
+  redis_data:
+  silo_data:
+
+networks:
+  doris-obs:
+    name: doris-obs
+    external: true

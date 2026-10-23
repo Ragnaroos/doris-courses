@@ -11,9 +11,30 @@ import requests
 
 from doris_labkit.profiles import normalize_statement, profile_metric, profile_row_sum
 
+from .environment import connection_settings
 from .runtime import expect, normalized
 from .streaming import wait_for
 from .ui import show_log, show_records
+
+
+def wait_for_mv(lab, name, read, accepts, *, description, timeout=60):
+    """Wait until read() of a materialized view gives a result that accepts() takes, and return it.
+
+    A build or REFRESH runs as a task after its statement returns. When the wait
+    times out, show the view's latest tasks from tasks('type'='mv'): FAILED with an
+    ErrorMsg says why the refresh failed, RUNNING or PENDING that it is still working.
+    """
+    try:
+        return wait_for(read, accepts, description=description, timeout=timeout)
+    except TimeoutError:
+        lab.sql("SELECT TaskId, Status, ErrorMsg, RefreshMode, CreateTime, FinishTime "
+                "FROM tasks('type'='mv') WHERE MvDatabaseName = %s AND MvName = %s "
+                "ORDER BY CreateTime DESC LIMIT 3", (lab.database, name),
+                title=f"The latest refresh tasks of {name}")
+        raise TimeoutError(
+            f"{description}: no expected result after {timeout} s. The table above lists the view's latest "
+            "refresh tasks. FAILED with an ErrorMsg says why the refresh failed; RUNNING or PENDING means it is "
+            "still working, so rerun this cell.") from None
 
 
 def case_fixture():
@@ -29,7 +50,8 @@ def _profiles(lab):
 
 
 def _profile_text(lab, profile_id):
-    endpoint = os.environ.get('DW_FE_HTTP_URL', 'http://127.0.0.1:51030').rstrip('/')
+    endpoint = os.environ.get('DW_FE_HTTP_URL') or connection_settings()['DW_FE_HTTP_URL']
+    endpoint = endpoint.rstrip('/')
     url = endpoint + '/rest/v2/manager/query/profile/text/' + profile_id
 
     def read():

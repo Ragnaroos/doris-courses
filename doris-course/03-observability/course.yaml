@@ -1,0 +1,77 @@
+# Release manifest: the course's modules in order, with their lesson, Lab, quiz,
+# and time, for a course catalog to publish. tools/check_course_manifests.py
+# checks it against the files, the lessons, and the course README.
+slug: observability
+title: Observability with Apache Doris
+status: published
+language: en
+doris_version: "4.1.3"
+estimated_minutes: 640
+modules:
+  - slug: observability-introduction
+    level: 1
+    order: 1
+    title: Observability Foundations in the DOG Stack
+    course: level1/module01-observability-introduction/course.md
+    lab: level1/module01-observability-introduction/lab01_observability_introduction.ipynb
+    quiz: level1/module01-observability-introduction/quiz01_observability_foundations.yaml
+    estimated_minutes: 70
+  - slug: data-ingest
+    level: 1
+    order: 2
+    title: Ingesting Observability Data
+    course: level1/module02-data-ingest/course.md
+    lab: level1/module02-data-ingest/lab02_ingest_observability_data.ipynb
+    quiz: level1/module02-data-ingest/quiz02_ingesting_observability_data.yaml
+    estimated_minutes: 70
+  - slug: data-visualization
+    level: 1
+    order: 3
+    title: Visualizing Observability Data
+    course: level1/module03-data-visualization/course.md
+    lab: level1/module03-data-visualization/lab03_data_visualization.ipynb
+    quiz: level1/module03-data-visualization/quiz03_observability_visualization.yaml
+    estimated_minutes: 85
+  - slug: table-model
+    level: 2
+    order: 4
+    title: Table Models for Observability Data
+    course: level2/module04-table-model/course.md
+    lab: level2/module04-table-model/lab04_table_models.ipynb
+    quiz: level2/module04-table-model/quiz04_observability_table_models.yaml
+    estimated_minutes: 70
+  - slug: partition-bucket
+    level: 2
+    order: 5
+    title: Partitioning and Bucketing for Observability Data
+    course: level2/module05-partition-bucket/course.md
+    lab: level2/module05-partition-bucket/lab05_partition_and_bucket.ipynb
+    quiz: level2/module05-partition-bucket/quiz05_partition_and_bucket_choices.yaml
+    estimated_minutes: 75
+  - slug: property-mv-index
+    level: 2
+    order: 6
+    title: Table Properties, Materialized Views, and Indexes
+    course: level2/module06-property-mv-index/course.md
+    lab: level2/module06-property-mv-index/lab06_properties_mv_index.ipynb
+    quiz: level2/module06-property-mv-index/quiz06_properties_mv_and_indexes.yaml
+    estimated_minutes: 85
+  - slug: data-analysis-litefuse
+    level: 2
+    order: 7
+    title: Trace Analysis and Litefuse
+    course: level2/module07-data-analysis-litefuse/course.md
+    lab: level2/module07-data-analysis-litefuse/lab07_data_analysis_litefuse.ipynb
+    quiz: level2/module07-data-analysis-litefuse/quiz07_analysis_and_litefuse.yaml
+    estimated_minutes: 90
+    optional:
+      - title: "Optional Lab 7A: Trace a Real Model with Litefuse"
+        path: level2/module07-data-analysis-litefuse/optional07_trace_a_real_model.ipynb
+  - slug: alerting
+    level: 2
+    order: 8
+    title: Alerting with Grafana
+    course: level2/module08-alerting/course.md
+    lab: level2/module08-alerting/lab08_alerting.ipynb
+    quiz: level2/module08-alerting/quiz08_alerting_rules.yaml
+    estimated_minutes: 95

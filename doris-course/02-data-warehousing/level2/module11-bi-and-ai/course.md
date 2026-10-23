@@ -1,52 +1,47 @@
-# Module 11: BI and AI Applications
+# Module 11: Interfaces and Boundaries for BI and AI Consumers
 
-| Course Information | Details |
+| Course information | Value |
 | --- | --- |
 | Course | Data Warehousing with Apache Doris · Level 2 |
-| Product scope | Apache Doris 4.x; examples use the course's 4.1.3 sandbox |
-| Prerequisites | Module 8 views, Module 9 grain, and Module 10 metric contracts |
-| Suggested time | About 128 minutes: reading 50, Lab 70, Quiz 8; first-start image downloads/builds are additional |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox from Module 1; `daily_order_metrics_l2` from Lab 10; for the optional dashboard, about 2 GiB more Docker memory and internet access once |
+| Estimated time | About 120 minutes: reading 40, Lab 70, quiz 10 |
 
-[Level 2 contents](../README.md) · [Open Lab 11](lab11_bi_and_ai_delivery.ipynb) · [Open Quiz 11](quiz11_bi_and_ai.ipynb)
+[Course README](../../README.md) · [Open Lab 11](lab11_bi_and_ai_delivery.ipynb) · [Open Quiz 11](quiz11_bi_and_ai.ipynb)
 
-## Module Goal
+## Module goal
 
-A BI team can query a table and still build a wrong dashboard if it mistakes a pre-tax order amount for money collected. Query access alone is not a data product. BI and AI consumers need an understandable, access-controlled, refreshed, and testable interface. This module wraps Module 10's metrics in a semantic view, explains dashboard dimensions and measures, and draws a clear boundary around feature projections and the separate Apache Doris MCP Server.
+Publish the daily metrics as an interface whose rows and meaning stay the same for dashboards and models, check it before anyone reads it, and draw the line between what Doris guarantees and what BI and AI tools must check themselves.
 
-## Learning Objectives
+## Learning objectives
 
-After this module, you should be able to:
+After completing this module, you will be able to:
 
-1. Design a consumer view with stable names and declared row grain.
-2. Distinguish dimensions, additive measures, and calculated ratios in a dashboard.
-3. Prepare reviewed feature inputs without claiming that a downstream model is accurate.
-4. Check nulls, coverage, freshness, counts, and amounts before publication.
-5. State what Doris SQL proves and what BI or AI tools must validate separately.
-6. Scope an external Model Context Protocol server to reviewed Doris data.
+1. Design a semantic view with stable names, one declared grain, and measures whose meaning is written down.
+2. Tell dimensions, additive measures, and ratios apart in a dashboard.
+3. Check an interface's rows, nulls, dates, and totals, and make its contract and freshness checks fail on purpose.
+4. Prepare feature inputs over a calendar without claiming anything about a model's accuracy.
+5. State what Doris guarantees and what a BI tool or an AI application must check itself.
+6. Bound an AI tool's access to Doris with a separate MCP server and a read-only account scoped to published views.
 
-## Module Schedule
+## Module structure
 
-| Section | Question | Time |
-| --- | --- | ---: |
-| 11.1 Consumer contract | Which columns and meanings should a dashboard depend on? | 10 min |
-| 11.2 BI connection | What do Doris and Superset each own? | 10 min |
-| 11.3 AI feature inputs | What can a data projection prove? | 10 min |
-| 11.4 MCP access | How can an AI tool read Doris safely? | 10 min |
-| 11.5 Publication checks | How do we validate the interface? | 5 min |
-| 11.6 Optional: real BI consumer | What does a real dashboard add, and what does it need? | 5 min |
-| Lab 11 / Quiz 11 | Sections 0–4 are required; Sections 5–6 (local Superset) are optional | 70 / 8 min |
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 11.1 A Consumer Contract | 8 min | A semantic view, its grain, and what each column means |
+| 11.2 Check the Interface Before Publication | 7 min | Rows, nulls, dates, totals, and two checks that must fail |
+| 11.3 What Doris Owns and What a BI Tool Owns | 7 min | Speed, freshness, and accuracy, and who checks each |
+| 11.4 Features for AI: Inputs, Not Conclusions | 7 min | A calendar, a day without orders, and what features cannot prove |
+| 11.5 Bound What an AI Tool Can Read | 7 min | A separate MCP server and a read-only account |
+| 11.6 Optional: A Real Dashboard | 4 min | A local Superset on the payment contract, and how to remove it |
+| Lab 11 | 70 min | Publish the semantic view, project features, check and break the contract; optionally build the dashboard |
+| Quiz 11 | 10 min | Six questions on these objectives |
 
-## 11.1 Publish a Consumer Contract, Not Just a Query
+## 11.1 A Consumer Contract
 
-A dashboard commonly uses three kinds of fields:
+A BI team can query a table and still build a wrong dashboard, for example by labeling the pre-tax order amount as money received. Query access is not a data product. A **semantic view** is the interface for consumers: stable names, one declared grain, and measures whose meaning is written down. Lab 11 publishes one over Lab 10's service table:
 
-| Kind | Meaning | Course example |
-| --- | --- | --- |
-| Dimension | Splits, filters, or orders results | `order_date` |
-| Measure | Numeric quantity at the declared grain | `order_count`, `gross_amount` |
-| Calculated measure | Derives a result from checked components | `average_order_amount` |
-
-Do not sum a date or average an already aggregated average order value without revisiting its numerator and denominator. Lab 11 creates this semantic view over Module 10's service table (read here; the Notebook executes it):
+**SQL reading example: the semantic view of Lab 11. Do not rerun it after the Lab.**
 
 <!-- reading-only-example -->
 ```sql
@@ -60,119 +55,113 @@ FROM daily_order_metrics_l2
 GROUP BY order_date;
 ```
 
-It has **one row per represented date**, not one row per customer. It retains amount and count until the final division. A date with no source rows does not appear automatically; a calendar table would be needed to create such rows. A zero denominator yields `NULL`, not an invented zero average.
+| order_date | order_count | gross_amount | average_order_amount |
+| --- | ---: | ---: | ---: |
+| 2026-01-01 | 9 | 1200.00 | 133.333333 |
+| 2026-01-02 | 1 | 110.00 | 110.000000 |
 
-A consumer contract should record:
+A dashboard uses three kinds of fields:
 
-1. **Names, types, and business meanings:** `order_date` derives from `event_time`; `order_count` counts the course's initial orders; `gross_amount` is simulated pre-tax order amount, not collected cash; `average_order_amount` is amount divided by count.
-2. **Grain and uniqueness:** one row per date; a missing date is different from a date whose measures are zero.
-3. **Time and coverage:** the time zone, first covered date, event-time rule, and treatment of late data.
-4. **Freshness:** the refresh trigger, acceptable delay, and which date or partition must be rebuilt after late arrivals.
-5. **Null and zero rules:** why the calculated ratio can be `NULL`.
-6. **Access and ownership:** which read-only account may see the published view, and who approves a definition change.
-7. **Downstream duties:** Doris can expose checked rows; a BI tool owns its chart filters, caching, and rendering; an AI application owns its model and evaluation.
+| Kind | In this view | What a dashboard may do with it |
+| --- | --- | --- |
+| Dimension | `order_date` | Group, filter, and sort by it |
+| Additive measure | `order_count`, `gross_amount` | Add it up over days |
+| Ratio | `average_order_amount` | Show it per row; over several days, add the counts and amounts and divide again, never average it |
 
-The implementation under a view can change without breaking consumers only if the published columns **and their meanings** remain stable.
+The view's contract writes down what consumers rely on:
 
-## 11.2 Connect BI Without Confusing Responsibilities
+1. **Names, types, and meanings:** `order_date` is the date of the order's version 1 event; `order_count` counts the orders that are not cancelled; `gross_amount` is their pre-tax order value, not money received; `average_order_amount` is the amount divided by the count.
+2. **Grain:** one row per date that has orders. A date without orders has no row; a missing row and a day with zero orders are different things.
+3. **Time and coverage:** the time zone, +08:00, the first date, and what happens with late events.
+4. **Freshness:** what triggers an update, the delay allowed, and which dates are rebuilt after a late event.
+5. **Nulls and zeros:** the ratio is `NULL` without orders, never an invented 0.
+6. **Access and owners:** which account may read the view (Module 12), and who approves a change of its definition.
 
-Superset can use Doris as an SQL source; Superset handles charts, dashboard configuration, its cache, and its own access model. The documented connection URI has this form:
+The view's implementation can change, Lab 10's table can gain columns, as long as its columns keep their names and meanings. A new question at a new grain, such as a filter by region, gets a second view, as Lab 11's practice publishes, while the first keeps its consumers.
 
-<!-- Reading-only URI template; do not paste a real password into course files. -->
+## 11.2 Check the Interface Before Publication
+
+Before a dashboard or a model reads the view, check what they rely on:
+
+```sql
+SELECT COUNT(*) AS serving_days,
+       SUM(CASE WHEN order_count IS NULL OR gross_amount IS NULL THEN 1 ELSE 0 END) AS days_with_nulls,
+       MIN(order_date) AS first_date,
+       MAX(order_date) AS last_date,
+       SUM(order_count) AS served_orders,
+       SUM(gross_amount) AS served_amount
+FROM bi_order_metrics_l2;
+```
+
+| Check | Lab 11's result |
+| --- | --- |
+| Serving days and days with nulls | 2 and 0 |
+| First and last date | 2026-01-01 and 2026-01-02 |
+| Orders and amount | 10 and 1310.00, the same as the service table |
+
+A query that runs is not a contract test. Lab 11 reads the view's column names through a cursor and compares them with the four that the contract publishes, then creates a broken copy without `average_order_amount`: the same check must reject it. It measures freshness against fixed teaching dates, since the orders are from January 2026: the latest day, January 2, is one day old on January 3, which a one-day rule allows, and seven days old on January 9, which it does not. A real check uses the business's clock and its declared rule. A check that has never failed may check nothing, so make each one fail on purpose once.
+
+## 11.3 What Doris Owns and What a BI Tool Owns
+
+A BI tool such as Apache Superset reads Doris through its SQL interface; the tool owns its charts, its filters, its cache, and its own users and roles. A connection URI has this form:
 
 ```text
 doris://<username>:<password>@<host>:<port>/internal.<database>
 ```
 
-The MySQL query port inside the course container is 9030; a client on the host must use the mapped host port instead. Do not mix container and host coordinates. Before creating a BI dataset, verify that the account can read only its intended published objects, the catalog and database are correct, the SQL result matches the independent Module 10 reconciliation, amounts remain numeric, and the time zone and refresh assumptions are documented.
+> **Do not write a real password into a notebook, a lesson, or a file that you commit.** The optional dashboard of Lab 11 generates the password of its Doris account and passes it to Superset without showing it.
 
-A useful service-level agreement separates three outcomes:
+Use the port that the BI tool can reach: inside the course's containers, Doris's MySQL port is 9030; from your computer it is the published port, 52030 or `DW_FE_QUERY_PORT`. Before a dataset is built on the view, check that the account can read only what it should (Module 12), that the catalog and database are right, that the numbers match the reconciliation of Module 10, and that the time zone and freshness are written down.
 
-| Goal | Doris-side evidence | Other owner or dependency |
+| Promise | What Doris can show | What another owner checks |
 | --- | --- | --- |
-| Speed | Query latency, scanned rows, operator time in Query Profile | BI query, concurrency, and cache settings |
-| Freshness | Latest successful refresh and maximum event time | Scheduler, late data, and BI cache |
-| Accuracy | Fixed expectations, independent detail reconciliation, null and count checks | Metric owner and chart filters |
+| Speed | Query latency, rows scanned, operator time in a Query Profile | The BI tool's queries, concurrency, and cache |
+| Freshness | The latest refresh, the latest event time | The scheduler, late data, the BI cache |
+| Accuracy | Fixed expectations, reconciliation with the detail, null and count checks | The metric's owner, and the chart's filters |
 
-A 200 ms response does **not** prove that the data is fresh. A displayed number does **not** prove that the business definition is correct. Before any BI tool is involved, the Lab verifies the consumer query in Doris:
+A 200 ms answer does not say that the data is fresh, and a number on a chart does not say that the definition behind it is right.
+
+## 11.4 Features for AI: Inputs, Not Conclusions
+
+A model that reads daily features needs a row for every day, also for a day without orders: a missing row is no input, a zero is. The semantic view has rows only for the days that had orders, so Lab 11 starts the projection from a calendar of the reporting window and joins the view to it:
 
 ```sql
-SELECT order_date, order_count, gross_amount, average_order_amount
-FROM bi_order_metrics_l2
-WHERE order_date >= '2026-01-01'
-ORDER BY order_date;
+WITH calendar AS (
+    SELECT DATE_ADD(DATE '2026-01-01', number) AS feature_date FROM numbers("number"="3")
+)
+SELECT c.feature_date,
+       COALESCE(m.order_count, 0) AS feature_order_count,
+       COALESCE(m.gross_amount, 0.00) AS feature_gross_amount,
+       m.average_order_amount AS feature_average_amount,
+       CASE WHEN COALESCE(m.order_count, 0) = 0 THEN 1 ELSE 0 END AS zero_order_flag
+FROM calendar c
+LEFT JOIN bi_order_metrics_l2 m ON m.order_date = c.feature_date
+ORDER BY c.feature_date;
 ```
 
-Use `order_date` as the time dimension and the count and amount as measures. Do not sum `average_order_amount` over dates in the BI layer; aggregate its amount and count components first.
+January 3 appears with 0 orders, no average, and `zero_order_flag` 1. The flag cannot say whether the day had no orders or its orders have not arrived yet: the freshness check and the pipeline's records can. A feature projection prepares consistent, checked inputs; it proves nothing about a model's accuracy, does not prevent target leakage, and does not make training and serving data agree by itself: the AI application owns those, with its own evaluation. Doris also offers vector columns and indexes for similarity search; they do not turn a measure into a good feature either.
 
-## 11.3 Give AI Checked Inputs, Not Unsupported Conclusions
+## 11.5 Bound What an AI Tool Can Read
 
-A feature projection can provide consistently named, typed, and checked columns to a downstream model. It does not prove predictive quality, prevent target leakage, or by itself resolve differences between training-time and serving-time data. Lab 11 reads this projection without writing a new table:
-
-```sql
-SELECT order_date,
-       order_count AS feature_order_count,
-       gross_amount AS feature_gross_amount,
-       average_order_amount AS feature_average_amount,
-       CASE WHEN order_count = 0 THEN 1 ELSE 0 END AS zero_order_flag
-FROM bi_order_metrics_l2
-ORDER BY order_date;
-```
-
-| Feature | Possible use | Still needs a decision about |
-| --- | --- | --- |
-| `feature_order_count` | Order activity | Whether the day is final and how late events are handled |
-| `feature_gross_amount` | Amount scale | Currency, tax, and refund scope |
-| `feature_average_amount` | Per-order average | What to do with a zero denominator |
-| `zero_order_flag` | Zero-count rows that actually exist | Missing dates do not appear automatically |
-
-Doris also has vector storage and approximate-nearest-neighbor index features, but neither turns a monetary column into a good model feature nor replaces offline evaluation. This Lab does not create a vector index.
-
-## 11.4 Put a Boundary Around MCP Access
-
-The [Apache Doris MCP Server](https://doris.apache.org/docs/4.x/key-features/mcp-server/) is a **separate service**, not a built-in SQL statement in the FE. It connects to Doris through the MySQL protocol and exposes tools to MCP clients for schema exploration and read-oriented analysis. A possible flow is:
+The [Apache Doris MCP Server](https://doris.apache.org/docs/4.x/key-features/mcp-server/) lets AI tools that speak the Model Context Protocol (MCP) explore schemas and run read queries on Doris. It is a separate service, not a statement of the FE; it connects through the MySQL protocol as a named Doris user:
 
 ```text
-MCP client → Doris MCP Server → Doris connection as a named database user
+MCP client (an AI tool) → Doris MCP Server → Doris, as one read-only database user
 ```
 
-The server's tool-level filtering, timeouts, result limits, and audit settings supplement—not replace—Doris account permissions. A safe deployment uses a dedicated read-only account scoped to published views, keeps credentials out of notebooks and prompts, reviews generated SQL (especially sensitive columns and wide scans), limits result rows and time range, treats business text returned from tables as untrusted input, and retains audit records. Do not connect MCP as root or treat an AI model's confidence as metric acceptance evidence.
+The server's own limits, such as allowed tools, timeouts, result sizes, and its log, add to the Doris account's privileges; they do not replace them. A safe setup gives the server an account that can read only the published views (Module 12), keeps its password out of notebooks and prompts, reviews the SQL that the tool generates, especially for sensitive columns and wide scans, limits rows and time ranges, treats text that comes back from tables as untrusted input, and keeps the audit records (Module 12). Never connect it as root, and never take a model's confidence for a check of a metric.
 
-The current Notebook does **not** install or contact an external MCP Server. The deployment notes are reading material for a later environment.
+Lab 11 installs no MCP server. For further reading, [Module 1: Connect AI Agents to Apache Doris with MCP](../../../04-ai-integrations/level1/module01-doris-mcp/course.md) of the course AI Integrations with Apache Doris connects an AI tool to Doris through the MCP server, with a read-only account.
 
-## 11.5 Check the Published Interface
+## 11.6 Optional: A Real Dashboard
 
-After Lab 11, run an integrity query:
+Lab 11's optional sections 5 and 6 take the payment contract of Module 10, not a relabeled order amount, into a real BI tool: they build and start a local Apache Superset 4.1.2, register Doris's SQLAlchemy driver, and create three charts, paid GMV, paid orders, and the cohort's conversion, whose values the helper reads back through Superset. They run only when you set `BUILD_DASHBOARD = True`.
 
-```sql
-SELECT COUNT(*) AS serving_days,
-       SUM(CASE WHEN order_count IS NULL THEN 1 ELSE 0 END) AS null_order_days,
-       MIN(order_date) AS first_date,
-       MAX(order_date) AS last_date,
-       SUM(order_count) AS served_orders
-FROM bi_order_metrics_l2;
-```
+**Before you switch them on:** the first run downloads Superset and builds the image `doris-course-superset:4.1.2-pydoris1.1.0`, which needs internet access and a few minutes. The service needs about 2 GiB of Docker memory more (its container is capped at 2 GiB and 2 CPUs) and the port 51888 on 127.0.0.1 (`DW_BI_PORT` to use another). It creates the Compose project `doris-warehousing-bi` with a volume for its metadata, the Superset user `course_admin` / `course_local_only`, and the Doris account `course_bi_<suffix>`, which can read only `bi_paid_kpis_l2`; Module 12 moves its grant to a role. These stay after the Lab, so that the dashboard keeps working. Skipping the optional sections changes nothing for Quiz 11 or Level 3.
 
-| Check | Current teaching sample |
-| --- | --- |
-| Service days / null-count days | 1 / 0 |
-| First / last date | `2026-01-01` / `2026-01-01` |
-| Served orders / amount | 10 / 1400.00 |
-| Average order amount | 140.00 |
+The Superset user configures dashboards; the Doris account is what the charts read with. A chart that loads and a denied read of `dwd_payments_l2` show the database's boundary for this account; they do not show Superset's own user isolation. The secret key, the plain HTTP, and the public user are for a local course only.
 
-Before production publication, also check schema and grain, critical nulls, independent count and amount totals, maximum event time, latest successful refresh, source batches, and read-only account scope. An unexpected result should lead back to its source and definition before any dashboard is released.
-
-## 11.6 Optional: Follow the Contract into a Real BI Consumer
-
-Lab 11 Sections 5–6 are optional. They take the reviewed contract beyond a semantic view: they start a pinned local Apache Superset service, register the Doris SQLAlchemy dialect, create three charts and query them through the actual BI connection. The input is the payment/cohort contract from Module 10, not a relabeled initial-order total. See the official [Superset integration](https://doris.apache.org/docs/4.x/connection-integration/data-integration/superset/) for supported connection setup.
-
-The UI administrator and Doris reader serve different purposes. The local UI account configures dashboards; the generated database account receives only `SELECT_PRIV` on the reviewed view. A successful chart query and a denied direct-detail query establish this experiment's database boundary. They do not prove Superset's own user/role isolation or production hardening.
-
-Inspect paid GMV, paid orders, and created-cohort conversion in the generated dashboard. Follow the metric SQL back to its numerator, denominator and explicit business-time cutoff. Refreshing a chart reruns its query; it does not extend the source contract's fixed reporting window. API result checks validate actual returned values, while browser review validates presentation. The local SQLite metadata, public teaching UI credentials and fixed secret are intentionally non-production.
-
-**Before you run Sections 5–6:** the first run needs internet access to download Apache Superset 4.1.2 and build the course image `doris-course-superset:4.1.2-pydoris1.1.0`, which can take several minutes. The service needs about 2 GiB of additional Docker memory (its container is capped at 2 GiB and two CPUs) and port 51888 on 127.0.0.1. It creates the Docker Compose project `doris-warehousing-bi` with a metadata volume, the local UI account `course_admin` / `course_local_only`, and a Doris account `course_bi_<suffix>` that can read only `bi_paid_kpis_l2`; Section 5 shows its exact name as `doris_reader`. These objects stay after the Lab so that the dashboard keeps working. Skipping Sections 5–6 does not affect Quiz 11 or Level 3.
-
-When you no longer need the dashboard, remove what the optional part created. From the course directory, detach the course Doris container from the BI network first; otherwise the network cannot be removed:
+To remove the dashboard, detach the course's Doris container from its network first, then remove the project and the image, from the course directory:
 
 ```bash
 docker network disconnect doris-warehousing-bi_default doris-warehousing-course-doris-1
@@ -180,37 +169,39 @@ docker compose --project-name doris-warehousing-bi --file environments/bi/compos
 docker image rm doris-course-superset:4.1.2-pydoris1.1.0
 ```
 
-Then drop the Doris account, using the name that Section 5 showed:
+Then drop the Doris account that Lab 11 showed as `doris_reader`, and the role that Module 12 moved it to: `DROP USER 'course_bi_<suffix>'@'%'` and `DROP ROLE IF EXISTS course_bi_dashboard_l3`.
 
-```sql
-DROP USER 'course_bi_<suffix>'@'%';
-```
+## Lab 11: Publish a Semantic View and Its Features
 
-## Hands-on Lab: Publish a Stable Consumer Interface
+Open [Lab 11: Publish a Semantic View and Its Features](lab11_bi_and_ai_delivery.ipynb). You:
 
-Complete Lab 10, then open [Lab 11](lab11_bi_and_ai_delivery.ipynb). It rebuilds `bi_order_metrics_l2`, queries reviewed dashboard fields and feature projections, and performs integrity checks. A temporary broken view proves that a missing published column is detectable; fixed teaching reference dates show a one-day freshness rule passing and then failing. The input is Module 10's service table; Modules 8–9 are conceptual context but not direct Lab 11 inputs. Results appear as tables. Optional Sections 5–6 also start a local Superset dashboard (see 11.6). The Lab does not connect to an external MCP Server.
+1. Publish `bi_order_metrics_l2`: two days, 10 orders, 1310.00.
+2. Project features over the reporting window's calendar, with January 3 flagged.
+3. Check the interface's days, nulls, dates, and totals against the service table.
+4. Make the contract check and the freshness check fail on purpose.
+5. Optionally, build a three-chart Superset dashboard on the payment contract.
+6. Practice: publish a second view per day and region without changing the first.
 
-### Independent exercise
+You need the course sandbox and Lab 10's `daily_order_metrics_l2`; the optional dashboard also needs Lab 10's `bi_paid_kpis_l2`. Module 12 publishes `bi_order_metrics_l2` to a role.
 
-A BI team now wants a customer-region filter. The current view cannot provide it: every row is already aggregated by date and contains no customer or region. A date-by-region service needs new aggregation from appropriate detail and dimension data, a new or versioned consumer contract, and its own refresh, access, and acceptance rules. Do not add a region column to the daily view while still claiming one row represents a whole day.
+## Summary
 
-## Module Summary
+- A semantic view is a contract: stable names, one grain, written meanings, and a time zone, a freshness rule, null rules, and owners; a new grain is a new view.
+- In a dashboard, group by dimensions, add up additive measures, and recompute ratios from their sums instead of averaging them.
+- Check days, nulls, dates, and totals before publication, and make the contract and freshness checks fail once to prove that they can.
+- Project features over a calendar so that a day without orders is a row; features are checked inputs, not evidence of a model's accuracy.
+- Doris shows speed, freshness, and accuracy of the SQL interface; a BI tool owns its charts, filters, and cache, and an AI application its model and evaluation.
+- Give an AI tool access through a separate MCP server with a read-only account limited to the published views; its own limits add to the privileges, never replace them.
 
-- A semantic view is a consumer contract: dimensions, measures, grain, units, and ownership must be explicit.
-- Doris provides SQL data; BI tools own presentation, caching, and their own access settings. Speed, freshness, and accuracy need separate checks.
-- A feature projection supplies reviewed inputs, not a guarantee of model quality.
-- MCP access needs a separate service and a least-privilege Doris identity; tool filters do not replace database permissions.
-- Check schema, nulls, coverage, counts, amounts, freshness, and account scope before publishing.
+## Quiz 11
 
-## Knowledge Quiz 11: BI and AI Applications
-
-Open [Quiz 11](quiz11_bi_and_ai.ipynb) to check semantic views, dimensions and measures, feature projections, publication checks, Doris/BI/AI boundaries, and least-privilege MCP access.
+Open [Quiz 11: Interfaces and Boundaries for BI and AI Consumers](quiz11_bi_and_ai.ipynb). It has six single-choice questions and needs no running environment.
 
 Next: this is the last module of Level 2. Level 3 starts with [Module 12: Publishing, Permissions, and Audit](../../level3/module12-publishing-permissions-audit/course.md).
 
-## Official References
+## References
 
-- [Apache Superset integration](https://doris.apache.org/docs/4.x/connection-integration/data-integration/superset/)
-- [Apache Doris MCP Server](https://doris.apache.org/docs/4.x/key-features/mcp-server/)
-- [Vector indexes](https://doris.apache.org/docs/4.x/table-design/index/vector-index/overview/)
-- [CREATE VIEW](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/table-and-view/view/CREATE-VIEW/)
+- [Apache Doris: CREATE VIEW](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/table-and-view/view/CREATE-VIEW/)
+- [Apache Doris: Superset](https://doris.apache.org/docs/4.x/connection-integration/data-integration/superset/)
+- [Apache Doris: MCP Server](https://doris.apache.org/docs/4.x/key-features/mcp-server/)
+- [Apache Doris: Vector search](https://doris.apache.org/docs/4.x/table-design/index/vector-index/overview/)

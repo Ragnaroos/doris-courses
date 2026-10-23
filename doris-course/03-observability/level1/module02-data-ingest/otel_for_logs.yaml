@@ -1,7 +1,17 @@
+extensions:
+  # Keeps the filelog receiver's read position in a directory that the Lab
+  # mounts from .runtime/, so a restarted collector continues where it stopped
+  # instead of loading fe.log again.
+  file_storage:
+    directory: /var/lib/otelcol/file_storage
+
 receivers:
   filelog:
-    include: [ /var/log/fe.log  ]
+    # The Lab mounts the FE log directory, not the file itself: when the FE
+    # rotates fe.log, the receiver sees the new fe.log in the directory.
+    include: [ /var/log/doris-fe/fe.log ]
     start_at: beginning
+    storage: file_storage
     multiline:
       line_start_pattern: '^(?:RuntimeLogger\s)?\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2},\d{3}'
     operators:
@@ -34,15 +44,14 @@ processors:
 exporters:
   doris:
     endpoint: http://doris-obs:8040
-    mysql_endpoint: doris-obs:9030
     database: otel
     username: root
     password:
     table:
       logs: otel_logs
-    create_schema: true
-    history_days: 10
-    create_history_days: 10
+    # The DOG Collector created otel_logs when Module 1 started it. This
+    # collector only loads rows, so it does not create tables.
+    create_schema: false
     timezone: UTC
     timeout: 60s
     log_response: true
@@ -58,6 +67,7 @@ exporters:
       load_to_single_tablet: "true"
 
 service:
+  extensions: [file_storage]
   pipelines:
     logs:
       receivers: [filelog]

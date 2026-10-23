@@ -1,203 +1,152 @@
 # Module 14: Resource Isolation and Query Protection
 
-| Course Information | Details |
+| Course information | Value |
 | --- | --- |
 | Course | Data Warehousing with Apache Doris · Level 3 |
-| Product scope | Apache Doris 4.x; examples use the single-node course sandbox |
-| Prerequisites | Module 12 roles and dashboard delivery; Module 13 monthly partitions |
-| Suggested time | About 68 minutes: 30 minutes reading, 30 minutes Lab, 8 minutes Quiz |
+| Doris | Apache Doris 4.1.3 |
+| Environment | The course sandbox from Module 1 |
+| Estimated time | About 100 minutes: reading 45, Lab 45, quiz 10 |
 
-[Level 3 contents](../README.md) · [Open Lab 14](lab14_resource_isolation.ipynb) · [Open Quiz 14](quiz14_resource_isolation.ipynb)
+[Course README](../../README.md) · [Open Lab 14](lab14_resource_isolation.ipynb) · [Open Quiz 14](quiz14_resource_isolation.ipynb)
 
-## Module Goal
+## Module goal
 
-The business intelligence (BI) dashboard published in Module 12 normally refreshes in under one second. During Monday's monthly review, analysts submit detail queries without date filters and several large aggregations. Refresh time rises to 20 seconds, and some dashboard queries time out.
+Keep ad hoc analysis from slowing down the dashboard: give each workload a Workload Group, route each account to its group, stop excessive queries before or while they run, and remove it all again in an order that its dependencies allow.
 
-Investigation finds that:
+## Learning objectives
 
-- Dashboard and ad hoc queries use the default `normal` group and compete for memory, central processing unit (CPU) time, and scan threads.
-- The group has no practical concurrency restriction or waiting queue under its default configuration.
-- Analysts have no administrator-enforced execution limit or scan-scope rule.
+After completing this module, you will be able to:
 
-Module 12 controlled who could read each object. This module controls resource consumption. Separate dashboard and ad hoc work into Workload Groups, route accounts to the intended groups, apply execution and scan limits, and document observation and rollback in a resource runbook.
-
-### Learning Objectives
-
-After this module, you should be able to:
-
-1. Explain the precedence used to select a query's Workload Group.
-2. Predict execution, queuing, or rejection from max_concurrency, max_queue_size, and queue_timeout.
+1. Explain the order in which Doris selects a query's Workload Group.
+2. Predict from max_concurrency, max_queue_size, and queue_timeout whether a query runs, waits, or is rejected.
 3. Explain where memory and CPU limits apply and what CPU enforcement requires.
-4. Route queries with USAGE_PRIV and default_workload_group, and explain why bypass_workload_group is not an isolation boundary.
-5. Distinguish the timing and scope of query_timeout, Workload Policy, and SQL Block Rule.
-6. Write a resource runbook covering groups, routing, protection rules, observations, and rollback order.
+4. Route an account to a group with USAGE_PRIV and default_workload_group, and explain why bypass_workload_group is not an isolation boundary.
+5. Tell query_timeout, Workload Policy, and SQL Block Rule apart by when and where they act.
+6. Write a resource runbook with groups, routing, protection, observations, and a rollback in dependency order.
 
-## Module Schedule
+## Module structure
 
-| Section | Main question | Suggested time |
-| --- | --- | ---: |
-| 14.1 Who competes with the dashboard? | Which resources are shared, and how is a group selected? | 5 minutes |
-| 14.2 How do groups control concurrency, queues, and memory? | When does a query run, wait, or fail? Where do limits apply? | 9 minutes |
-| 14.3 How do BI queries reach the intended group? | What do usage grants, defaults, and queue bypass do? | 6 minutes |
-| 14.4 How do you stop excessive queries? | How do timeouts, Workload Policy, and SQL Block Rule differ? | 6 minutes |
-| 14.5 How do you write a resource runbook? | How are configuration, evidence, and rollback connected? | 4 minutes |
-| Lab 14 | Configure groups and observe queuing and scan rejection | 30 minutes |
-| Quiz 14 | Check resource and query-protection decisions | 8 minutes |
+| Section | Time | Outcome |
+| --- | ---: | --- |
+| 14.1 Who Competes with the Dashboard | 6 min | Two workloads, one group, and the order of routing |
+| 14.2 Run, Wait, or Be Rejected | 9 min | Concurrency, queue, and wait, and what bypasses them |
+| 14.3 Memory and CPU on Each BE | 6 min | Per-BE limits, and the cgroup that CPU limits need |
+| 14.4 Route an Account to Its Group | 8 min | Usage privileges and the account's default, as an ordinary user sees them |
+| 14.5 Stop an Excessive Query | 10 min | Timeouts, Workload Policies, and SQL Block Rules |
+| 14.6 A Resource Runbook and Its Rollback | 6 min | Configuration, observations, and the order of removal |
+| Lab 14 | 45 min | Create two groups, queue and reject queries, route an ordinary user, block a full scan, and check a plan |
+| Quiz 14 | 10 min | Six questions on these objectives |
 
-## 14.1 Who Competes with the Dashboard?
+## 14.1 Who Competes with the Dashboard
 
-Dashboard queries and ad hoc analysis have different needs:
+The dashboard that Module 11 published refreshes in under a second. On Monday's monthly review, analysts send detail queries without date filters and a few large aggregations, the refresh takes 20 seconds, and some dashboard queries time out. Both workloads run in the default group `normal`, which by default has no practical limit on concurrency and no queue, and nothing stops a scan of every partition.
 
-| Dimension | Dashboard queries | Ad hoc analysis |
+| | Dashboard queries | Ad hoc analysis |
 | --- | --- | --- |
-| Frequency | High; each refresh triggers several chart queries | Lower, but one query may run for a long time |
-| Scan scope | Small, often the latest one or two months | Variable; date filters are easily omitted |
-| Latency target | Around one second | Tens of seconds may be acceptable |
+| Frequency | High: each refresh sends several | Lower, but one query can run long |
+| Scan | Small: the latest days | Unpredictable: a date filter is easily forgotten |
+| Latency target | About a second | Tens of seconds may be fine |
 
-When these workloads share a group, large scans can consume memory, CPU, and scan-thread capacity before small dashboard queries obtain what they need.
+A **Workload Group** applies limits to the queries that run in it, on two levels:
 
-A Workload Group applies configured limits to a set of queries. Controls operate at two layers:
-
-| Location | Controls | Main properties |
+| Where | Controls | Properties |
 | --- | --- | --- |
-| Frontend (FE) | Running queries, queue capacity, and wait time | `max_concurrency`, `max_queue_size`, `queue_timeout` |
-| Each Backend (BE) | Group memory, CPU, and scan resources | `max_memory_percent`, `max_cpu_percent`, `scan_thread_num`, `read_bytes_per_second` |
+| Each FE | How many queries run, how many wait, and how long | `max_concurrency`, `max_queue_size`, `queue_timeout` |
+| Each BE | The group's memory, CPU, and scan resources | `max_memory_percent`, `max_cpu_percent`, `scan_thread_num`, `read_bytes_per_second` |
 
-Separate groups keep ad hoc queries from occupying the dashboard group's execution slots and bound the resources controlled by each group. Workload Groups provide isolation within a BE process, where components such as caches and remote procedure call (RPC) thread pools remain shared. They reduce interference but do not guarantee complete latency isolation. [The Workload Group guide](https://doris.apache.org/docs/4.x/admin-manual/workload-management/workload-group/) explains when dedicated nodes are needed instead.
+Separate groups keep ad hoc queries out of the dashboard's slots and bound what each group uses on a BE. They share one BE process, with its caches and threads, so they reduce interference rather than isolate completely; workloads that must not affect each other at all need separate nodes.
 
 Doris selects a query's group in this order:
 
-1. A query-level `SET_VAR(workload_group=...)` hint.
-2. A nonempty session variable `workload_group`.
-3. The account property `default_workload_group`.
-4. The built-in `normal` group if no earlier option selects one.
+1. A hint in the query: `SET_VAR(workload_group = ...)`.
+2. The session's `workload_group`, when it is not empty.
+3. The account's property `default_workload_group`.
+4. `normal`, which every account may use and which cannot be dropped.
 
-All accounts can use `normal`, and it cannot be dropped. Without workload-specific routing, dashboard and analyst queries both land there. Lab 14 does not use query-level routing hints. It first confirms that root's session variable is empty and `SHOW PROPERTY` reports `default_workload_group=normal`.
+## 14.2 Run, Wait, or Be Rejected
 
-## 14.2 How Do Groups Control Concurrency, Queues, and Memory?
+For a query in a group, its FE decides:
 
-### Run, queue, or reject?
+1. Fewer queries run than `max_concurrency`: the query starts.
+2. The slots are full and fewer than `max_queue_size` wait: it waits.
+3. The queue is full too: it is rejected with `query waiting queue is full`.
+4. It waits longer than its time allows: it fails with `query queue timeout`.
 
-For the Lab's one-slot-per-query requests, FE makes these decisions:
-
-1. Fewer queries are running than `max_concurrency`: start the query.
-2. Running capacity is full but fewer queries are waiting than `max_queue_size`: enqueue it.
-3. The queue is also full: reject it with `query waiting queue is full`.
-4. The query waits beyond its permitted interval: fail with `query queue timeout`.
-
-Lab 14 sets both concurrency and queue capacity to 1 for ad hoc work. Of three slow queries, the first runs, the second waits, and the third is rejected immediately.
-
-The defaults matter:
+Lab 14's ad hoc group has one slot and one place in the queue. Of three slow queries, the first runs, the second waits, and the third is rejected at once: `query waiting queue is full, queue capacity=1, waiting num=1`. The defaults matter:
 
 | Property | Default | Meaning |
 | --- | --- | --- |
-| `max_concurrency` | 2147483647 | Effectively unrestricted concurrency |
-| `max_queue_size` | 0 | No waiting queue; reject when running capacity is full |
-| `queue_timeout` | 0 | Milliseconds; no separate positive queue-wait cap in the course version, so the query timeout bounds waiting |
+| `max_concurrency` | 2147483647 | No practical limit |
+| `max_queue_size` | 0 | No queue: a query beyond the slots is rejected |
+| `queue_timeout` | 0 | In milliseconds; 0 sets no wait of its own, so the query's own timeout bounds the wait |
 
-Setting only `max_concurrency` does not create a queue. Configure `max_queue_size` too if excess requests should wait. A positive `queue_timeout` bounds waiting together with `query_timeout`; the smaller applicable interval wins. Queue timeout is measured in milliseconds, while query timeout is measured in seconds.
+Setting only `max_concurrency` creates no queue: set `max_queue_size` too if extra queries should wait. A positive `queue_timeout`, in milliseconds, bounds the wait together with `query_timeout`, in seconds: whichever ends first wins.
 
-Four boundaries affect queuing:
+Some queries never queue. The FE queues queries that scan data; `SELECT 1` and queries of `information_schema` alone do not. A query answered from the SQL cache returns at once without queueing: with the cache on, as in the sandbox, a repeated query can be cached after its tables have not changed for about 30 seconds, so Lab 14's sessions turn the cache off. Each FE has its own slots and queue: three FEs with 8 slots each have 24, if the connections are spread over them. `SHOW WORKLOAD GROUPS` shows each group's `running_query_num` and `waiting_query_num`; in `information_schema.active_queries`, a waiting query is `WAIT_IN_QUEUE` and a running one `RUNNING`.
 
-- FE queues queries that scan data. `SELECT 1` and queries confined to `information_schema` do not enter this queue.
-- SQL Cache hits return cached results without queuing. With `enable_sql_cache=true`, as in the sandbox, repeated SQL may become cacheable after table data has remained unchanged for roughly 30 seconds.
-- `bypass_workload_group=true` skips queuing. Section 14.3 explains the consequence for isolation.
-- Each FE has its own counters and queue. Cluster-wide running capacity is the sum of the capacities reached on individual FEs, subject to connection distribution.
+## 14.3 Memory and CPU on Each BE
 
-Observe `running_query_num` and `waiting_query_num` in `SHOW WORKLOAD GROUPS`. In `information_schema.active_queries`, a queued query has `QUERY_STATUS=WAIT_IN_QUEUE`; a query that obtained its slot is `RUNNING`.
-
-### Where do memory and CPU limits apply?
-
-Memory and CPU properties apply **on each BE**, rather than to one shared cluster-wide allowance:
+A group's memory and CPU properties apply on each BE, not to the cluster as a whole:
 
 | Property | Meaning | Default |
 | --- | --- | --- |
-| `max_memory_percent` | Maximum group memory on one BE, as a percentage of that BE process's `mem_limit` | 100% |
-| `min_memory_percent` | Reserved share under memory pressure; a group below this share is protected from group-memory reclamation | 0% |
-| `memory_high_watermark` | Threshold relative to the group's maximum at which new memory requests begin failing | 85% |
-| `memory_low_watermark` | Threshold below which queries paused for group-memory pressure can normally resume | 75% |
-| `max_cpu_percent` | Hard CPU cap, even when CPU is otherwise idle; requires CPU cgroup configuration | 100% |
-| `min_cpu_percent` | Minimum CPU share under contention | 0% |
+| `max_memory_percent` | The most memory the group may use on a BE, as a share of the BE process's `mem_limit` | 100% |
+| `min_memory_percent` | The share kept for the group when memory is short | 0% |
+| `memory_high_watermark` | The share of its maximum at which new memory requests of the group start to fail | 85% |
+| `memory_low_watermark` | The share below which its paused queries normally resume | 75% |
+| `max_cpu_percent` | A hard limit on CPU, also when the CPU is otherwise idle | 100% |
+| `min_cpu_percent` | The share kept for the group when the CPU is busy | 0% |
 
-Within the applicable compute group, minimum memory shares must sum to at most 100%, as must minimum CPU shares. Maximums are individual group caps and can sum to more than 100%.
+The minimum shares of all groups must add up to at most 100%; the maximums can add up to more. When a group nears its memory limit, its requests can fail and its queries pause; Doris may spill intermediate data to disk, or resume a query when memory is freed, and otherwise cancels it with `memory limit is exceeded while handling workload group memory pressure`. Which of these happens depends on the BE's load at the moment, so Lab 14 sets a memory limit without claiming to reproduce an overload.
 
-When group memory approaches its limit, memory requests can fail and queries may pause. Doris may spill intermediate data to disk or resume a query after pressure falls. If it cannot recover, it cancels the query with an error containing `memory limit is exceeded while handling workload group memory pressure`.
+Memory limits use Doris's own accounting. CPU limits need Linux CPU cgroups: if the BE's `doris_cgroup_cpu_path` is empty, Doris creates no cgroup for the groups, and `max_cpu_percent` is a setting that nothing enforces. The course's sandbox has no such path.
 
-The path depends on current BE load. Lab 14 configures a memory limit but does not claim to reproduce overload deterministically.
+## 14.4 Route an Account to Its Group
 
-CPU enforcement requires Linux CPU cgroups. If `doris_cgroup_cpu_path` is empty, BE does not create group cgroups; the CPU percentages remain configured values without enforcing CPU consumption. The course sandbox has no such path configured. Memory control uses Doris's own accounting and does not require cgroups.
+Two things route an account's queries to a group, and either alone is not enough.
 
-## 14.3 How Do BI Queries Reach the Intended Group?
-
-Default routing needs two steps.
-
-First, grant the group's `USAGE_PRIV`. Lab 14 grants it to the course role; read the statement here:
+**SQL reading example: Lab 14 runs these for a temporary user. Do not run them outside the Lab.**
 
 <!-- reading-only-example -->
 ```sql
-GRANT USAGE_PRIV ON WORKLOAD GROUP 'course_dashboard_l3'
-TO ROLE 'course_dashboard_reader_l3';
-```
-
-Second, set the account's default group. This is a reading-only example; Lab 14 does not modify this example account:
-
-<!-- reading-only-example -->
-```sql
+GRANT USAGE_PRIV ON WORKLOAD GROUP 'course_dashboard_l3' TO ROLE 'course_dashboard_reader_l3';
 SET PROPERTY FOR 'bi_dashboard_user' 'default_workload_group' = 'course_dashboard_l3';
 ```
 
-Either step alone leaves a problem:
-
 | Configuration | Result |
 | --- | --- |
-| Usage grant without a default or other routing setting | Queries still use `normal` |
-| Default group without usage privilege | Queries fail with `Access denied; you need (at least one of) the USAGE/ADMIN privilege(s) to use workload group` |
+| `USAGE_PRIV` without a default or another setting | The queries still run in `normal` |
+| A default without `USAGE_PRIV` | Every query fails: `Access denied; you need (at least one of) the USAGE/ADMIN privilege(s) to use workload group '...'` |
+| Both | The queries run in the group |
 
-The privilege check occurs when the query runs, rather than when `workload_group` or `default_workload_group` is set. A session can select an unauthorized group, but its next query is denied.
+Lab 14 tests this as a temporary ordinary user with the role and the default. Its slow query runs in `course_dashboard_l3`, as `information_schema.active_queries` shows, although the user named no group. Then the user sets its session to `course_adhoc_l3`, which its role may not use: the `SET` succeeds, and the next query is refused, because Doris checks the privilege when a query runs. A user may change its own `default_workload_group`, but its queries run only in groups that it may use; the other account properties, such as `query_timeout` and `sql_block_rules`, only an administrator can set, with `SET PROPERTY FOR`. A group that is some account's default cannot be dropped until the default changes.
 
-An ordinary user can change their own `default_workload_group`, yet queries succeed only for groups they can use. Other account properties such as `query_timeout` and `sql_block_rules` require an administrator's `SET PROPERTY FOR`.
+Any user can set `bypass_workload_group = true` for its session. That skips the FE's queue, `max_concurrency`, `max_queue_size`, and `queue_timeout`; it does not change the group, skip the usage check, or lift the BE's memory limits. In Lab 14, a query with it set runs while the ad hoc group's slot and queue are full. So the queue is not a boundary that an ordinary user cannot cross; the BE's limits, an administrator's timeout, and SQL Block Rules are.
 
-The shared `normal` group also needs deliberate production limits. Changes to it affect many accounts. Lab 14 uses dedicated groups.
+## 14.5 Stop an Excessive Query
 
-### Why is queue bypass not an isolation boundary?
+A group bounds what all of its queries use together; one query also needs bounds of its own. Doris has three, which act at different times:
 
-An ordinary user can set this session variable:
-
-<!-- reading-only-example -->
-```sql
-SET bypass_workload_group = true;
-```
-
-It skips FE queuing, including `max_concurrency`, `max_queue_size`, and `queue_timeout`. It does not change group selection, bypass `USAGE_PRIV`, or remove BE memory limits.
-
-Queuing is therefore not an enforceable boundary against a user who chooses to bypass it. BE limits, administrator-set execution limits, and SQL Block Rules still apply. Lab 14 demonstrates a query entering execution while the group's ordinary running slot and queue are occupied.
-
-## 14.4 How Do You Stop Excessive Queries?
-
-Group limits control aggregate consumption. A single excessive query also needs a boundary. Doris provides three mechanisms with different timing and scope:
-
-| Mechanism | When it acts | Scope | Outcome |
+| Mechanism | When it acts | On which queries | What happens |
 | --- | --- | --- | --- |
-| `query_timeout` | During execution after the time limit | Each query | Cancellation with `query timeout` |
-| Workload Policy | During execution when a condition matches | Queries in the associated group, or all queries if no group is specified | An action such as `cancel_query` |
-| SQL Block Rule | Before execution | All accounts for a global rule; otherwise the accounts associated with it | Rejection before the scan runs |
+| `query_timeout` | During execution, when the time is up | Each query | Cancelled: `query timeout` |
+| Workload Policy | During execution, when a condition matches | The queries of a group, or all of them | An action, such as `cancel_query` |
+| SQL Block Rule | Before execution | Every account for a global rule, the associated accounts otherwise | Rejected before it scans |
 
-### Execution timeout
+**Execution timeout.** `query_timeout`, in seconds, defaults to 900. A user can raise it for its session; an administrator's account property of the same name takes precedence and cannot be changed by the user.
 
-`query_timeout` is measured in seconds and defaults to 900. A user can increase the session value. An administrator can set the same-named account property, which takes precedence over the session variable and cannot be changed by that user.
-
-This example is for reading only:
+**SQL reading example: not executed in the Lab.**
 
 <!-- reading-only-example -->
 ```sql
 SET PROPERTY FOR 'adhoc_analyst' 'query_timeout' = '600';
 ```
 
-Lab 14 uses a two-second session timeout to observe the error. A timeout limits ongoing cost; the query has already consumed resources before it is cancelled.
+Lab 14 sets two seconds in a session to see the error. A timeout stops the cost, but the query used resources until then; a queue timeout, in contrast, means that the query never ran.
 
-### Workload Policy
+**Workload Policy.** A policy checks the running queries and acts when its condition matches; this one cancels the ad hoc queries that run longer than a minute.
 
-A Workload Policy checks running queries and applies its action when a condition matches. This reading-only example cancels ad hoc queries running for more than 60 seconds:
+**SQL reading example: not executed in the Lab.**
 
 <!-- reading-only-example -->
 ```sql
@@ -207,25 +156,17 @@ ACTIONS (cancel_query)
 PROPERTIES ("workload_group" = "course_adhoc_l3");
 ```
 
-Consider these properties:
+`query_time` is in milliseconds; other conditions are `be_scan_rows`, `be_scan_bytes`, and `query_be_memory_bytes`. The FE sends policies to the BEs periodically and the BEs check about every half second, so a cancellation comes with a delay; its message contains `cancelled by workload policy` and the policy's name. A policy without a group applies to every query, which makes a wrong condition costly. A group that a policy references cannot be dropped first; `information_schema.workload_policy` lists the policies. Lab 14 does not run one: its timing would not make a reliable check.
 
-- `query_time` is measured in milliseconds. Other conditions include `be_scan_rows`, `be_scan_bytes`, and `query_be_memory_bytes`.
-- FE distributes policies to BEs periodically. BEs check running queries at roughly 500-millisecond intervals, so propagation and cancellation have delays. The cancellation message contains `cancelled by workload policy` and the policy name.
-- A policy without `workload_group` applies to all queries, increasing the impact of an incorrect condition.
-- A referenced group cannot be dropped until its policy dependency is removed. Inspect policies through `information_schema.workload_policy`.
+**SQL Block Rule.** A rule rejects a matching query before it runs, by its text or by what its plan would scan:
 
-Lab 14 describes this mechanism without running it because asynchronous propagation makes cancellation timing unsuitable for a deterministic Notebook assertion.
-
-### SQL Block Rule
-
-SQL Block Rules reject matching queries before execution. A rule is either text-based or scan-based:
-
-| Rule type | Properties | Evidence used |
+| Kind | Properties | What it reads |
 | --- | --- | --- |
-| Text | `sql` regular expression or `sqlHash` | Original SQL text |
-| Scan | `partition_num`, `tablet_num`, `cardinality` | Partition count, tablet count, or estimated row count for scan nodes in the plan |
+| Text | `sql`, a regular expression, or `sqlHash` | The query's text |
+| Scan | `partition_num`, `tablet_num`, `cardinality` | The partitions, tablets, or estimated rows of the plan's scans |
 
-Lab 14 limits a scan to two partitions:
+**SQL reading example: the rule of Lab 14, which drops it at the end. Do not run it outside the Lab: the rule is global.**
+It allows a scan of at most two partitions:
 
 <!-- reading-only-example -->
 ```sql
@@ -233,122 +174,67 @@ CREATE SQL_BLOCK_RULE course_scan_guard_l3
 PROPERTIES ("partition_num" = "2", "global" = "true", "enable" = "true");
 ```
 
-`orders_monthly_l3` has three monthly partitions. A scan without a date filter exceeds the limit and fails with `sql hits sql block rule: course_scan_guard_l3, reach partition_num : 2`. The number in the error is the configured limit, not the actual three-partition scan count. A one-month query prunes the scan to one partition and succeeds.
+`orders_monthly_l3` has three monthly partitions. An unfiltered `SUM(amount)` would scan all three, and Doris rejects it: `sql hits sql block rule: course_scan_guard_l3, reach partition_num : 2`, where 2 is the rule's limit, not the scan's count. A query of March alone prunes to one partition and runs. Four details matter:
 
-Four details matter:
+- `global` defaults to false: an administrator associates the rule with accounts through the account property `sql_block_rules`, which the account cannot remove. A global rule applies to every account, root and the dashboards included.
+- A text rule matches the original text, case-sensitively by default: a rule for `select * from orders_monthly_l3` misses `SELECT * FROM db.orders_monthly_l3`. When the requirement is about scan scope, use a scan rule.
+- A scan rule needs a plan that scans. An unfiltered `COUNT(*)` of a Duplicate Key table may be answered from the FE's statistics without a scan, so Lab 14 uses `SUM(amount)`.
+- A query that is already in the SQL cache can keep returning its cached answer under a new rule: test with the cache off.
 
-- `global` defaults to `false`. Administrators associate such a rule with accounts through `sql_block_rules`; ordinary users cannot remove that account-property restriction. A global rule also affects root and administrators.
-- Text matching is case-sensitive by default and uses the original SQL. A pattern for `select * from orders_monthly_l3` may miss an uppercase or database-qualified query. Use scan rules when the requirement concerns scan scope.
-- Scan rules require an actual scan plan. On a Duplicate Key table, an unfiltered `COUNT(*)` may be answered from FE-cached statistics without scanning partitions. Lab 14 therefore uses `SUM(amount)`.
-- A query already in SQL Cache can continue returning cached data without exercising the new scan rule. Disable the session cache with `SET enable_sql_cache = false` or use an uncached query when validating it.
+The mechanisms combine: a scan rule rejects unbounded scans at the door, a policy cancels long ad hoc queries, and an administrator's timeout bounds every query.
 
-These mechanisms can be combined: reject excessive scans at entry, use Workload Policy to cancel long-running ad hoc work, and enforce an account-level timeout as a per-query limit.
+## 14.6 A Resource Runbook and Its Rollback
 
-## 14.5 How Do You Write a Resource Runbook?
+A resource change needs an owner, observations, and a way back:
 
-Resource configuration needs an owner, observable results, and a rollback sequence. An operator should be able to identify each group's purpose, inspect current impact, and remove dependencies in the correct order.
-
-| Runbook section | Lab 14 example |
+| Part | Lab 14's example |
 | --- | --- |
-| Groups | Dashboard: concurrency 8, queue 20, wait 10 seconds, memory cap 50%. Ad hoc: concurrency 1, queue 1, wait 30 seconds, memory cap 30%; its configured CPU cap of 30% is unenforced in this sandbox |
-| Routing | `course_dashboard_reader_l3` holds dashboard-group `USAGE_PRIV`; production accounts also need default-group configuration |
-| Protection | `course_scan_guard_l3` limits scans to two partitions globally; administrators configure production account execution limits |
-| Observations | Running and waiting counts, `WAIT_IN_QUEUE` entries, and the exact rejection or timeout messages |
-| Rollback | Remove policy dependencies, change account defaults, revoke usage grants, remove unused roles and groups, remove rules, then verify all objects |
+| Groups | Dashboard: 8 slots, 20 places in the queue, a wait of 10 s, 50% memory. Ad hoc: 1, 1, 30 s, 30% memory, and a CPU limit of 30% that the sandbox does not enforce |
+| Routing | `course_dashboard_reader_l3` holds `USAGE_PRIV` on the dashboard group; its accounts get the group as their default |
+| Protection | `course_scan_guard_l3` limits scans to two partitions; an administrator sets the accounts' timeouts |
+| Observations | The groups' running and waiting counts, `WAIT_IN_QUEUE`, the exact errors |
+| Rollback | Remove the policies that reference the groups, set the accounts' defaults to another group, revoke the usage privileges, drop the unused roles and the groups, drop the rules, and check each with its `SHOW` statement |
 
-The order matters for two reasons. Doris rejects dropping a group referenced by a Workload Policy or an account's `default_workload_group`. Remove those references first.
+The order follows the dependencies: Doris refuses to drop a group that a policy references or that is an account's default. And dropping a group does not drop the grants of its usage: a group created later with the same name would show the old `USAGE_PRIV` again in `SHOW ROLES`. Revoke the grants, or drop a role that has no purpose left, before you drop the group. Lab 14's practice checks a plan before it is applied: on three FEs, 8 slots each hold a peak of 20 dashboard queries only if the connections are spread over the FEs.
 
-Dropping a group also does not remove its role grants. Recreating the same group name can make old `USAGE_PRIV` grants appear again in `SHOW ROLES`. Revoke grants explicitly, or remove a dedicated role that has no remaining purpose, before dropping the group.
+## Lab 14: Separate Dashboard and Ad Hoc Resources
 
-## Hands-on Lab: Separate Dashboard and Ad Hoc Resources
+Open [Lab 14: Separate Dashboard and Ad Hoc Resources](lab14_resource_isolation.ipynb). You:
 
-Open [Lab 14](lab14_resource_isolation.ipynb) and complete these steps:
+1. See which group root's queries use.
+2. Prepare the table, and remove what an earlier run left.
+3. Create the dashboard and ad hoc groups, and grant the dashboard group to a role.
+4. Send five queries and see them run, wait, be rejected, and bypass the queue.
+5. Tell a queue timeout from an execution timeout.
+6. Route a temporary ordinary user with its account's default, and see it refused the ad hoc group.
+7. Reject a full scan with a SQL Block Rule.
+8. Check that no policy or account default holds the groups, then revoke the grant and drop the role and the groups.
+9. Practice: check a resource plan, then apply it under trial names.
 
-1. Confirm that the initial query uses `normal`.
-2. Rebuild `orders_monthly_l3` with three monthly partitions.
-3. Create dashboard and ad hoc groups, and grant dashboard-group usage to the dedicated role.
-4. Submit slow queries in multiple sessions; observe running, queuing, rejection, and bypass.
-5. Compare queue-wait and execution timeouts.
-6. Reject an unfiltered full-table scan with a SQL Block Rule.
-7. Revoke usage, remove the role and groups, and verify cleanup.
-8. Write a dashboard resource-configuration checklist.
+You need only the course sandbox. Workload Groups, roles, users, and rules belong to the whole cluster; the Lab removes all of its own and leaves `normal` and root's account unchanged.
 
-### Prerequisites and Scope
+## Summary
 
-Lab 14 requires the sandbox connection but no Level 1 business tables. It rebuilds `orders_monthly_l3` in the dedicated database and creates two Workload Groups, one role, and one global SQL Block Rule.
+- Doris takes a query's group from a hint, then the session, then the account's default, then `normal`.
+- A query runs when a slot is free, waits while the queue has room, and is rejected otherwise; a positive `queue_timeout` ends the wait, and each FE has its own slots and queue.
+- Memory and CPU limits apply on each BE; CPU limits need a CPU cgroup, which the sandbox does not have.
+- An account reaches a group with both `USAGE_PRIV` and `default_workload_group`; the privilege is checked when a query runs, and `bypass_workload_group` skips only the FE's queue.
+- `query_timeout` cancels a running query, a Workload Policy acts on running queries that match, and a SQL Block Rule rejects a query before it runs.
+- A runbook names the groups, routing, protection, and observations, and removes policies, defaults, grants, roles, groups, and rules in the order of their dependencies.
 
-Those configuration objects are cluster-wide. The Lab removes leftovers with the same dedicated names at startup and removes its objects at completion.
+## Quiz 14
 
-The global rule exists only within one cell and is deleted in its `finally` block. Interrupting that cell or restarting the kernel can leave the rule behind. Rerun “1. Prepare the table and remove leftover objects” before continuing; run the connection cell first if the kernel was restarted.
+Open [Quiz 14: Resource Isolation and Query Protection](quiz14_resource_isolation.ipynb). It has six single-choice questions and needs no running environment.
 
-The Lab uses root and does not create consumer accounts or modify account properties, so it does not test an ordinary user's denied group access. `sleep()` simulates slow scans. `dw_course.workload` opens additional sandbox sessions and disables their SQL Cache so that the queries actually queue and execute.
+Next: this is the last module of the course. Over fourteen modules you loaded orders and their history into Doris, kept only the inputs that passed their checks, followed the orders' changes, modeled them as facts and dimensions, turned them into metrics with written contracts, published those metrics to dashboards and models, granted that access through roles and audited it, kept the data's lifecycle in partitions with a tested way back, and gave each workload its own resources. The [course README](../../README.md) says how to remove what the Labs created; the other courses of this series, such as [Real-time Analytics with Apache Doris](../../../01-real-time-analytics/README.md), are further reading.
 
-The sandbox has one FE and one BE, without CPU cgroup configuration. CPU enforcement, memory-overload recovery, and Workload Policy cancellation remain reading topics.
+## References
 
-### Acceptance Criteria
-
-| Check | Expected result |
-| --- | --- |
-| Initial routing | Empty root session `workload_group`; account default `normal` |
-| Groups | Concurrency, queue, wait, and memory settings match the design |
-| Role grant | Only dashboard-group `USAGE_PRIV` |
-| Queuing and rejection | A runs; B waits then runs; C is rejected; D and E run without waiting |
-| Timeouts | Queue failure after roughly one second; execution failure after roughly two seconds |
-| Scan rule | Unfiltered `SUM` is rejected; one-month query succeeds; rule is removed before the cell finishes |
-| Cleanup | Lab groups, role, rule, and usage grants are gone; `normal` remains unchanged |
-
-## Independent Exercise
-
-A dashboard is going live. Five BI accounts generate about 20 simultaneous queries at peak refresh. Three analyst accounts submit irregular queries with unpredictable scan scope. The cluster has three FEs.
-
-Write a configuration checklist covering:
-
-1. Each group's concurrency, queue capacity, and wait interval, with reasons.
-2. Usage grants and account properties that route each workload.
-3. The errors for a full queue, excessive queue wait, and excessive execution time.
-4. A rule that rejects scans without a sufficient date restriction, and the accounts affected.
-5. Rollback order and verification.
-
-<details>
-<summary>Reference Explanation</summary>
-
-Queue capacity is per FE. A dashboard concurrency of 8 permits about 24 running queries across three evenly used FEs, enough for a peak of 20. If connections concentrate on one FE, only its eight slots are available to those requests. Verify connection distribution rather than treating 24 as a guaranteed capacity.
-
-Reserve queue space for short refresh bursts and allow a few seconds of waiting. Keep ad hoc concurrency and queue capacity small enough that excessive scans are rejected instead of accumulating on BEs. Use per-BE memory caps; rely on CPU caps only after cgroup enforcement is configured.
-
-Grant BI accounts dashboard-group `USAGE_PRIV` through a role and set their default group. Give analysts usage only on the ad hoc group and make it their default. Selecting the dashboard group does not grant access: the analyst's query is denied without its usage privilege.
-
-A full queue reports `query waiting queue is full`; excessive waiting reports `query queue timeout`; excessive execution reports `query timeout`. Analysts can change their session timeout, so enforce the production execution limit through the administrator-controlled account property. Queue bypass does not remove that limit or a scan rule.
-
-Create a `partition_num` SQL Block Rule and associate it with analyst accounts using `sql_block_rules`. A global rule also affects dashboards and administrators, so verify their scan requirements before choosing that scope.
-
-For rollback, remove Workload Policies referencing the groups, change account defaults to an appropriate remaining group, revoke usage privileges, remove unused roles and groups, and remove obsolete rules. Verify with `SHOW WORKLOAD GROUPS`, `SHOW ROLES`, and `SHOW SQL_BLOCK_RULE`.
-
-</details>
-
-## Module Summary
-
-- Routing precedence is query hint, session group, account default, then `normal`.
-- Concurrency, queue capacity, and wait time determine whether ordinary requests run, wait, or fail.
-- FE queues and BE resource limits apply per node; CPU enforcement requires cgroups.
-- Default routing needs both a usage grant and a default-group setting.
-- Queue bypass is available to ordinary users and does not remove usage checks or BE resource limits.
-- SQL Block Rules reject before execution; Workload Policy and timeouts cancel ongoing work.
-- A resource runbook records groups, routing, protection, observations, and dependency-aware rollback.
-
-## Knowledge Quiz 14: Resource Isolation and Query Protection
-
-[Quiz 14](quiz14_resource_isolation.ipynb) contains six scenario-based single-choice questions covering routing precedence, concurrency, queues, BE limits, queue bypass, query protection, and rollback.
-
-Next: this is the last module of the course.
-
-## Official References
-
-- [Workload Group](https://doris.apache.org/docs/4.x/admin-manual/workload-management/workload-group/)
-- [Concurrency Control and Queuing](https://doris.apache.org/docs/4.x/admin-manual/workload-management/concurrency-control-and-queuing/)
-- [Query Circuit Breaking: SQL Block Rule and Workload Policy](https://doris.apache.org/docs/4.x/admin-manual/workload-management/sql-blocking/)
-- [CREATE SQL_BLOCK_RULE](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-governance/CREATE-SQL_BLOCK_RULE/)
-- [CREATE WORKLOAD POLICY](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/cluster-management/compute-management/CREATE-WORKLOAD-POLICY/)
-- [SET PROPERTY](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/SET-PROPERTY/)
-- [active_queries](https://doris.apache.org/docs/4.x/admin-manual/system-tables/information_schema/active_queries/)
-- [SQL Cache](https://doris.apache.org/docs/4.x/query-acceleration/sql-cache-manual/)
+- [Apache Doris: Workload Group](https://doris.apache.org/docs/4.x/admin-manual/workload-management/workload-group/)
+- [Apache Doris: Concurrency control and queuing](https://doris.apache.org/docs/4.x/admin-manual/workload-management/concurrency-control-and-queuing/)
+- [Apache Doris: SQL blocking and Workload Policy](https://doris.apache.org/docs/4.x/admin-manual/workload-management/sql-blocking/)
+- [Apache Doris: CREATE SQL_BLOCK_RULE](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/data-governance/CREATE-SQL_BLOCK_RULE/)
+- [Apache Doris: CREATE WORKLOAD POLICY](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/cluster-management/compute-management/CREATE-WORKLOAD-POLICY/)
+- [Apache Doris: SET PROPERTY](https://doris.apache.org/docs/4.x/sql-manual/sql-statements/account-management/SET-PROPERTY/)
+- [Apache Doris: active_queries](https://doris.apache.org/docs/4.x/admin-manual/system-tables/information_schema/active_queries/)
+- [Apache Doris: SQL Cache](https://doris.apache.org/docs/4.x/query-acceleration/sql-cache-manual/)
