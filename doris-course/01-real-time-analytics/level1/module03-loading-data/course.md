@@ -81,22 +81,9 @@ A **bounded source** has a known end: one client file, one request body, or one
 fixed set of objects. A **continuous source** can receive new records after the
 load starts.
 
-```text
-Bounded client file                 Fixed remote object set
-        |                                      |
-        | HTTP push                            | Doris reads
-        v                                      v
-   Stream Load                         S3 TVF -> SELECT
-                                              |
-                                              v
-                                     INSERT INTO target
+![Four source contracts map to Stream Load, S3 TVF with INSERT INTO SELECT, Routine Load, and Group Commit.](images/01-load-method-selection.png)
 
-Continuous Kafka topic              Frequent tiny application writes
-        |                                      |
-        | Doris consumes                       | INSERT / Stream Load
-        v                                      v
- Routine Load job                         Group Commit
-```
+*Choose the load method from the source and control contract rather than forcing every source through one path.*
 
 All four mechanisms can participate in transactional writes, but they expose
 different control and completion models. Select the model that matches the
@@ -116,17 +103,9 @@ port. FE authenticates and redirects the request to a Backend (BE). The BE
 parses and writes the rows, and the load transaction is committed through FE.
 The client receives one synchronous JSON response.
 
-```text
-Client-local CSV
-      |
-      | HTTP PUT + Stream Load headers
-      v
-Frontend (FE) ---- redirect ----> Backend (BE)
-      ^                                |
-      |                                | parse, map, filter, write
-      |                                v
-      +---------- JSON response -- load transaction
-```
+![A client pushes a bounded CSV batch through FE and BE, receives a synchronous JSON result, and reuses the same label for a safe retry.](images/02-stream-load-request-and-retry.png)
+
+*Stream Load combines a synchronous batch response with label-based protection for an uncertain retry.*
 
 `curl --location-trusted` follows the authenticated FE-to-BE redirect. In a
 secured environment, use TLS and an appropriately scoped Doris account rather
@@ -347,20 +326,9 @@ FROM S3(
 );
 ```
 
-```text
-S3 Parquet objects
-        |
-        | S3 TVF read
-        v
-temporary relation
-        |
-        | SELECT projection / filtering / transformation
-        v
-INSERT INTO target internal table
-        |
-        v
-committed rows in Doris-managed storage
-```
+![The S3 TVF reads Parquet objects into a temporary relation, while INSERT INTO SELECT persists the transformed result in an Apache Doris internal table.](images/03-s3-tvf-to-internal-table.png)
+
+*Reading remote objects and persisting a SQL result are separate responsibilities.*
 
 The responsibilities remain distinct:
 
@@ -406,21 +374,9 @@ is appropriate when new CSV or JSON messages continue to arrive and should
 become queryable with low latency without an external process submitting one
 load command for every batch.
 
-```text
-Application producers
-        |
-        | append JSON messages
-        v
-Kafka topic and Partitions
-        |
-        | consume from tracked offsets
-        v
-Routine Load job
-        |
-        | schedule micro-batch tasks
-        v
-BE nodes -> load transaction -> target internal table
-```
+![Producers append messages to Kafka partitions, and an Apache Doris Routine Load job schedules BE tasks that commit rows with their offsets.](images/04-routine-load-kafka-flow.png)
+
+*Routine Load keeps continuous progress through managed tasks and committed Kafka offsets.*
 
 ### Job and task responsibilities
 
@@ -518,21 +474,9 @@ work while BE storage accumulates version pressure.
 writes to the same table into a shared load transaction. It is not simply
 “concurrent writing,” and it is not a standalone connector for S3 or Kafka.
 
-```text
-Application workers
-   |     |     |     |       many compatible small writes
-   +-----+-----+-----+
-             |
-             v
-     BE Group Commit queue
-             |
-             | time or size trigger
-             v
-     one grouped load transaction
-             |
-             v
-       fewer new Rowsets
-```
+![Compatible tiny writes enter the Apache Doris Group Commit queue and leave as fewer grouped load transactions and Rowsets.](images/05-group-commit-small-writes.png)
+
+*Group Commit changes the transaction unit and acknowledgement timing without becoming a new source connector.*
 
 Group Commit layers on top of compatible `INSERT INTO VALUES`, JDBC prepared
 statements, or Stream Load requests. It reduces per-write planning,

@@ -81,21 +81,9 @@ independently on each date.
 
 The query can be understood as a sequence of row shapes:
 
-```text
-event-detail rows
-        |
-        | filter dates and derive event_date
-        v
-selected event-detail rows
-        |
-        | group by event_date and region
-        v
-daily-region rows
-        |
-        | add previous, cumulative, and rank values
-        v
-the same daily-region rows with more columns
-```
+![The report grain from event-detail rows through filtering, grouping, windows, and ordering](images/01-trace-report-grain.png)
+
+*Trace the meaning and row shape of the result through every analytical stage.*
 
 Filtering can remove rows. Grouping usually reduces many detail rows to fewer
 grouped rows. Window calculation retains the rows it receives and adds a value
@@ -135,13 +123,11 @@ rows. The categories are not merely lists of names.
 
 ### Follow the row shape through the analysis
 
-A useful first approximation connects the three core function shapes:
+A useful first approximation connects the core function shapes:
 
-```text
-one input row  -- Scalar Function --> one derived value for that row
-many rows      -- Aggregate Function --> one value for each group
-one input row  -- Table Function --> zero to many expanded rows
-```
+![How scalar, aggregate, Table, and window functions change or retain rows](images/02-function-row-shapes.png)
+
+*Function categories differ in what they consume, return, and do to row shape.*
 
 In shorthand, these are **one-to-one**, **many-to-one**, and **one-to-many**.
 They describe what the function contributes to the query, not a guarantee that
@@ -290,17 +276,9 @@ should remain in scope.
 
 `WHERE` and `HAVING` operate at different row shapes:
 
-```text
-FROM events_modelled
-        |
-        | WHERE: remove input event rows
-        v
-GROUP BY product_id
-        |
-        | calculate one row per product
-        v
-HAVING: remove product groups by their aggregate values
-```
+![WHERE filtering event rows before grouping and HAVING filtering aggregate groups afterward](images/03-where-vs-having.png)
+
+*`WHERE` tests input rows; `HAVING` tests groups after their aggregates exist.*
 
 To find products whose purchase revenue reaches a threshold on one day,
 `WHERE` should choose that day's purchase events, while `HAVING SUM(revenue)`
@@ -449,6 +427,10 @@ different states.
 After aggregation, each row already represents a date and region. Window
 functions compare those rows while preserving them. Three clauses establish
 the comparison contract:
+
+![Region-over-time and date-across-regions window populations in one report](images/04-window-populations.png)
+
+*The same daily-region rows can participate in different window populations without changing their grain.*
 
 | Window component | Question it answers |
 | --- | --- |

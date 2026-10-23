@@ -81,12 +81,9 @@ that its reports do not need.
 Suppose two purchase events have revenue 12.00 and 18.00. A daily summary for
 those events contains revenue 30.00:
 
-```text
-event detail                         daily summary
+![Three separate data products and the boundary between event detail and daily summary](images/01-three-data-product-grains.png)
 
-event 101   purchase   12.00         2026-09-15   purchase   30.00
-event 102   purchase   18.00
-```
+*Keep event history, current state, and summary metrics at separate declared grains.*
 
 If all three rows are placed in one table and a query simply calculates
 `SUM(revenue)`, the result is 60.00. The same activity has been represented once
@@ -128,6 +125,10 @@ Choose the model from row meaning before thinking about performance. Doris
 cannot convert an existing table to another Table Model; a changed contract
 needs a new table and a controlled transition. See the [Table Model overview](https://doris.apache.org/docs/4.x/table-design/data-model/intro/)
 and [Table Model best practices](https://doris.apache.org/docs/4.x/table-design/data-model/tips/).
+
+![Duplicate, Unique, and Aggregate Key behavior when a key repeats](images/02-table-model-repeated-key-semantics.png)
+
+*Choose a Table Model from the result that a repeated key must produce.*
 
 ### Event history: Duplicate Key
 
@@ -406,6 +407,10 @@ the total. Pair the calculation with an invalid-row count and an explicit
 policy. Once valid rows enter a typed analytical table, downstream queries can
 use `SUM(revenue)` without repeating parsing logic. See [CAST and TRY_CAST](https://doris.apache.org/docs/4.x/sql-manual/basic-element/sql-data-types/conversion/cast-expr/).
 
+![Typed ingestion outcomes for absent, omitted, null, and invalid values](images/03-typed-ingestion-boundary.png)
+
+*Treat missing, omitted, and invalid input as different states at the ingestion boundary.*
+
 ## 4.6 Choose Time Partitions from Query and Lifecycle Boundaries
 
 Most event queries read recent time ranges, while retention, replacement, and
@@ -571,6 +576,10 @@ The three choices cooperate, but each answers its own question: a sort key
 creates no Partitions, a time Partition orders no rows, and a Hash key enforces
 no uniqueness. Lab 4 inspects the declaration and the layout; Lab 2 compared the
 scan work of two sort keys with the Query Profile.
+
+![How Partition, Bucket, and sort key place and organize one row](images/04-partition-bucket-sort-layout.png)
+
+*Partition selects the time range, Hash selects the Tablet, and the sort key orders data within storage.*
 
 ## 4.9 Map Complex Types from the Application Structure
 

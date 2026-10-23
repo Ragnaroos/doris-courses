@@ -99,11 +99,9 @@ Arrival order is unreliable. A delayed `paid` message can arrive after a newer
 `shipped` message. A Sequence column makes source version, timestamp, or offset
 part of the table contract:
 
-```text
-09:00 created
-10:10 shipped  -> visible winner
-10:05 paid     -> arrives last but has a smaller Sequence
-```
+![A Sequence column choosing the newest source state despite out-of-order arrival](images/01-sequence-source-order.png)
+
+*Current state follows the authoritative source sequence, not arrival order.*
 
 Lab 7 declares `"function_column.sequence_col" = "updated_at"`. Merely naming a
 column `updated_at` would not create ordering semantics. Choose a value monotonic
@@ -125,6 +123,10 @@ values.
 | --- | --- | --- |
 | Full-row upsert | Construct a complete replacement | Use schema defaults or permitted `NULL` |
 | Partial column update | Patch the existing state | Preserve visible values |
+
+![Full-row upsert applying defaults to omitted fields versus partial update preserving them](images/02-full-row-vs-partial-update.png)
+
+*Omitted columns are replaced by a full-row upsert but preserved by a partial update.*
 
 Lab 7 shows a full-row write changing omitted amount and region to `0.00` and
 `UNASSIGNED`, while a partial update preserves `88.00` and `CN-WEST`.
@@ -206,6 +208,10 @@ A staging relation may contain mixed change types:
 | 4002 | DELETE | Delete an existing order |
 | 4004 | UPSERT | Insert a new order |
 
+![MERGE INTO applying matched delete, matched update, and not-matched insert actions](images/03-merge-conditional-actions.png)
+
+*`MERGE INTO` applies the first qualifying action and leaves target-only rows unchanged.*
+
 `MERGE INTO` joins that relation to a target table, which must be a Unique Key
 table with Merge-on-Write; on any other table Doris rejects the statement
 ("merge into command only support MOW unique key olapTable"):
@@ -272,6 +278,10 @@ bitmap described by Merge-on-Write. Lab 7 deletes `2003` by predicate and
 
 ## 7.7 Match the Operation to a Complete Lifecycle Scope
 
+![Partial update, SQL update, delete, truncate, and overwrite matched to change scope](images/04-operation-change-scope.png)
+
+*Choose an operation whose scope matches the incoming change, from one Key to a complete Partition.*
+
 | Requirement | Starting operation |
 | --- | --- |
 | A complete table or Partition is obsolete | `TRUNCATE TABLE/PARTITION` |
@@ -294,12 +304,9 @@ After publication, new ordinary queries see the winning Unique Key state and
 exclude logically deleted rows. They need not wait for Compaction. Superseded
 physical versions can remain until background Compaction reclaims them.
 
-```text
-transaction publishes
-        +-- new queries see the new logical state
-        +-- old physical versions may remain
-                    +-- later Compaction can reclaim them
-```
+![Logical state becoming visible immediately while old physical versions wait for Compaction](images/05-logical-visibility-physical-cleanup.png)
+
+*Logical visibility is immediate after publication; physical reclamation is later background work.*
 
 | Evidence | Supported conclusion | Unsupported conclusion |
 | --- | --- | --- |

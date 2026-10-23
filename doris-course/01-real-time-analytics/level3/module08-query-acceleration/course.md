@@ -101,14 +101,9 @@ affected by scheduling, caches, concurrent work, and the test environment.
 
 The safe workflow is:
 
-```text
-define the answer
-        -> capture a correct baseline
-        -> inspect the selected plan
-        -> inspect one execution's relevant work
-        -> change one controlled variable
-        -> repeat all three checks
-```
+![A controlled acceleration workflow combining result, plan, and runtime evidence](images/01-acceleration-evidence-loop.png)
+
+*Preserve the answer, change one variable, and repeat every evidence check.*
 
 The baseline now protects the dashboard's meaning. The first operational
 problem, however, is simpler than repeated computation: several reports are
@@ -154,6 +149,10 @@ precomputation.
 | Regular view | A reusable query definition | No | Reads current source data when queried |
 | Manually populated summary table | Rows written by a separate process | Yes | The process must keep it current |
 | Materialized view | A definition plus managed stored data | Yes | Doris maintains or refreshes it according to the view type |
+
+![CTE, regular view, manual summary, and materialized view as four forms of reuse](images/02-four-forms-of-reuse.png)
+
+*Logic reuse and stored-result reuse solve different problems and have different freshness owners.*
 
 A manually populated summary can be a good data product. It becomes unsafe
 only when users assume it is current without an explicit owner, schedule, and
@@ -281,6 +280,10 @@ writes.
 
 An asynchronous view has at least three contracts:
 
+![Synchronous and asynchronous materialized-view scope, freshness, and maintenance](images/03-sync-vs-async-materialization.png)
+
+*Synchronous materialization trades write cost for immediate supported freshness; asynchronous materialization trades refresh cost for a stored snapshot.*
+
 | Contract | Decision |
 | --- | --- |
 | Build | Build immediately or defer the first build |
@@ -368,6 +371,10 @@ preserved the necessary state.
 The optimizer needs enough information to derive the requested result.
 
 Check four parts:
+
+![A fresh additive materialized result being eligible for rollup but ineligible for an exact distinct count](images/04-materialized-view-eligibility.png)
+
+*Freshness is only one gate: the stored dimensions, grain, and measure state must also answer the query.*
 
 | Query requirement | Question to ask |
 | --- | --- |
@@ -458,34 +465,19 @@ one workload. An inverted index can add a separate access structure.
 ### Understand the Segment-local lookup
 
 Within a Segment, an un-tokenized inverted index maps a complete value to a set
-of Row IDs. If a six-row Segment contains:
+of Row IDs:
 
-```text
-Row ID       0     1     2     3     4     5
-product_id  1001  1002  1001  1003  1004  1001
-```
+![An inverted-index posting and bitmap inside one Segment of a Tablet replica](images/05-segment-local-inverted-index.png)
 
-the posting for `1001` can be represented as:
-
-```text
-Row ID set: {0, 2, 5}
-bitmap:     [1, 0, 1, 0, 0, 1]
-```
+*The posting narrows Row IDs inside one Segment; it does not redefine the table's larger storage layout.*
 
 The bits answer which row positions may be read from that Segment. They are not
 Partition numbers, Bucket numbers, Tablet locations, or global business IDs.
 Each relevant Segment has its own Row ID space and its own index.
 
-The simplified read path is:
-
-```text
-Partition pruning
-    -> select Tablet replicas
-    -> inspect relevant Segments
-    -> probe each Segment's inverted index
-    -> obtain matching Row ID bitmaps
-    -> read requested column values for those rows
-```
+The simplified read path is Partition pruning, Tablet-replica selection,
+Segment inspection, index probing, and reading the requested values at the
+matching Row IDs.
 
 The index does not change where the table is partitioned or bucketed. It narrows
 rows after those larger layout decisions identify the storage that may contain

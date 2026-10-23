@@ -59,18 +59,9 @@ client submitting SQL does not connect directly to every BE. It opens a MySQL
 protocol session to an FE query port, or to a proxy that selects an FE for that
 session.
 
-```text
-application or SQL client
-           |
-           v
-client-side multi-address logic or TCP proxy
-           |
-           v
-connected FE: parse, analyze, optimize, coordinate
-           |
-           v
-selected BEs: scan local Tablet replicas and execute fragments
-```
+![The client, proxy, FE, and BE responsibilities in one distributed Doris request](images/01-distributed-request-roles.png)
+
+*The client reaches one FE session; the FE plans and coordinates work that selected BEs execute.*
 
 ### Frontend responsibilities
 
@@ -132,10 +123,9 @@ physical consequences visible.
 
 For the base index of a table with a fixed Bucket count per Partition:
 
-```text
-logical Tablets = Partitions x Buckets per Partition
-physical replica records = logical Tablets x replication count
-```
+![Logical Tablet count and physical replica movement after a BE is added](images/02-tablets-replicas-expansion.png)
+
+*Adding a BE creates another placement target; it does not change the logical shard definition.*
 
 For example, a two-Partition table with six Buckets per Partition has twelve
 logical Tablets in its base index. With two replicas, Doris maintains two
@@ -230,12 +220,9 @@ elect another Master and preserve FE metadata service availability.
 
 The existing MySQL TCP session still terminates:
 
-```text
-client ===== TCP session ===== failed FE
-                                   X
+![FE Master election preserving metadata service while a failed client session must be reopened](images/03-fe-election-client-session.png)
 
-new Master elected elsewhere does not move that TCP session
-```
+*Election can preserve the FE service, but the application must create a new session through a healthy entry point.*
 
 The application must establish a new session through another address or a
 stable entry point.
@@ -420,29 +407,9 @@ assume the default majority rule when an environment overrides it.
 
 ### Follow the commit and recovery states
 
-Before failure:
+![A three-replica majority commit followed by heartbeat recovery and version catch-up](images/04-majority-commit-recovery.png)
 
-```text
-BE A replica: version V, current
-BE B replica: version V, current
-BE C replica: version V, current
-```
-
-After BE B stops and a new write commits through A and C:
-
-```text
-BE A replica: version V+1, current
-BE B replica: version V,   not current, BE unavailable
-BE C replica: version V+1, current
-```
-
-After BE B returns and catches up:
-
-```text
-BE A replica: version V+1, current
-BE B replica: version V+1, current
-BE C replica: version V+1, current
-```
+*Two of three replicas can commit the write; the returning BE is alive before its replica is necessarily current.*
 
 The exact numbers do not matter. Compare versions relative to each other.
 During the outage, FE metadata can retain the stopped replica's last known
@@ -480,6 +447,10 @@ how much event–user Join input must move for a recurring report.
 The restored cluster repeatedly joins event measures to user segments on
 `user_id`. The logical Inner Join and its business answer stay fixed. The
 decision is how much Join input should move across the distributed execution.
+
+![Bucket Shuffle moving one Join input compared with Colocate moving neither Join input](images/05-bucket-shuffle-vs-colocate.png)
+
+*The logical Join stays the same; the storage and placement contract determines which input moves.*
 
 ### Reuse the Event-Side Layout with Bucket Shuffle
 

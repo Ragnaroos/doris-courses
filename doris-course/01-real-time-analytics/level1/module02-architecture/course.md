@@ -99,25 +99,9 @@ operators such as scan, filter, exchange, and aggregate. An **Exchange** moves
 intermediate data between plan fragments when the next operation requires rows
 to be repartitioned or gathered.
 
-```text
-MySQL-compatible client
-          |
-          | SQL
-          v
-Frontend (FE)
-  parse -> analyze -> optimize
-  create a distributed query plan
-  assign plan fragments
-          |
-          v
-Backend (BE) nodes
-  execute assigned plan fragments
-  scan -> filter -> partial aggregate
-          |
-          | Exchange when required
-          v
-  merge -> final result -> client
-```
+![A MySQL-compatible client sends SQL into Apache Doris, which plans fragments for parallel BE execution and exchanges partial results before returning the final answer.](images/01-sql-to-distributed-plan-fragments.png)
+
+*One SQL statement becomes coordinated plan fragments that BE nodes execute in parallel.*
 
 This is **Massively Parallel Processing (MPP)**: work is distributed across BE
 nodes. Within one BE, the **Pipeline execution engine** schedules operators as
@@ -210,13 +194,9 @@ The examples use `internal.doris_course.events`:
 
 Inside an internal Table, data is organized physically:
 
-```text
-Table
-└── Partition              logical range and lifecycle boundary
-    └── Bucket / Tablet    distribution rule / physical data shard
-        └── Rowset         version unit created by a load transaction or Compaction
-            └── Segment    immutable columnar data file
-```
+![An Apache Doris table contains partitions, buckets and tablets, rowsets, and immutable columnar segments.](images/02-storage-hierarchy.png)
+
+*The hierarchy separates lifecycle boundaries, physical distribution, version units, and immutable files.*
 
 ### Partition
 
@@ -326,14 +306,9 @@ model, Compaction also applies repeated-key semantics and obsolete-data
 cleanup. It does not merge data across unrelated Tablets, and it does not
 change the logical query result.
 
-```text
-Before Compaction                  After Compaction
-Tablet                             Tablet
-├── Rowset v1                       └── Rowset v1–v4
-├── Rowset v2                           ├── Segment
-├── Rowset v3                           └── Segment
-└── Rowset v4
-```
+![A load transaction publishes rowsets across affected tablets, while background Compaction rewrites several rowsets within one tablet into fewer larger rowsets without changing the logical result.](images/03-load-transaction-and-compaction.png)
+
+*Publishing makes a transaction visible; later Compaction reduces read amplification within each Tablet.*
 
 Compaction balances two forms of work: extra background I/O when Rowsets are
 rewritten, and less read amplification for later queries. That is why a healthy
@@ -478,6 +453,10 @@ This wording matters. **Predicate pushdown** means that BE evaluates a
 predicate in the scan operator close to storage instead of passing every row to
 a later Filter operator. It does not necessarily mean that FE pruned a
 Partition or Tablet.
+
+![FE pruning excludes whole partitions and tablets from metadata, while BE scan reduction skips ranges inside the selected tablets.](images/04-pruning-and-scan-reduction.png)
+
+*FE reduces the planned scan scope; BE reduces the ranges read inside that scope.*
 
 ### Read `EXPLAIN` as planned evidence
 

@@ -72,13 +72,9 @@ safe relationship. Before writing SQL, ask:
 For one equality Key, the number of matching pairs is the product of the
 matching row counts on both sides:
 
-```text
-3 left rows with product_id = 20
-×
-2 right rows with product_id = 20
-=
-6 matching result pairs
-```
+![Three event rows and two product-version rows producing six matching Join pairs](images/01-join-multiplicity.png)
+
+*A Join emits every matching pair, so repeated keys can multiply both rows and measures.*
 
 This is valid relational behavior. A Join does not infer that a table called a
 dimension should contain one row per Key.
@@ -136,6 +132,10 @@ syntax.
 | Return only events for which a product exists | `LEFT SEMI JOIN` | Return qualifying left rows without right columns |
 | Return only events for which no product exists | `LEFT ANTI JOIN` | Return unmatched left rows |
 | Generate every combination intentionally | `CROSS JOIN` | Return the Cartesian product |
+
+![Inner, Left Outer, Left Semi, and Left Anti Join row-retention behavior](images/02-join-row-retention.png)
+
+*Choose the logical Join form from the matched and unmatched rows the answer must retain.*
 
 With 100 left rows and 20 right rows, a Cross Join has 2,000 combinations
 before later filtering. Use it only when every combination belongs to the
@@ -275,14 +275,9 @@ e.product_id = d.product_id
 Doris can build an in-memory hash table from the physical right-side input and
 stream physical left-side rows through it:
 
-```text
-right-side rows                         left-side rows
-dim_products                            events_modelled
-      |                                       |
-      | build hash table by product_id        | probe by product_id
-      v                                       v
-{ 10 → row, 20 → row, ... }  <----------  event Key candidates
-```
+![The build and probe roles of an equality Hash Join](images/03-hash-join-build-probe.png)
+
+*The build side creates the key lookup; the probe side streams candidates through it.*
 
 **Build side** and **probe side** are roles inside a Join operator. They are not
 permanent properties of a fact or dimension table, and they do not mean one BE
@@ -341,14 +336,11 @@ BE 3: events product_id {10, 40}       products product_id {20, 40}
 
 A local-only Join would miss valid matches: the product row for Key 10 is on
 BE 2 while event rows with Key 10 are on BE 1 and BE 3. The distributed plan
-must therefore do one of the following:
+must therefore make matching Keys meet:
 
-```text
-Broadcast:          copy the complete small build input to every participant
-Partition Shuffle: hash both inputs by Join Key and route equal Keys together
-Bucket Shuffle:    keep one compatible bucketed input; route only the other
-Colocate:          use an existing layout where matching Buckets are together
-```
+![Broadcast, Partition Shuffle, Bucket Shuffle, and Colocate Join distribution](images/04-join-distribution-strategies.png)
+
+*The four strategies differ in which input data moves and which existing layout can be reused.*
 
 These choices balance network transfer, per-instance memory, skew, and the
 ability to reuse an existing layout:
@@ -583,17 +575,9 @@ Broadcast Join and a Runtime Filter.
 For a Hash Join, Doris can derive a Runtime Filter from build-side Join values
 and apply it to the probe-side Scan when Join semantics allow:
 
-```text
-filtered product Keys {10, 20}
-          |
-          | build Join and produce Runtime Filter
-          v
-event Scan keeps product_id 10 and 20 candidates
-and rejects product_id 30, 40, ... candidates
-          |
-          v
-fewer candidate rows reach the Hash Join
-```
+![A Runtime Filter built from product keys reducing event-scan candidates before a Hash Join](images/05-runtime-filter.png)
+
+*Runtime Filters reduce probe candidates; the final Join condition still determines the result.*
 
 The plan can show an identifier such as `RF000`, `RF0`, or another generated
 label. That label identifies a planned or profiled filter; it is not a table,

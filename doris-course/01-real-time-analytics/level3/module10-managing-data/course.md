@@ -65,6 +65,10 @@ separating them.
 | Recover from cluster loss or an old logical error | Repository backup or authoritative-source replay | Can data be restored independently of this live cluster? |
 | Move colder data to a cheaper medium | Local or remote tiered storage | Where should retained cold data live? |
 
+![Compression, partitioning, retention, tiering, recycle-bin undo, and independent recovery responsibilities](images/01-lifecycle-responsibilities.png)
+
+*A complete lifecycle uses several mechanisms; none of them substitutes for all the others.*
+
 These mechanisms can be combined, but they are not substitutes for each
 other. Compression does not remove old rows. A replica does not preserve a
 previous business state. The recycle bin is not independent of the cluster.
@@ -120,21 +124,9 @@ opportunities than mixing complete rows together.
 
 A useful simplified path is:
 
-```text
-logical column values
-        |
-        v
-column encoding
-        |
-        v
-encoded bytes divided into Pages
-        |
-        v
-table-selected compression algorithm applied per Page
-        |
-        v
-Segment storage
-```
+![Column values being encoded before a table-selected algorithm compresses each Page](images/02-encoding-page-compression.png)
+
+*Column encoding represents values efficiently; Page compression reduces the resulting encoded bytes.*
 
 The two middle steps solve related but distinct problems.
 
@@ -337,6 +329,10 @@ Three Partition modes answer different creation questions:
 | Auto Partitioning | An incoming Partition value during data ingestion | Sparse, unpredictable, or data-driven values | Creates missing ranges on demand; with `partition.retention_count = N`, the scheduler also keeps only the N newest historical ranges |
 | Dynamic Partitioning | A scheduler interpreting current time and table properties | Predictable time-series window with future pre-creation and rolling expiry | Creates and removes complete time ranges according to offsets |
 
+![Manual, Auto, and Dynamic Partition creation with a clock-relative rolling window](images/03-partition-rolling-window.png)
+
+*Dynamic Partitioning manages complete time ranges, so a row expires with its Partition rather than by an individual row TTL.*
+
 Auto Partitioning is the recommended general approach for automatic creation
 in current Doris documentation. Dynamic Partitioning remains the relevant
 choice when the requirement specifically includes a clock-driven rolling
@@ -503,6 +499,10 @@ give each row an individual expiry timestamp. Dynamic Partitioning supports
 | Online ranges | `SHOW PARTITIONS` | Which Partition boundaries currently exist? |
 | Business visibility | A focused `SELECT` | Are the expected rows currently queryable? |
 
+![Policy, scheduler, online-range, and business-query evidence for a Partition expiry](images/04-expiry-evidence-layers.png)
+
+*Verify logical expiry in four layers, then keep physical reclamation as a separate observation.*
+
 Useful scheduler fields include `Enable`, `State`, `LastSchedulerTime`,
 `LastCreatePartitionMsg`, and `LastDropPartitionMsg`. A `NORMAL` state is not a
 substitute for inspecting actual ranges or querying the business row.
@@ -614,6 +614,10 @@ Choose recovery according to the failure:
 | Rows were changed or deleted through another data operation | Operation-specific correction, backup, or replay; do not assume `RECOVER` applies |
 | Entire cluster or failure domain is lost | Repository backup restored to a viable cluster, or source replay |
 | Dynamic retention removed an old range | Follow the designed archive/backup policy; do not depend on an accidental recycle-bin opportunity |
+
+![Replica repair, recycle-bin recovery, backup, and replay matched to different failures](images/05-recovery-boundary.png)
+
+*The recycle bin is a limited same-cluster undo path; independent backup or source replay covers broader failures.*
 
 ### Use the recycle bin for an eligible object drop
 
