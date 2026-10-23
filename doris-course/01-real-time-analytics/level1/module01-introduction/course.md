@@ -96,6 +96,10 @@ Its vectorized execution engine processes batches of column values rather than m
 row at a time through every operator. Together with MPP execution, this design
 supports large scans, filtering, joins, and aggregations.
 
+![Fresh event data is stored by column, processed in parallel across BE nodes, and reduced to an analytical result.](images/01-fresh-data-to-analytical-answers.png)
+
+*Fresh rows become analytical answers through columnar storage and parallel execution.*
+
 > **Mental model:** Doris is not “a faster MySQL.” It presents a familiar SQL
 > and MySQL-compatible protocol, but its storage and execution engine are built
 > for analytical workloads.
@@ -160,17 +164,9 @@ Imagine an ecommerce checkout:
 The order commit is OLTP. The dashboard queries are OLAP. They are connected,
 but they optimize for different units of work.
 
-```text
-Customer request
-      |
-      v
-OLTP database ---- change stream / CDC pipeline ----> Apache Doris
-      |                                         |
-operational truth                         analytical serving
-                                                |
-                                                v
-                                      dashboard / application
-```
+![An operational request is committed in an OLTP database, delivered through CDC, and served analytically by Apache Doris.](images/02-one-business-process-two-workloads.png)
+
+*One business process connects OLTP and OLAP while keeping their responsibilities separate.*
 
 Doris supports transactions, updates, and deletes, but those capabilities do
 not turn every operational workload into a good Doris workload. The right
@@ -193,6 +189,10 @@ transactions, or analyze many records together?**
 
 Doris works best when fresh or large datasets must support interactive SQL,
 especially when many users or applications query the data concurrently.
+
+![Operational databases, event streams, logs, metrics, and object storage feed Apache Doris, which serves dashboards, customer-facing analytics, observability, and lakehouse SQL.](images/03-where-apache-doris-fits.png)
+
+*Apache Doris sits between continuously changing data sources and interactive analytical experiences.*
 
 ### Real-time dashboards
 
@@ -302,19 +302,9 @@ engine. In the integrated storage and compute architecture, it also stores
 internal-table data on local storage. Across a production cluster, multiple
 BEs can scan and aggregate different pieces of a table in parallel.
 
-```text
-MySQL-compatible client
-          |
-          | SQL over the FE query port (9030; host port 19030 in the sandbox)
-          v
-Frontend (FE)
-  parse -> analyze -> optimize -> coordinate
-          |
-          | assigned plan fragments
-          v
-Backend (BE)
-  scan -> filter -> aggregate -> return partial results
-```
+![A MySQL-compatible client sends SQL to FE, which plans the query and distributes work to BE nodes before returning the combined result.](images/04-sql-execution-through-fe-and-be.png)
+
+*FE plans and coordinates SQL while BE nodes execute plan fragments in parallel.*
 
 The official [system architecture documentation](https://doris.apache.org/docs/4.x/features-architecture/system-architecture/)
 provides the complete FE and BE responsibility model.
@@ -353,6 +343,10 @@ This architecture is a strong fit when:
 - compute demand changes independently from stored data volume;
 - multiple workloads need isolated compute pools over shared data;
 - cloud-native elasticity is more important than the simplest deployment.
+
+![Integrated storage-compute keeps data on stateful BE nodes, while decoupled storage-compute uses compute groups over shared storage.](images/05-two-apache-doris-architectures.png)
+
+*Integrated deployments scale local storage with BE compute; decoupled deployments scale compute independently over shared storage.*
 
 ### Compare the two architectures
 
