@@ -68,19 +68,48 @@ Measured on 4.1.3 or read in its source (commit `7126cf65d96`); recheck after
 changing the Doris version:
 
 - `UTC_DATE()` is not folded when the query is planned, so a filter on it cannot
-  prune partitions (section 5.3).
+  prune partitions (section 5.3). Fixed upstream; see below.
 - With `BUCKETS AUTO`, when the estimate for a new partition is less than half of
   the previous partition's bucket count, the new partition keeps the previous count
   (`DynamicPartitionScheduler.checkAndFixAutoBucketCalcNumIsValid`; section 5.7,
   Lab 5 section 2, and Quiz 5).
 - A synchronous materialized view cannot reuse a column name of its base table or
   of another view, and `CREATE MATERIALIZED VIEW IF NOT EXISTS` does not skip a view
-  that exists, so Lab 6, section 4, drops the view first.
+  that exists, so Lab 6, section 4, drops the view first. The second part is fixed
+  upstream; see below.
 - Rows that a `MATCH_PHRASE` or `LIKE` filter removes without an index are counted
   in `RowsExprPredFiltered` (`SegmentIterator::_execute_common_expr`,
   `SCAN_FILTER_COUNTERS`).
 - `ALTER TABLE ... SET ("compression" = ...)` fails with "Unknown table property".
 - The table property `group_commit_mode` exists from 4.1.
+
+### Fixed upstream
+
+Two of these behaviors are fixed in the master branch of Apache Doris. When this was
+checked, on 2026-10-23, no release had the fixes; the latest was 4.1.5. The Labs
+work around both behaviors, so they pass with or without the fixes and cannot show
+whether a version has them: run the reproduction steps of each issue on the new
+version.
+
+- `UTC_DATE()`: fixed by
+  [apache/doris#69393](https://github.com/apache/doris/pull/69393), merged on
+  2026-10-23 (issue [apache/doris#69368](https://github.com/apache/doris/issues/69368)).
+  Section 5.3 uses it as its example of a filter that cannot prune; on a version
+  with the fix, the section needs another example. Lab 5 writes yesterday's range
+  into its query as text, which prunes on any version, so the Lab can stay as it
+  is; `test_module5_reads_the_plan_of_the_incident_window` keeps `UTC_DATE()` out
+  of it.
+- `CREATE MATERIALIZED VIEW IF NOT EXISTS`: fixed by
+  [apache/doris#69370](https://github.com/apache/doris/pull/69370), merged on
+  2026-10-22 (issue [apache/doris#69367](https://github.com/apache/doris/issues/69367));
+  the backport to 4.1 is [apache/doris#69439](https://github.com/apache/doris/pull/69439).
+  With the fix, the statement does nothing when a synchronous view with that name
+  exists; a new view still cannot reuse a column name. Section 6.6 and the expected
+  result of Lab 6, section 4, give the 4.1.3 behavior as the reason to drop the view
+  first, and so does the comment in
+  `test_module6_builds_the_view_before_relying_on_it`. On a version with the fix,
+  keep the drop in the Lab and change the reason: the cell waits for the job that
+  its own `CREATE` starts, and a skipped `CREATE` starts none.
 
 ## Clean-up
 
