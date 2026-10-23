@@ -10,9 +10,8 @@ API tokens, paths inside a user's home or temporary directory, and email
 addresses outside the reserved example domains (example.com, .test, ...).
 Images and other binary files cannot be scanned; review them by eye.
 
-Not scanned: maintenance/, the development area, which is removed before the
-repository is published, and tools/, whose checks contain the patterns they
-look for. Exits with status 1 when a pattern matches.
+Not scanned: tools/, whose checks contain the patterns they look for. Exits
+with status 1 when a pattern matches.
 """
 import re
 import subprocess
@@ -20,7 +19,7 @@ import sys
 from pathlib import Path
 
 REPO = Path(__file__).resolve().parents[1]
-SKIP_PREFIXES = ("maintenance/", "tools/")
+SKIP_PREFIXES = ("tools/",)
 RULES = {
     "private key": re.compile(r"-----BEGIN (?:[A-Z]+ )*PRIVATE KEY-----"),
     "AWS access key": re.compile(r"\b(?:AKIA|ASIA)[0-9A-Z]{16}\b"),

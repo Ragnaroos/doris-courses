@@ -969,7 +969,10 @@ demo_compose ps
     def _storefront_status(self) -> int | None:
         """The HTTP status of the storefront page, or None when it does not answer."""
         # The proxy keeps the connection open while the frontend starts, so no answer is often a timeout.
-        return self._http_status(self.demo_url)
+        # Ask for the page "/", not the bare host: through an HTTP proxy, such as a system proxy on macOS
+        # that does not exempt 127.0.0.1, urllib sends the URL as written, and Envoy rejects a request
+        # target without a path with HTTP 400.
+        return self._http_status(f"{self.demo_url}/")
 
     def _wait_for_demo(self, timeout_seconds: int) -> None:
         """Wait until every demo container is running and the storefront answers; stop with a card otherwise."""

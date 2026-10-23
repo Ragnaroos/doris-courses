@@ -134,6 +134,11 @@ extensions start with `ext_`.
   memory, with 4 CPUs, because both run Doris with a 6 GiB memory limit next to
   their services; the dashboard of Lab 11 about 2 GiB more; the backup of
   Lab 13 512 MiB more.
+- **Doris version.** Apache Doris 4.1.3, from the image
+  `apache/doris:all-in-one-4.1.3` with the digest
+  `sha256:82a5cabc7900ebcd3d080412d636c0cebd6602799fffe2605c652b2ea7d42609`.
+  `SHOW FRONTENDS` and `SHOW BACKENDS` report the version as
+  `doris-4.1.3-rc02-7126cf65d96`: the 4.1.3 release is that build.
 - **Downloads.** The images below, the first time that a Lab needs them. Silo
   is an open-source (AGPLv3) fork of the MinIO server, maintained by the Pigsty
   project, with MinIO's S3 API; the course uses it because MinIO no longer

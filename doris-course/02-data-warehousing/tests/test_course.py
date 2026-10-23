@@ -730,6 +730,26 @@ MaterializedViewRewriteFail:
             with self.assertRaises(ValueError):
                 connection_settings()
 
+    def test_local_services_bypass_any_proxy(self):
+        import os
+        import urllib.request
+        from dw_course.environment import bypass_proxies_for_local_services
+        # Importing the course's code already did it.
+        self.assertIn("127.0.0.1", os.environ.get("no_proxy", "").split(","))
+        with patch.dict("os.environ", {"NO_PROXY": "example.internal", "HTTP_PROXY": "http://127.0.0.1:1082"},
+                        clear=True):
+            bypass_proxies_for_local_services()
+            bypass_proxies_for_local_services()
+            self.assertEqual(os.environ["NO_PROXY"], "example.internal,127.0.0.1,localhost")
+            self.assertEqual(os.environ["no_proxy"], os.environ["NO_PROXY"])
+            # A proxy set for everything else still applies, but not to the course's services.
+            self.assertTrue(urllib.request.proxy_bypass("127.0.0.1:51900"))
+            self.assertTrue(urllib.request.proxy_bypass("example.internal"))
+            self.assertFalse(urllib.request.proxy_bypass("doris.apache.org"))
+        with patch.dict("os.environ", {"no_proxy": "*"}, clear=True):
+            bypass_proxies_for_local_services()
+            self.assertEqual(dict(os.environ), {"no_proxy": "*"})
+
     def test_busy_port_stops_before_any_container_starts(self):
         from dw_course.docker_runtime import prepare_environment
         from dw_course.onboarding import SetupRequired

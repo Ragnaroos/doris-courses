@@ -1,6 +1,8 @@
-# DOG stack 的 override 文件（维护说明）
+# The Observability environment: override files
 
-原为 `doris-course/03-observability/environments/dog-stack/README.md`，B4（OB-15）移到开发区。下面的路径相对于课程目录 `doris-course/03-observability/`。
+How the files in `environments/dog-stack/` and `environments/litefuse/` change the upstream
+environment, and how to check them after moving the pinned commit. Paths are relative to the
+course directory, `doris-course/03-observability/`.
 
 The observability course uses the upstream
 [`ai-observe/ai-observe-stack`](https://github.com/ai-observe/ai-observe-stack)
@@ -13,7 +15,7 @@ under the ignored `.runtime/` directory and starts:
 - Grafana with the Doris data source
 - Mailpit, which receives Grafana's emails (added by this course)
 
-The files in this directory are layered on the upstream Compose files:
+The files in `environments/dog-stack/` are layered on the upstream Compose files:
 
 - `compose.dog.yml` (Compose project `doris-obs`) renames the containers and the
   network, publishes the host ports on 127.0.0.1 only, runs Doris 4.1.3 with its
@@ -27,7 +29,8 @@ The files in this directory are layered on the upstream Compose files:
   and labels them with `host.name`, which Module 8's alert groups by.
 - `compose.demo.yml` (Compose project `doris-obs-demo`) renames the 23 demo
   containers, publishes only the storefront, and connects the demo Collector to
-  the `doris-obs` network.
+  the `doris-obs` network. It also names an exact version for Valkey, whose tag
+  in the upstream `.env` moves to each new 8.1 release.
 - `demo-collector-extras.yml` makes the demo Collector forward its telemetry to
   the DOG Collector over that network. Upstream sends it to port 4317 on the
   host instead.
@@ -40,7 +43,7 @@ restates every receiver of the upstream Collector's `metrics` pipeline.
 
 Litefuse, which Module 7 starts, has a Compose file of its own in
 `environments/litefuse/` (Compose project `doris-obs-litefuse`). It joins the
-`doris-obs` network and keeps its tables in this Doris, in the database
+`doris-obs` network and keeps its tables in the DOG stack's Doris, in the database
 `litefuse`. `ObservabilityLab.start_litefuse()` first gives the Doris BE the tag
 `private_endpoint` = `doris-obs:8040`: the BE of the all-in-one image registers
 as 127.0.0.1, and without the tag the FE redirects Litefuse's Stream Loads to an

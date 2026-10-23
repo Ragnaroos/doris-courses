@@ -26,7 +26,7 @@ jobs:
       - name: Install the check dependencies
         run: python -m pip install -r tools/requirements.txt
       - name: Links
-        run: python tools/check_links.py doris-course README.md CONTRIBUTING.md
+        run: python tools/check_links.py doris-course maintenance README.md CONTRIBUTING.md
       - name: Notebook outputs
         run: python tools/check_notebook_outputs.py --strict
       - name: Quiz structure
@@ -38,6 +38,12 @@ jobs:
           python tools/check_quiz_balance.py --strict doris-course/03-observability
           python tools/check_quiz_balance.py --strict doris-course/02-data-warehousing
           python tools/check_quiz_balance.py --strict doris-course/01-real-time-analytics
+      - name: Course manifests
+        run: python tools/check_course_manifests.py
+      - name: Image list
+        # Only whether maintenance/images.md lists the images that the courses
+        # name; comparing their digests with the registries needs the network.
+        run: python tools/check_image_digests.py --offline
       - name: Secrets, local paths and email addresses
         run: python tools/check_sensitive_info.py
       - name: Tests of the checks

@@ -120,6 +120,13 @@ the Lab checks after loading.
 
 ## Clean up
 
+To pause, run `lab.stop()` in the last section of the Lab, or
+`docker stop doris-ai`. The sandbox keeps its data, and `lab.start()` starts
+it again; while it is stopped, a Host that starts the launcher reports the
+Server as failed.
+
+To remove everything that the course created:
+
 1. Remove the `doris` entry from each Host you connected. Module 1's Clean up
    section says where each Host keeps it; for Codex, run
    `codex mcp remove doris`.

@@ -43,11 +43,15 @@ class SensitiveInfoTests(unittest.TestCase):
                 self.assertEqual(result.returncode, 1)
                 self.assertIn(f"doris-course/notes.md:2: {rule}", result.stdout)
 
-    def test_development_area_tools_and_untracked_files_are_skipped(self):
+    def test_tools_and_untracked_files_are_skipped(self):
         secret = f"key = '{FAKE_KEY}'\n"
-        result = scan({"maintenance/notes.md": secret, "tools/rules.py": secret, "README.md": "ok\n"},
-                      untracked={"scratch.md": secret})
+        result = scan({"tools/rules.py": secret, "README.md": "ok\n"}, untracked={"scratch.md": secret})
         self.assertEqual(result.returncode, 0, result.stdout)
+
+    def test_maintainer_notes_are_scanned(self):
+        result = scan({"maintenance/notes.md": f"key = '{FAKE_KEY}'\n"})
+        self.assertEqual(result.returncode, 1)
+        self.assertIn("maintenance/notes.md:1: AWS access key", result.stdout)
 
 
 if __name__ == "__main__":

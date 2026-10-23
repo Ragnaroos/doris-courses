@@ -1,0 +1,35 @@
+Apache Doris Courses
+Copyright 2026 VeloDB, Inc. and contributors
+
+This product includes software developed by VeloDB and contributors,
+licensed under the Apache License, Version 2.0 (see LICENSE).
+
+This product includes software developed at
+The Apache Software Foundation (https://www.apache.org/).
+
+================================================================================
+Third-party material
+================================================================================
+
+* The multi-node Compose file of Real-time Analytics Module 9
+  (doris-course/01-real-time-analytics/level3/module09-sharding-replication/
+  compose.multinode.yml) is adapted from Apache Doris
+  (https://github.com/apache/doris), licensed under the Apache License,
+  Version 2.0:
+
+    Apache Doris
+    Copyright 2018-2026 The Apache Software Foundation
+
+* The Wide World Importers sample data in
+  doris-course/02-data-warehousing/datasets/wwi/ comes from Microsoft's SQL
+  Server sample code, Copyright (c) Microsoft Corporation, licensed under the
+  MIT License; see LICENSE.txt in that directory.
+
+* The Litefuse Compose file of Observability Module 7
+  (doris-course/03-observability/environments/litefuse/compose.litefuse.yml)
+  follows the docker-compose.yml of Litefuse 26.3.0
+  (https://github.com/litefuse/litefuse), Copyright (c) 2023-2025 Langfuse
+  GmbH, licensed under the MIT License.
+
+The courses download other software, container images, and data when they
+run. These are not part of this repository and keep their own licenses.

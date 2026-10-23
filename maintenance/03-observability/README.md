@@ -1,38 +1,130 @@
-# Observability 课程维护
+# Observability: notes for maintainers
 
-学员入口：[课程首页](../../doris-course/03-observability/README.md)。
-本目录只供课程作者和评审者使用，不是学员的学习步骤。
+The course: [doris-course/03-observability](../../doris-course/03-observability/README.md).
+How the course's override files change the upstream environment, and how to check
+them after moving its pinned commit: [dog-stack.md](dog-stack.md).
 
-| 文件 | 用途 |
-| --- | --- |
-| [quiz-alignment.md](quiz-alignment.md) | 每道测验题对应的学习目标、讲义小节和 Lab 中的证据（OB-08、OB-17）。改题目、讲义或 Lab 时同步更新 |
-| [dog-stack.md](dog-stack.md) | `environments/dog-stack/` 中各 override 文件的作用，改上游提交 `STACK_COMMIT` 后的核对方法，Litefuse 与 private endpoint（OB-15 从课程目录移来；学员需要的部分已并入课程 README） |
+## The incident that the course follows
 
-## 维护要点
+- The whole course follows one incident: the demo's feature flag `paymentFailure`
+  at `50%`, which the learner sets on the flag page in Lab 1, section 5. The flag
+  page writes `doris-opentelemetry-demo/src/flagd/demo.flagd.json` in the upstream
+  checkout; `lab.teardown()` restores the file with `git checkout`, and
+  `lab.teardown(keep_data=True)` leaves it alone.
+- Level 1's expected results rest on the flag: about half of the orders fail, one
+  or two failed orders a minute, HTTP 500 in the access log, and the exception
+  message on the payment span. A different incident means rewriting Labs 1 to 3 and
+  the matching parts of their lessons.
+- Level 2 rests on it too. Lab 4's summaries and alerts, and the incident window of
+  Labs 5 to 7, which starts at the first failed order, need the flag to have been
+  on. Lab 8, section 11, has the learner turn it off, which ends the story. After
+  that, Lab 8, section 10, waits in vain for its alert; its waiting cell says that
+  the flag must be at 50%. Labs 4 to 7 still work with the failures recorded
+  earlier, but the share of failed orders in their window keeps falling.
 
-- 全课的故障主线：demo 的 feature flag `paymentFailure` 设为 `50%`（Lab 1 第 5 节由学员在 flag 页面打开）。flag 页面改的是上游检出中的 `doris-opentelemetry-demo/src/flagd/demo.flagd.json`；`lab.teardown()` 用 `git checkout` 恢复，`teardown(keep_data=True)` 不动它。Level 1 的期望值（失败订单约占一半、每分钟 1–2 单失败、访问日志的 HTTP 500、payment span 的异常消息）都建立在这个 flag 上，换故障时要重写 Lab 1–3 和讲义的对应部分。
-- Doris App 1.0.5 的 Discover 和 Traces 用浏览器本地时间拼时间条件，表里存的是 UTC：本机不在 UTC 时，相对时间范围查不到最新的行。Lab 3 让 notebook 打印 UTC 的绝对时间范围。插件升级后先确认这个行为是否还在，再决定是否改正文（讲义 3.2 节、Lab 3 第 2 节、quiz03 的 `fix_empty_time_range`）。
-- Lab 3 的网页步骤按 Grafana 11.4.0 写。改正文或升级 Grafana 后，用无头 Chrome 按正文逐步走一遍（做法见 plan-doc 的 handoff，脚本按 Lab 3 的节号打印每一步看到的结果）。
-- 讲义中引用的数字（失败订单的 span 数、各服务的 error span 数、主机 CPU 的忙碌比例等）来自 2026-10-20 在 Doris 4.1.3、demo 2.0.2 上的实测；升级 demo 或上游 DOG 栈后要重新核对。
-- Level 2 也建立在这个 flag 上（B4）：Lab 4 的汇总和告警、Lab 5–7 的故障时间窗（从第一单失败开始）都要求 flag 开过；Lab 8 第 11 节由学员在 flag 页面把它关掉，故事到此结束。之后重跑 Lab 8 第 10 节会等不到 Alerting（等待单元的提示说 flag 要是 50%）；Lab 4–7 仍能用之前的失败数据（B4 干净环境关 flag 后重跑 Lab 4、5、7 通过），只是故障时间窗中失败的比例会越来越低。
-- 讲义和 Lab 中依赖 Doris 4.1.3 行为、升级后要重新核对的地方（B4 在 4.1.3 上实测或读源码 `7126cf65d96`）：`UTC_DATE()` 在规划时不折叠，不能做分区裁剪（讲义 5.3）；BUCKETS AUTO 估算低于上一分区一半时沿用上一分区的桶数（`DynamicPartitionScheduler.checkAndFixAutoBucketCalcNumIsValid`，讲义 5.7、Lab 5 第 2 节、quiz05）；同步物化视图的列名不能与基表或其他视图的列重名，`CREATE MATERIALIZED VIEW IF NOT EXISTS` 不跳过已有视图（Lab 6 第 4 节先 DROP）；不走索引的 `MATCH_PHRASE` 和 `LIKE` 过滤掉的行记在 `RowsExprPredFiltered`（`SegmentIterator::_execute_common_expr`，`SCAN_FILTER_COUNTERS`）；`ALTER TABLE ... SET ("compression" = ...)` 报 Unknown table property；`group_commit_mode` 表属性自 4.1 起有。
-- Lab 5 的分桶倾斜（按 `service_name` 分 10 桶时最大的 tablet 约 38%，有一两个几乎为空）取决于各服务名的哈希值和 demo 的流量构成，换 demo 版本后要重新跑一遍再改数字（讲义 5.6）。RANDOM 表每个 tablet 的占比在数据少时是 7%–13%，数据多了才接近 10%：4.1.3 的导入按批轮流写各个 tablet（`VTabletFinder` 的 `FIND_TABLET_EVERY_BATCH`，起点由 FE 的 `TabletLoadIndexRecorderMgr` 按分区轮转）。
-- Level 2 的 Expected 按数据最少的情况写（B4 干净环境：Lab 1 之后直接做 Lab 2–8，Lab 4 开始时只有 5 单）：数量写成「tens of thousands or more」这类下限，失败比例在单数少时加了「chance can put the share far from half」。改正文时用干净环境的输出再核对一遍。
-- Lab 8 第 10 节用 Grafana 的 provisioning API 建规则：带固定 uid 的规则第一次要先 POST `/api/v1/provisioning/alert-rules`，组的 PUT 只更新已有 uid 的规则（否则 500 "could not find alert rule"），`lab.provision_alert_rule_group()` 已处理；`X-Disable-Provenance: true` 让规则在网页中可改。升级 Grafana 后先核对这两点。
-- demo 的 jaeger（`/tmp`）、kafka（3 个）、prometheus（`/prometheus`）镜像声明了 demo 的 Compose 文件没有挂载的卷，Docker 为它们建匿名卷。下次启动不会复用这些卷，所以 `stop_demo()` 和 `teardown()` 删除 demo 时都加 `--volumes`（OB-20），`keep_data=True` 也一样。之前不带 `--volumes`，demo 每启动一次就留下 5 个卷。检查清理后有没有残留时，按名字过滤查不到匿名卷，要用 `docker volume ls -f dangling=true` 按创建时间比对；升级 demo 后照此再查一次。
-- Linux（OB-21）：课程只在 macOS 的 Docker Desktop 上跑过。下面是 2026-10-21 读代码、并在本机模拟后核对过的情况：
-  - FE 的日志目录以 bind mount 挂到 `.runtime/doris-logs/fe`。FE 以 root 写日志，还会建 `profile/` 子目录。在 Linux 的 Docker Engine 上，这些文件在宿主机上也属于 root，学员不用 sudo 就删不掉 `.runtime/`。Docker Desktop 把属主映射成当前用户，所以 Mac 上看不到这个问题。
-  - 修正：`teardown()` 第 6 步在删除 DOG 之后，用 Doris 镜像执行 `chown -R --reference=/logs /logs`，把文件交还给目录的属主（`prepare_environment()` 以学员身份建的这个目录）。用 `--reference` 而不是学员的 uid，是因为在 rootless Docker 下这个目录在容器里显示为 root 的，用 `--reference` 不会把属主改错。
-  - 验证：在 Docker Desktop 的命名卷上模拟过。命名卷放在虚拟机的 ext4 上，与 Linux 一样检查属主。修正前学员对 `profile/` 没有写权限，修正后所有文件都归学员。
-  - 容器的打开文件数：Docker Engine 29（containerd 2.1.5 起）在 Linux 上把容器默认的 `ulimit -n` 设为 1024，Docker Desktop 是 1048576。用 `--ulimit nofile=1024:524288` 起 Doris 实测，BE、FE 进程都是 524288：内嵌的 JVM 把软上限提到硬上限，`start_be.sh` 只在 macOS 上关掉 MaxFDLimit。BE 空闲时已打开 764 个文件。
-  - `vm.max_map_count`：Doris 要求至少 2000000，镜像设了 `SKIP_CHECK_ULIMIT=true`，启动时不检查。Docker Desktop 的虚拟机是 262144；Linux 默认 65530（Ubuntu 22.04、Debian 12），Ubuntu 24.04 和 Fedora 39 起是 1048576。BE 空闲时有 3,959 个映射，没有在课程的负载下测过。有人在 Linux 上跑课程时，先看这一项：BE 日志中有没有 mmap 失败。
-  - 已核实没有问题：
-    - 34 个镜像都同时发布了 linux/amd64 和 linux/arm64（用 `docker buildx imagetools inspect` 查过）。
-    - Grafana 的 Doris App 只有前端，没有按架构编译的程序。
-    - flagd-ui 以 root 运行，能写 flag 文件。
-    - Module 2 的日志 Collector 用 `--user` 以学员的 uid 运行。
-  - 没有考虑的环境：
-    - rootless Docker 和 Podman：demo 的 Collector 挂载 `/var/run/docker.sock`。
-    - 开启 SELinux 的系统：bind mount 都没有加 `:z`。
-    - M4 Mac 上的 Linux 虚拟机：`.env.arm64` 只在 Darwin 上添加。
-- 网页步骤的核对脚本（无头 Chrome）：Lab 1 第 5 节和 Lab 8 第 11 节的 flag 页面、Lab 3 第 2–8 节、Lab 8 第 4–6 节，用法见 plan-doc 的 handoff。
+## Expected results and measured numbers
+
+- Level 2's expected results are written for the least data that a learner can
+  have: Lab 1 followed straight away by Labs 2 to 8, so that Lab 4 starts with as
+  few as five orders. Quantities are lower bounds, such as "tens of thousands or
+  more", and a failure share says that chance can put it far from half. When
+  changing the text, compare it with the output of a run from a clean environment.
+- The numbers quoted in the lessons (the spans of a failed order, the error spans
+  of each service, how busy the host CPU is) were measured on 2026-10-20 with Doris
+  4.1.3 and demo 2.0.2. Measure them again after upgrading the demo or the upstream
+  DOG stack.
+- The bucket skew of Lab 5 (with 10 buckets by `service_name`, the largest tablet
+  holds about 38% and one or two are almost empty) depends on the hash values of the
+  service names and on the demo's traffic. After a demo upgrade, run the Lab and
+  update the numbers in section 5.6 of the lesson. In a RANDOM table, each tablet
+  holds 7% to 13% of a small table and closer to 10% of a large one: Doris 4.1.3
+  writes each batch of a load to the next tablet in turn (`FIND_TABLET_EVERY_BATCH`
+  in `VTabletFinder`), and the FE moves the starting tablet on for each partition
+  (`TabletLoadIndexRecorderMgr`).
+
+## Web steps
+
+- The Grafana steps of Lab 3 (sections 2 to 8) and Lab 8 (sections 4 to 6), and the
+  flag page in Lab 1, section 5, and Lab 8, section 11, are written for Grafana
+  11.4.0 and demo 2.0.2. After changing them, or upgrading Grafana or the demo,
+  follow them in a browser exactly as written.
+- The Discover and Traces pages of the Doris App 1.0.5 build their time condition
+  from the browser's local time, while the tables store UTC. Away from UTC, a
+  relative range such as "Last 15 minutes" misses the newest rows, so Lab 3 prints
+  an absolute range in UTC for the learner to enter. After upgrading the plugin,
+  check whether this still happens before changing the text (section 3.2 of the
+  lesson, Lab 3 section 2, and the question `fix_empty_time_range` of Quiz 3).
+- Lab 8, section 10, creates the alert rules through Grafana's provisioning API. A
+  rule with a fixed uid has to be created first with a POST to
+  `/api/v1/provisioning/alert-rules`; a PUT of its group only updates rules whose
+  uid exists, and otherwise fails with HTTP 500 "could not find alert rule".
+  `lab.provision_alert_rule_group()` does both. The header
+  `X-Disable-Provenance: true` keeps the rules editable in the web UI. Check both
+  after upgrading Grafana.
+
+## Doris 4.1.3 behavior that the course relies on
+
+Measured on 4.1.3 or read in its source (commit `7126cf65d96`); recheck after
+changing the Doris version:
+
+- `UTC_DATE()` is not folded when the query is planned, so a filter on it cannot
+  prune partitions (section 5.3).
+- With `BUCKETS AUTO`, when the estimate for a new partition is less than half of
+  the previous partition's bucket count, the new partition keeps the previous count
+  (`DynamicPartitionScheduler.checkAndFixAutoBucketCalcNumIsValid`; section 5.7,
+  Lab 5 section 2, and Quiz 5).
+- A synchronous materialized view cannot reuse a column name of its base table or
+  of another view, and `CREATE MATERIALIZED VIEW IF NOT EXISTS` does not skip a view
+  that exists, so Lab 6, section 4, drops the view first.
+- Rows that a `MATCH_PHRASE` or `LIKE` filter removes without an index are counted
+  in `RowsExprPredFiltered` (`SegmentIterator::_execute_common_expr`,
+  `SCAN_FILTER_COUNTERS`).
+- `ALTER TABLE ... SET ("compression" = ...)` fails with "Unknown table property".
+- The table property `group_commit_mode` exists from 4.1.
+
+## Clean-up
+
+The demo's jaeger, kafka, and prometheus images declare volumes that the demo's
+Compose file does not mount (`/tmp`, three for kafka, and `/prometheus`), so Docker
+creates anonymous volumes for them. The next start does not reuse them, so
+`stop_demo()` and `teardown()` remove the demo with `--volumes`, also with
+`keep_data=True`. A filter by name does not find anonymous volumes: compare
+`docker volume ls -f dangling=true` before and after, and do it again after
+upgrading the demo.
+
+## Linux
+
+The course has run only on Docker Desktop for macOS. What follows was checked on
+2026-10-21 by reading the code and by simulating Linux on Docker Desktop:
+
+- The FE's log directory is bind-mounted to `.runtime/doris-logs/fe`. The FE writes
+  its logs as root and creates a `profile/` directory. On Docker Engine for Linux,
+  those files belong to root on the host too, and the learner cannot delete
+  `.runtime/` without sudo; Docker Desktop maps the owner to the current user, so a
+  Mac does not show this. Step 6 of `teardown()` therefore runs
+  `chown -R --reference=/logs /logs` with the Doris image after removing the DOG
+  stack, which hands the files back to the owner of the directory that
+  `prepare_environment()` created as the learner. It uses `--reference` rather than
+  the learner's uid because, with rootless Docker, the directory appears as root's
+  inside the container. This was checked on a named volume, which lives on the ext4
+  disk of Docker Desktop's VM and keeps owners as Linux does: before the change, the
+  learner could not write to `profile/`; after it, every file belonged to the
+  learner.
+- Open files: Docker Engine 29 (containerd 2.1.5 and later) sets a container's
+  default `ulimit -n` to 1024 on Linux; Docker Desktop sets 1048576. Doris started
+  with `--ulimit nofile=1024:524288` had 524288 for both the BE and the FE: the
+  embedded JVM raises the soft limit to the hard one, and `start_be.sh` turns off
+  `MaxFDLimit` only on macOS. An idle BE has 764 files open.
+- `vm.max_map_count`: Doris asks for at least 2000000, and the image sets
+  `SKIP_CHECK_ULIMIT=true`, so the start does not check it. Docker Desktop's VM has
+  262144. Linux defaults to 65530 (Ubuntu 22.04, Debian 12); Ubuntu 24.04 and
+  Fedora 39 and later have 1048576. An idle BE has 3,959 maps; the course's load was
+  not measured. When someone runs the course on Linux, look first for mmap failures
+  in the BE's log.
+- Checked and fine: all 34 images are published for linux/amd64 and linux/arm64
+  (`docker buildx imagetools inspect`); Grafana's Doris App has only a frontend, with
+  no binary per architecture; flagd-ui runs as root and can write the flag file;
+  Module 2's log collector runs with `--user`, as the learner.
+- Not considered: rootless Docker and Podman (the demo's Collector mounts
+  `/var/run/docker.sock`); SELinux (no bind mount has `:z`); a Linux VM on an Apple
+  silicon Mac (`.env.arm64` is added only on macOS).

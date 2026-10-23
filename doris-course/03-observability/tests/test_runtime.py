@@ -796,6 +796,13 @@ class DemoReadinessTests(unittest.TestCase):
                  patch("doris_course.doris_client.urllib.request.urlopen", side_effect=outcome):
                 self.assertEqual(lab._storefront_status(), expected)
 
+    def test_storefront_status_asks_for_a_page(self):
+        # Through an HTTP proxy, urllib sends the URL as written; the demo's Envoy answers 400 without a path.
+        lab = object.__new__(ObservabilityLab)
+        with patch.object(ObservabilityLab, "_http_status", return_value=200) as status:
+            lab._storefront_status()
+        self.assertEqual(status.call_args.args[0], f"{lab.demo_url}/")
+
 
 if __name__ == "__main__":
     unittest.main()

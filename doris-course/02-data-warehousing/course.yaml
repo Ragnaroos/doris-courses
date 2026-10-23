@@ -1,0 +1,140 @@
+# Release manifest: the course's modules in order, with their lesson, Lab, quiz,
+# and time, for a course catalog to publish. tools/check_course_manifests.py
+# checks it against the files, the lessons, and the course README.
+slug: data-warehousing
+title: Data Warehousing with Apache Doris
+status: published
+language: en
+doris_version: "4.1.3"
+estimated_minutes: 1311
+modules:
+  - slug: introduction
+    level: 1
+    order: 1
+    title: Meet Doris and Analyze Your First Orders
+    course: level1/module01-introduction/course.md
+    lab: level1/module01-introduction/lab01_connect_and_query.ipynb
+    quiz: level1/module01-introduction/quiz01_doris_fundamentals.yaml
+    estimated_minutes: 55
+  - slug: architecture
+    level: 1
+    order: 2
+    title: Doris Storage Architecture and Write Mechanisms
+    course: level1/module02-architecture/course.md
+    lab: level1/module02-architecture/lab02_observe_storage.ipynb
+    quiz: level1/module02-architecture/quiz02_storage_and_write_batches.yaml
+    estimated_minutes: 55
+  - slug: table-design
+    level: 1
+    order: 3
+    title: Doris Table Models, Partitioning, and Bucketing
+    course: level1/module03-table-design/course.md
+    lab: level1/module03-table-design/lab03_models_and_pruning.ipynb
+    quiz: level1/module03-table-design/quiz03_models_and_data_distribution.yaml
+    estimated_minutes: 60
+    optional:
+      - title: "Module 2–3 Extension Lab: Batches, Partitions, and Profile"
+        path: level1/extensions/extension23_physical_design.ipynb
+  - slug: external-access
+    level: 1
+    order: 4
+    title: Querying External Data and Joining Lake Tables
+    course: level1/module04-external-access/course.md
+    lab: level1/module04-external-access/lab04_query_iceberg.ipynb
+    quiz: level1/module04-external-access/quiz04_internal_files_and_lake_tables.yaml
+    estimated_minutes: 65
+  - slug: ingestion
+    level: 1
+    order: 5
+    title: Batch and Continuous Data Ingestion
+    course: level1/module05-ingestion/course.md
+    lab: level1/module05-ingestion/lab05_stream_load.ipynb
+    quiz: level1/module05-ingestion/quiz05_load_methods_and_retry_safety.yaml
+    estimated_minutes: 90
+    optional:
+      - title: "Reading: Continuous Ingestion"
+        path: level1/module05-ingestion/optional05_continuous_ingestion.md
+        quiz: level1/module05-ingestion/quiz05_continuous_ingestion.yaml
+      - title: "Further reading: WWI invoices and account receipts"
+        path: level1/module05-ingestion/optional05_invoice_and_receipts.md
+      - title: "Lab 5A: Kafka → Routine Load → Doris"
+        path: level1/module05-ingestion/optional05_kafka_routine_load.ipynb
+      - title: "Lab 5B: MySQL → Flink CDC → Doris"
+        path: level1/module05-ingestion/optional05_flink_mysql_cdc.ipynb
+      - title: "Module 4–5 Extension Lab: Direct File Queries, Batch Loading, and Group Commit Acknowledgments"
+        path: level1/extensions/extension45_files_and_group_commit.ipynb
+  - slug: data-quality
+    level: 1
+    order: 6
+    title: Data Quality and Schema Validation
+    course: level1/module06-data-quality/course.md
+    lab: level1/module06-data-quality/lab06_validate_orders.ipynb
+    quiz: level1/module06-data-quality/quiz06_data_quality_and_rejection.yaml
+    estimated_minutes: 70
+  - slug: state-changes
+    level: 1
+    order: 7
+    title: Data Updates, Deletion, and Event Replay
+    course: level1/module07-state-changes/course.md
+    lab: level1/module07-state-changes/lab07_current_state_and_replay.ipynb
+    quiz: level1/module07-state-changes/quiz07_state_changes_and_replay.yaml
+    estimated_minutes: 90
+    optional:
+      - title: "Module 6–7 Extension Lab: Schema Changes, Load-Based Deletion, and Conflict Detection"
+        path: level1/extensions/extension67_schema_and_delete.ipynb
+  - slug: views-materialized-views
+    level: 2
+    order: 8
+    title: Views and Materialized Views
+    course: level2/module08-views-materialized-views/course.md
+    lab: level2/module08-views-materialized-views/lab08_views_and_materialized_views.ipynb
+    quiz: level2/module08-views-materialized-views/quiz08_views_and_materialized_views.yaml
+    estimated_minutes: 117
+  - slug: modeling-and-joins
+    level: 2
+    order: 9
+    title: Warehouse Modeling and Joins
+    course: level2/module09-modeling-and-joins/course.md
+    lab: level2/module09-modeling-and-joins/lab09_modeling_and_joins.ipynb
+    quiz: level2/module09-modeling-and-joins/quiz09_modeling_and_joins.yaml
+    estimated_minutes: 112
+  - slug: metric-processing
+    level: 2
+    order: 10
+    title: Metric Processing and Delivery
+    course: level2/module10-metric-processing/course.md
+    lab: level2/module10-metric-processing/lab10_metric_processing.ipynb
+    quiz: level2/module10-metric-processing/quiz10_metric_processing.yaml
+    estimated_minutes: 146
+  - slug: bi-and-ai
+    level: 2
+    order: 11
+    title: Interfaces and Boundaries for BI and AI Consumers
+    course: level2/module11-bi-and-ai/course.md
+    lab: level2/module11-bi-and-ai/lab11_bi_and_ai_delivery.ipynb
+    quiz: level2/module11-bi-and-ai/quiz11_bi_and_ai.yaml
+    estimated_minutes: 120
+  - slug: publishing-permissions-audit
+    level: 3
+    order: 12
+    title: Publishing, Permissions, and Audit
+    course: level3/module12-publishing-permissions-audit/course.md
+    lab: level3/module12-publishing-permissions-audit/lab12_publishing_permissions_audit.ipynb
+    quiz: level3/module12-publishing-permissions-audit/quiz12_publishing_permissions_audit.yaml
+    estimated_minutes: 123
+  - slug: storage-lifecycle
+    level: 3
+    order: 13
+    title: Storage and Lifecycle Management
+    course: level3/module13-storage-lifecycle/course.md
+    lab: level3/module13-storage-lifecycle/lab13_storage_and_lifecycle.ipynb
+    quiz: level3/module13-storage-lifecycle/quiz13_storage_lifecycle.yaml
+    estimated_minutes: 108
+  - slug: resource-isolation
+    level: 3
+    order: 14
+    title: Resource Isolation and Query Protection
+    course: level3/module14-resource-isolation/course.md
+    lab: level3/module14-resource-isolation/lab14_resource_isolation.ipynb
+    quiz: level3/module14-resource-isolation/quiz14_resource_isolation.yaml
+    estimated_minutes: 100

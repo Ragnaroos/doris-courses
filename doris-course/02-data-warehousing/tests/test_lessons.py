@@ -72,6 +72,10 @@ class LessonTests(unittest.TestCase):
                 self.assertEqual(path.split("/")[0], f"level{level}")
                 self.assertIn(f"Estimated time | About {minutes} minutes:", lesson)
         environment = readme.split("## Environment", 1)[1].split("\n## ", 1)[0]
+        for fact in ("apache/doris:all-in-one-4.1.3",
+                     "sha256:82a5cabc7900ebcd3d080412d636c0cebd6602799fffe2605c652b2ea7d42609",
+                     "doris-4.1.3-rc02-7126cf65d96"):
+            self.assertIn(fact, environment)
         for variable, (port, _) in {**SANDBOX_PORTS, **LAKE_PORTS, **BI_PORTS, **BACKUP_PORTS}.items():
             self.assertRegex(environment, rf"\| {port} \| [^|]+ \| `{variable}` \|")
 

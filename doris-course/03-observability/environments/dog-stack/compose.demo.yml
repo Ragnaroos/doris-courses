@@ -13,6 +13,9 @@
 #   most services on random host ports of every interface.
 # - The demo Collector also joins the DOG network and forwards the demo's
 #   telemetry to the DOG Collector (see demo-collector-extras.yml).
+# - Valkey gets an exact version. Upstream's .env names its tag 8.1-alpine, which
+#   moves to each new 8.1 release; 8.1.10-alpine3.24 is the release that the
+#   course was verified with.
 #
 # This file names every upstream service; update it together with the pinned
 # commit.
@@ -77,6 +80,7 @@ services:
     container_name: doris-obs-demo-kafka
   valkey-cart:
     container_name: doris-obs-demo-valkey-cart
+    image: valkey/valkey:8.1.10-alpine3.24
     ports: !reset []
   jaeger:
     container_name: doris-obs-demo-jaeger

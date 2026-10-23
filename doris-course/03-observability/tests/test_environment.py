@@ -160,6 +160,11 @@ class EnvironmentTests(unittest.TestCase):
         self.assertEqual(compose["networks"]["dog"], {"name": environment.NETWORK, "external": True})
         self.assertEqual(services["otel-collector"]["networks"], ["default", "dog"])
 
+    def test_demo_valkey_names_an_exact_version(self):
+        # Upstream's .env names Valkey's tag 8.1-alpine, which moves to each new 8.1 release.
+        services = load_compose(ENVIRONMENT_DIR / "compose.demo.yml")["services"]
+        self.assertRegex(services["valkey-cart"]["image"], r"^valkey/valkey:\d+\.\d+\.\d+-alpine\d+\.\d+$")
+
     def test_demo_collector_forwards_to_the_dog_collector(self):
         config = yaml.safe_load((ENVIRONMENT_DIR / "demo-collector-extras.yml").read_text())
         self.assertEqual(config["exporters"]["otlp/gateway"]["endpoint"], f"{environment.COLLECTOR_CONTAINER}:4317")
@@ -333,11 +338,18 @@ class EnvironmentTests(unittest.TestCase):
         for upstream_file, override_file, added in pairs:
             upstream = load_compose(UPSTREAM / upstream_file)["services"]
             override = load_compose(ENVIRONMENT_DIR / override_file)["services"]
+            env_file = (UPSTREAM / upstream_file).parent / ".env"
+            variables = dict(re.findall(r"^(\w+)=(.*)$", env_file.read_text(), re.M)) if env_file.is_file() else {}
             with self.subTest(override=override_file):
                 self.assertEqual(set(override), set(upstream) | added)
                 for name, service in upstream.items():
                     if service.get("ports"):
                         self.assertIn("ports", override[name], name)
+                    # Every image names an exact version; the override replaces a tag that moves.
+                    image = override[name].get("image") or re.sub(
+                        r"\$\{(\w+)(?::-([^}]*))?\}",
+                        lambda match: variables.get(match.group(1), match.group(2) or ""), service["image"])
+                    self.assertRegex(image.rsplit(":", 1)[-1], r"\d+\.\d+\.\d+", f"{name}: {image}")
         # collector-host-metrics.yml restates the upstream metrics pipeline without hostmetrics.
         upstream = yaml.safe_load((UPSTREAM / "docker/otel-collector-config/otel-collector-config.yaml").read_text())
         course = yaml.safe_load((ENVIRONMENT_DIR / "collector-host-metrics.yml").read_text())["service"]["pipelines"]

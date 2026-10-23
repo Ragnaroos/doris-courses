@@ -7,7 +7,32 @@ are read when a notebook starts or connects to a service, so a running kernel
 picks up a changed variable only after a restart.
 """
 
+import os
+
 from doris_labkit.docker import env_port
+
+# Every service of the course listens on 127.0.0.1, and Python has to reach it
+# directly. On macOS, Python also follows the system's proxy settings, and a
+# proxy that does not exempt 127.0.0.1 can stall requests to these services:
+# boto3 uploads to the lake's object storage wait for "100 Continue" through
+# such a proxy and time out. The course downloads nothing in Python itself.
+LOCAL_HOSTS = ("127.0.0.1", "localhost")
+
+
+def bypass_proxies_for_local_services():
+    """Add the course's local addresses to NO_PROXY and no_proxy, keeping what is there."""
+    values = [os.environ.get(name, "") for name in ("no_proxy", "NO_PROXY")]
+    if "*" in (value.strip() for value in values):
+        return  # every host already bypasses the proxy
+    hosts = []
+    for host in ",".join(values).split(","):
+        if host.strip() and host.strip() not in hosts:
+            hosts.append(host.strip())
+    hosts += [host for host in LOCAL_HOSTS if host not in hosts]
+    os.environ["NO_PROXY"] = os.environ["no_proxy"] = ",".join(hosts)
+
+
+bypass_proxies_for_local_services()
 
 # The single-node sandbox of every Lab (environments/single-node/compose.yml).
 SANDBOX_PORTS = {

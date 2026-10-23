@@ -170,7 +170,7 @@ You need the DOG stack and the demo from Module 1, with the payment failure turn
 
 - `SHOW CREATE TABLE` shows a table's definition but leaves out default values: the exporter's `compression = zstd` is missing because ZSTD is the 4.x default.
 - Every load adds a rowset, and compaction merges them; the time-series policy merges appended data about once. Group commit collects small loads into one, but only for loads that use it, by a header or by the table's `group_commit_mode`.
-- A fair comparison of compression changes only the algorithm, loads the same rows the same way, and waits for the BEs to report sizes. On the course's logs, LZ4 took 1.5 to 1.6 times the space of ZSTD.
+- A fair comparison of compression changes only the algorithm, loads the same rows the same way, and waits for the BEs to report sizes. On the course's logs, LZ4 took about 1.5 to 1.6 times the space of ZSTD.
 - An inverted index with a parser lists, for each token, the rows that contain it; `MATCH_ANY`, `MATCH_ALL`, and `MATCH_PHRASE` compare tokens, and phrases need `support_phrase`. Without the index, or with `LIKE`, Doris reads every row's text.
 - A Query Profile's row counters show where each row of a scan went in this query: skipped by zone maps or the index, read and dropped, or read and kept. They are not a measure of speed.
 - A synchronous materialized view is built by a job, then updated with every load, and stored as an AGGREGATE index of its table. Doris uses it when the query's expressions, filters, and aggregates can be computed from it, which `EXPLAIN` shows.

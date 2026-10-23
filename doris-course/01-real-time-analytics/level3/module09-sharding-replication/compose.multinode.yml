@@ -105,7 +105,7 @@ services:
         ipv4_address: ${SUBNET:-172.31.91}.52
 
   haproxy:
-    image: ${HAPROXY_IMAGE:-haproxy:3.0-alpine}
+    image: ${HAPROXY_IMAGE:-haproxy:3.0.30-alpine3.24}
     depends_on:
       fe-1:
         condition: service_healthy

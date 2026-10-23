@@ -139,6 +139,11 @@ def wait_for_health(name: str, timeout_seconds: int = 300, *, report: bool = Tru
             if report:
                 card(f"{name} is healthy", "ok")
             return
+        if state.get("Status") == "restarting":
+            # Its restart policy brings the container back, for example after a download at
+            # startup timed out; if it never becomes healthy, the timeout below still applies.
+            time.sleep(2)
+            continue
         if last == "unhealthy" or state.get("Status") in {"dead", "exited"}:
             logs = run(["docker", "logs", "--tail", "200", name], check=False)
             show_log(f"{name} logs", logs.stdout + logs.stderr)
