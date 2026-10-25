@@ -73,11 +73,12 @@ questions:
     answer: manual_auto_dynamic
     explanation: >-
       Manual Partitioning keeps the boundaries under explicit control, Auto
-      Partitioning creates a range when a value first arrives, and Dynamic
+      Partitioning creates a Partition when a value first arrives, and Dynamic
       Partitioning follows the clock to create future ranges and remove old
-      ones. Auto Partitioning can also cap how many historical ranges it
-      keeps with partition.retention_count, but it keeps no window relative to
-      today, and Dynamic Partitioning does not create a range for a late value.
+      ones. AUTO RANGE tables can cap the number of historical ranges with
+      partition.retention_count, but this count policy defines no window
+      relative to today. Dynamic Partitioning does not create a Partition
+      for a late value.
 
   - id: hourly_window
     objective: "Read a Dynamic Partition window from its time unit, offsets, and time zone, and predict what happens to late data."

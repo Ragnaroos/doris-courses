@@ -875,40 +875,67 @@ class DorisLab:
         started = time.monotonic()
         deadline = started + timeout_seconds
         metadata_rows = None
-        while time.monotonic() < deadline:
-            tablets = self._metadata_rows(f"SHOW TABLETS FROM `{table_name}`")
-            per_tablet: dict[str, int] = {}
-            for row in tablets:
-                tablet_id = str(row["TabletId"])
-                # SHOW TABLETS returns one row per replica. Replica statistics are
-                # reported asynchronously, so an earlier row can temporarily be
-                # older than another replica of the same logical tablet.
-                per_tablet[tablet_id] = max(
-                    per_tablet.get(tablet_id, 0), int(row["RowCount"])
-                )
-            metadata_rows = sum(per_tablet.values())
-            partitions = self._metadata_rows(f"SHOW PARTITIONS FROM `{table_name}`")
-            partition_rows = sum(max(int(row.get("RowCount", 0)), 0) for row in partitions)
-            if metadata_rows == expected_rows and partition_rows == expected_rows:
-                card(
-                    f"{len(per_tablet)} tablets and {len(partitions)} partition(s) report all "
-                    f"{expected_rows:,} rows (waited {time.monotonic() - started:.0f} seconds)",
-                    "ok",
-                    f"Tablet reports for {table_name} are complete",
-                )
-                self.show_statements(
-                    f"SELECT COUNT(*) AS row_count FROM {table_name}",
-                    f"SHOW TABLETS FROM {table_name}",
-                    f"SHOW PARTITIONS FROM {table_name}",
-                    title="SQL behind this check (the two SHOW statements repeat until their counts match)",
-                )
-                return
-            time.sleep(2)
+        partition_rows = None
+
+        def progress(state: str = "running") -> HTML:
+            label = ("Waiting for Tablet and Partition reports" if state == "running"
+                     else "Tablet metadata wait stopped")
+            reported = lambda value: "not yet polled" if value is None else f"{value:,}"
+            details = (
+                f"Table {table_name} · expected {expected_rows:,} committed rows · "
+                f"Tablet rows {reported(metadata_rows)} · Partition rows {reported(partition_rows)} · "
+                f"Elapsed {time.monotonic() - started:.0f}s / {timeout_seconds}s"
+            )
+            return HTML(
+                f'<div class="doris-status {state}"><div class="doris-status-title">'
+                f'{html.escape(label)}</div><div>{html.escape(details)}</div></div>'
+            )
+
+        handle = display(progress(), display_id=True)
+        try:
+            while time.monotonic() < deadline:
+                tablets = self._metadata_rows(f"SHOW TABLETS FROM `{table_name}`")
+                per_tablet: dict[str, int] = {}
+                for row in tablets:
+                    tablet_id = str(row["TabletId"])
+                    # SHOW TABLETS has one row per replica. Keep the newest
+                    # reported count of each logical Tablet instead of adding copies.
+                    per_tablet[tablet_id] = max(
+                        per_tablet.get(tablet_id, 0), int(row["RowCount"])
+                    )
+                metadata_rows = sum(per_tablet.values())
+                partitions = self._metadata_rows(f"SHOW PARTITIONS FROM `{table_name}`")
+                partition_rows = sum(max(int(row.get("RowCount", 0)), 0) for row in partitions)
+                if handle is not None:
+                    handle.update(progress())
+                if metadata_rows == expected_rows and partition_rows == expected_rows:
+                    if handle is not None:
+                        handle.update(HTML(""))
+                    card(
+                        f"{len(per_tablet)} tablets and {len(partitions)} partition(s) report all "
+                        f"{expected_rows:,} rows (waited {time.monotonic() - started:.0f} seconds)",
+                        "ok",
+                        f"Tablet reports for {table_name} are complete",
+                    )
+                    self.show_statements(
+                        f"SELECT COUNT(*) AS row_count FROM {table_name}",
+                        f"SHOW TABLETS FROM {table_name}",
+                        f"SHOW PARTITIONS FROM {table_name}",
+                        title="SQL behind this check (the two SHOW statements repeat until their counts match)",
+                    )
+                    return
+                time.sleep(2)
+        except Exception:
+            if handle is not None:
+                handle.update(progress("failure"))
+            raise
+        if handle is not None:
+            handle.update(progress("failure"))
         raise self._timed_out(
             "Tablet reports are late",
             f"{table_name} has the expected {query_rows:,} committed rows, but after "
-            f"{timeout_seconds} seconds its tablets report {metadata_rows} rows instead of "
-            f"{expected_rows:,}.",
+            f"{timeout_seconds} seconds its tablets report {metadata_rows} rows and its "
+            f"partitions report {partition_rows} rows instead of {expected_rows:,}.",
             hint="Each BE reports tablet statistics about once a minute; rerun this cell.",
         )
 
@@ -1826,7 +1853,9 @@ class DorisLab:
               root.querySelector('[data-score]').textContent = String(cards.filter(item => item.dataset.solved === 'true').length);
             }} else {{
               card.classList.add('wrong');
-              feedback.textContent = 'Not this expression. Compare the input, output row shape, and whether the operation depends on an existing input row or an external service.';
+              feedback.textContent = selected === 'SUM(revenue)' && card.dataset.answer === 'LOWER(event_type)'
+                ? 'SUM combines multiple input rows into one value per group. This task must keep every event row and return one normalized value for each row.'
+                : 'Not this expression. Compare the input, output row shape, and whether the operation depends on an existing input row or an external service.';
             }}
           }};
           methods.forEach(button => {{
@@ -1942,6 +1971,12 @@ LIMIT 10
         run_button.on_click(run_query)
         display(widgets.VBox([
             widgets.HTML("<b>Choose the reporting grain, input rows, and metric.</b> The generated SQL remains visible."),
+            widgets.HTML(
+                "<b>Fixed input range:</b> 2020-03-01 00:00:00 (included) to "
+                "2020-03-09 00:00:00 (excluded). Changing Grain keeps this input range. "
+                "Week labels are Monday week starts, which can precede March 1; "
+                "Month summarizes only the part of March inside the range."
+            ),
             widgets.HBox([grain, event_filter, metric]),
             run_button,
             output,
@@ -2253,6 +2288,14 @@ LIMIT 10
         """Capture the result, plan and fresh runtime Profile on this lab session."""
         from .profiles import capture_query
         return capture_query(self, statement, settings=settings)
+
+    @staticmethod
+    def show_lookup_comparison(evidence):
+        """Show captured lookup counters, with one row per DetailProfile scan task."""
+        from .profiles import lookup_scan_summary
+        frame = lookup_scan_summary(evidence)
+        show_frame("Lookup comparison (one row per DetailProfile scan task)", frame)
+        return frame
 
     def verify_query_change(
         self,

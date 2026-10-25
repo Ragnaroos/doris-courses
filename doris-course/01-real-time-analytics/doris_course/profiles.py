@@ -372,6 +372,61 @@ class QueryEvidence:
         show_log(f"{title}: complete raw Query Profile · {self.profile_id}", self.profile)
 
 
+def lookup_scan_summary(evidence: Mapping[str, QueryEvidence]) -> pd.DataFrame:
+    """Compare raw DetailProfile scan tasks without summing overlapping scopes."""
+    rows = []
+    counters = ("ScanRows", "RowsInvertedIndexFiltered")
+    for label, captured in evidence.items():
+        metadata = {
+            "query": label, "Profile ID": captured.profile_id,
+            "query result rows": len(captured.rows.index),
+        }
+        context = {}
+        current = None
+        seen = set()
+        first_row = len(rows)
+        for line in scan_profile_excerpt(captured.profile, detail=True).splitlines():
+            text = line.strip()
+            fragment = re.match(r"Fragment\s+(\d+)", text)
+            pipeline = re.match(r"Pipeline\s+(\d+)", text)
+            task = re.match(r"PipelineTask\(index=(\d+)\)", text)
+            if fragment:
+                context = {"fragment": f"Fragment {fragment.group(1)}"}
+                current = None
+            elif pipeline:
+                context.pop("task", None)
+                context["pipeline"] = f"Pipeline {pipeline.group(1)}"
+                host = re.search(r"hostname:([^,]+),", text)
+                context["host"] = host.group(1) if host else text
+                current = None
+            elif task:
+                context["task"] = f"Task {task.group(1)}"
+                current = None
+            elif text.startswith("OLAP_SCAN_OPERATOR("):
+                table = re.search(r"table_name=(.+?)\)\(id=", text)
+                operator = re.search(r"\(id=(\d+)\)", text)
+                scope = [*context.values()]
+                scope.append(f"scan {operator.group(1)}" if operator else text)
+                if table:
+                    scope.append(table.group(1))
+                current = {**metadata, "scan task": " · ".join(scope),
+                           **{name: "not shown" for name in counters}}
+                rows.append(current)
+                seen = set()
+            elif current is not None:
+                counter = re.match(r"- (ScanRows|RowsInvertedIndexFiltered):\s*(.+)", text)
+                if counter:
+                    name, value = counter.groups()
+                    current[name] = "multiple values; see detail" if name in seen else value
+                    seen.add(name)
+        if len(rows) == first_row:
+            rows.append({**metadata, "scan task": "DetailProfile scan not shown",
+                         **{name: "not shown" for name in counters}})
+    return pd.DataFrame(rows, columns=[
+        "query", "Profile ID", "query result rows", "scan task", *counters,
+    ])
+
+
 def capture_query(lab: Any, statement: str, *, settings=None) -> QueryEvidence:
     """Capture fresh BE execution evidence on the existing local course session.
 

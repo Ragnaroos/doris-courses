@@ -17,9 +17,10 @@ Doris implements the Join and moves the data so that matching rows meet.
 
 An operations team wants purchase revenue by product category and region. The
 events carry `product_id`, and the product attributes live in a dimension,
-`dim_products`, which Lab 6 generates with one row per product, except for
-deliberately missing and duplicated cases, so that matching, missing, and
-duplicate relationships become visible.
+`dim_products`, which Lab 6 generates with a Unique Key and one row per
+product. It deliberately omits one product to expose an unmatched relationship.
+A separate small table, `join_product_cases`, repeats a product key to show
+how duplicate matches multiply event rows.
 
 ## Learning objectives
 

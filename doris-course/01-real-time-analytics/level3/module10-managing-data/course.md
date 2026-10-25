@@ -334,7 +334,7 @@ Three Partition modes answer different creation questions:
 | Mode | What creates a Partition? | Appropriate scenario | Lifecycle consequence |
 | --- | --- | --- | --- |
 | Manual Partitioning | Explicit table DDL or `ALTER TABLE` | Stable or business-defined ranges requiring precise control | Application or operator also manages later additions and removals |
-| Auto Partitioning | An incoming Partition value during data ingestion | Sparse, unpredictable, or data-driven values | Creates missing ranges on demand; with `partition.retention_count = N`, the scheduler also keeps only the N newest historical ranges |
+| Auto Partitioning | An incoming Partition value during data ingestion | Sparse, unpredictable, or data-driven values | Creates missing Partitions on demand; AUTO RANGE tables can use `partition.retention_count = N` to retain only the N newest historical ranges |
 | Dynamic Partitioning | A scheduler interpreting current time and table properties | Predictable time-series window with future pre-creation and rolling expiry | Creates and removes complete time ranges according to offsets |
 
 Auto Partitioning is the recommended general approach for automatic creation
@@ -738,10 +738,11 @@ Lab's tables as they were.
   and load batches, the same Table Model, Partitions, Buckets, and replicas;
   its storage report then shows a difference for that sample, not a query
   speed.
-- Manual Partitioning keeps creation and removal under explicit control, Auto
-  Partitioning creates ranges from incoming values and can keep the newest N
-  with `partition.retention_count`, and Dynamic Partitioning keeps a window
-  relative to the current time and creates future ranges in advance.
+- Manual Partitioning keeps creation and removal under explicit control. Auto
+  Partitioning creates Partitions from incoming values; AUTO RANGE tables can
+  retain the newest N historical ranges with `partition.retention_count`.
+  Dynamic Partitioning keeps a window relative to the current time and creates
+  future ranges in advance.
 - A Dynamic Partition window is a set of half-open ranges counted from
   `start` to `end` in its `time_unit` and `time_zone`; a row leaves with its
   whole range, and a late event outside every range fails to load unless a
