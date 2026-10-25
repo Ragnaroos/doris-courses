@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import base64
 import http.client
+import html
 import json
 import os
 import re
@@ -17,6 +18,7 @@ from typing import Mapping, Sequence
 
 import pandas as pd
 import pymysql
+from IPython.display import HTML, display
 
 from doris_labkit.db import connect_doris, report_sql_error, sql
 from doris_labkit.docker import (
@@ -370,15 +372,39 @@ class ObservabilityLab:
         clean = statement.strip().rstrip(";")
         show_sql(f"{title} (rerun every 2 seconds for up to {timeout_seconds} seconds)", clean)
         started = time.monotonic()
+        handle = None
+        last_update = None
+
+        def update_progress(elapsed: float, found: int, state: str) -> None:
+            nonlocal handle
+            remaining = max(0, timeout_seconds - elapsed)
+            content = HTML(
+                f'<div class="doris-status {state}">'
+                f'<div class="doris-status-title">{html.escape(title)}</div>'
+                f'<div>Elapsed {elapsed:.0f} seconds / {timeout_seconds} seconds · '
+                f'{remaining:.0f} seconds remaining · matching rows {found} / {min_rows}</div></div>'
+            )
+            if handle is None:
+                handle = display(content, display_id=True)
+            else:
+                handle.update(content)
+
         while True:
             frame = self.query(clean)
             elapsed = time.monotonic() - started
             if len(frame) >= min_rows:
+                if last_update is not None:
+                    update_progress(elapsed, len(frame), "success")
                 show_frame(f"{title} · rows found after {elapsed:.0f} seconds", frame)
                 return frame
             if elapsed >= timeout_seconds:
+                if last_update is not None:
+                    update_progress(elapsed, len(frame), "failure")
                 break
-            time.sleep(2)
+            if last_update is None or elapsed - last_update >= 10:
+                update_progress(elapsed, len(frame), "running")
+                last_update = elapsed
+            time.sleep(min(2, timeout_seconds - elapsed))
         show_frame(title, frame)
         found = "No rows" if frame.empty else f"Only {len(frame)} of {min_rows} rows"
         self._failure(f"{found} after {timeout_seconds} seconds", hint)
@@ -757,6 +783,10 @@ class ObservabilityLab:
         uid = found[0]["uid"]
         dashboard = json.loads(self._read(f"{self.grafana_url}/api/dashboards/uid/{uid}", "Grafana",
                                           GRAFANA_HINT)).get("dashboard") or {}
+        saved_time = dashboard.get("time") or {}
+        show_frame(f"The saved default time range of {title}", pd.DataFrame([
+            {"from": saved_time.get("from"), "to": saved_time.get("to")}
+        ]))
         rows = [
             {"panel": panel.get("title"), "visualization": panel.get("type"),
              "format": target.get("format"), "sql": target.get("rawSql", "")}

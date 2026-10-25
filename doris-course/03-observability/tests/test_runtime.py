@@ -201,6 +201,57 @@ class RuntimeTests(unittest.TestCase):
         self.assertIn(f"course-root={Path.cwd()}", result.stdout)
 
 
+
+class RowWaitProgressTests(unittest.TestCase):
+    def test_wait_refreshes_in_place_then_finishes_with_the_actual_rows(self):
+        lab = object.__new__(ObservabilityLab)
+        empty = pd.DataFrame(columns=["id"])
+        ready = pd.DataFrame([{"id": 1}])
+        with patch.object(lab, "query", side_effect=[empty, empty, empty, ready]), \
+             patch("doris_course.doris_client.time.monotonic", side_effect=[0, 0, 2, 10, 12]), \
+             patch("doris_course.doris_client.time.sleep"), \
+             patch("doris_course.doris_client.display") as display, \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.show_frame"):
+            result = lab.wait_for_rows("SELECT id FROM t", title="Rows <ready>", hint="Retry", timeout_seconds=30)
+        self.assertIs(result, ready)
+        display.assert_called_once()
+        initial = display.call_args.args[0].data
+        self.assertIn("Rows &lt;ready&gt;", initial)
+        self.assertIn("30 seconds remaining", initial)
+        updates = [call.args[0].data for call in display.return_value.update.call_args_list]
+        self.assertEqual(len(updates), 2)  # no new card at the two-second poll
+        self.assertIn("Elapsed 10 seconds", updates[0])
+        self.assertIn("matching rows 0 / 1", updates[0])
+        self.assertIn('doris-status success', updates[1])
+        self.assertIn("matching rows 1 / 1", updates[1])
+
+    def test_timeout_stops_the_progress_and_preserves_the_recovery_hint(self):
+        lab = object.__new__(ObservabilityLab)
+        with patch.object(lab, "query", return_value=pd.DataFrame()), \
+             patch("doris_course.doris_client.time.monotonic", side_effect=[0, 0, 9, 10]), \
+             patch("doris_course.doris_client.time.sleep") as sleep, \
+             patch("doris_course.doris_client.display") as display, \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.show_frame"), \
+             patch.object(lab, "_failure") as failure:
+            with self.assertRaises(EnvironmentNotReady):
+                lab.wait_for_rows("SELECT 1 WHERE FALSE", title="Waiting", hint="Start the demo", timeout_seconds=10)
+        failure.assert_called_once_with("No rows after 10 seconds", "Start the demo")
+        self.assertEqual(sleep.call_args_list[-1].args, (1,))
+        final = display.return_value.update.call_args.args[0].data
+        self.assertIn('doris-status failure', final)
+        self.assertIn("0 seconds remaining", final)
+
+    def test_ready_rows_do_not_create_a_waiting_card(self):
+        lab = object.__new__(ObservabilityLab)
+        with patch.object(lab, "query", return_value=pd.DataFrame([{"id": 1}])), \
+             patch("doris_course.doris_client.display") as display, \
+             patch("doris_course.doris_client.show_sql"), \
+             patch("doris_course.doris_client.show_frame"):
+            lab.wait_for_rows("SELECT 1", title="Ready", hint="Retry")
+        display.assert_not_called()
+
 def rules_page(*instances, health="ok"):
     """Grafana's rules API with the rule Host CPU busy and the given (labels, state) instances."""
     alerts = [{"labels": {"alertname": "Host CPU busy", "grafana_folder": "Doris course", "team": "doris-course",
