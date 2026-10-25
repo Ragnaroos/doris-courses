@@ -831,6 +831,7 @@ MaterializedViewRewriteFail:
         connection = Mock()
         connection.cursor.return_value = manager
         with patch.dict("os.environ", {"DW_START_SANDBOX": "yes"}, clear=True), patch("subprocess.run", return_value=Mock(stdout="")) as run, \
+                patch("dw_course.docker_runtime._course_networks", return_value=("", {})), \
                 patch("dw_course.docker_runtime.port_in_use", return_value=False), patch("pymysql.connect", return_value=connection):
             self.assertEqual(prepare_environment(), connection_settings())
             self.assertEqual(run.call_args_list[2].args[0], compose_command("config", "--quiet"))
@@ -947,7 +948,7 @@ MaterializedViewRewriteFail:
         import subprocess
         with patch("subprocess.run", side_effect=[
             *[Mock(stdout="") for _ in range(5)], subprocess.CalledProcessError(1, "up")
-        ]), patch("dw_course.docker_runtime.port_in_use", return_value=False), patch(
+        ]), patch("dw_course.docker_runtime._course_networks", return_value=("", {})), patch("dw_course.docker_runtime.port_in_use", return_value=False), patch(
             "pymysql.connect"
         ) as connect:
             with self.assertRaises(subprocess.CalledProcessError):
@@ -1015,7 +1016,7 @@ MaterializedViewRewriteFail:
             "dw_course.ui.display"
         ) as display, patch("dw_course.ui.show_log") as log, patch(
             "subprocess.run", side_effect=[*[Mock(stdout="") for _ in range(5)], error]
-        ), patch("dw_course.docker_runtime.port_in_use", return_value=False), patch("pymysql.connect") as connect:
+        ), patch("dw_course.docker_runtime._course_networks", return_value=("", {})), patch("dw_course.docker_runtime.port_in_use", return_value=False), patch("pymysql.connect") as connect:
             with self.assertRaises(subprocess.CalledProcessError):
                 prepare_environment(start=True)
             panel = display.return_value.update.call_args.args[0].data

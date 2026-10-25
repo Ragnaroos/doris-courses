@@ -7,6 +7,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from decimal import Decimal
 from pathlib import Path
+from urllib.parse import quote
 
 import pandas as pd
 import pymysql
@@ -209,6 +210,11 @@ class WarehouseLab:
             print(frame.to_string(index=False))
         return frame
 
+    def profile_url(self, query_id):
+        """Link to this query in the FE UI, using the sandbox's configured HTTP port."""
+        endpoint = (os.environ.get("DW_FE_HTTP_URL") or connection_settings()["DW_FE_HTTP_URL"]).rstrip("/")
+        return f"{endpoint}/QueryProfile/{quote(str(query_id), safe='')}"
+
     def scan_profile(self, statement, *, title="Run the query, then read its Query Profile"):
         """Run a query and return how many rows its scans read and skipped, from its Query Profile.
 
@@ -226,7 +232,8 @@ class WarehouseLab:
         # The BE reports its counters after the query ends; read until the scan's are there.
         text = fetch_profile_text(endpoint, query_id, user=self.user, password=self.password,
                                   ready=lambda profile: "ScanRows" in profile)
-        return {"query": statement, "rows_returned": len(rows),
+        return {"query": statement, "query_id": query_id, "profile_url": self.profile_url(query_id),
+                "rows_returned": len(rows),
                 **{counter: profile_row_sum(text, counter) for counter in SCAN_COUNTERS},
                 "ScanBytes": profile_metric(text, "ScanBytes")}
 

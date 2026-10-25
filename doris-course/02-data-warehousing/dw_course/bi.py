@@ -101,10 +101,15 @@ def build_payment_dashboard(lab, *, start=False):
         # Refresh inferred column metadata before creating chart metrics.
         api.request('PUT', f'dataset/{dataset_id}/refresh')
         charts, observations = [], []
-        specifications = [('Paid GMV', 'SUM(paid_gmv)', 660.0, ',.2f'),
-                          ('Paid orders', 'SUM(paid_orders)', 5, ',.0f'),
-                          ('Created-cohort conversion', 'SUM(converted_orders)*1.0/NULLIF(SUM(created_orders),0)', 0.625, '.1%')]
-        for title, expression, expected_value, number_format in specifications:
+        specifications = [
+            ('Paid GMV', 'SUM(paid_gmv)', 660.0, ',.2f',
+             'Payments Jan 1-3, 2026; refunds separate (UTC+8)'),
+            ('Paid orders', 'SUM(paid_orders)', 5, ',.0f',
+             'Distinct paid orders, Jan 1-3, 2026 (UTC+8)'),
+            ('Created-cohort conversion', 'SUM(converted_orders)*1.0/NULLIF(SUM(created_orders),0)', 0.625, '.1%',
+             'Jan 1-3, 2026 cohort: 5/8 paid before Jan 4 (UTC+8)'),
+        ]
+        for title, expression, expected_value, number_format, description in specifications:
             metric = {'expressionType': 'SQL', 'sqlExpression': expression,
                       'label': title, 'optionName': 'metric_' + title.replace(' ', '_')}
             query = {'metrics': [metric], 'columns': [], 'filters': [], 'extras': {},
@@ -113,7 +118,7 @@ def build_payment_dashboard(lab, *, start=False):
                        'queries': [query], 'force': True, 'result_format': 'json', 'result_type': 'full'}
             params = {'datasource': f'{dataset_id}__table', 'viz_type': 'big_number_total',
                       'metric': metric, 'time_range': 'No filter', 'y_axis_format': number_format,
-                      'subheader': 'Asia/Shanghai; payments before January 4; refunds separate'}
+                      'subheader': description}
             chart_id = api.upsert('chart', 'slice_name', title + ' ' + suffix, {
                 'slice_name': title + ' ' + suffix, 'viz_type': 'big_number_total',
                 'datasource_id': dataset_id, 'datasource_type': 'table',

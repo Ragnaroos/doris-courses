@@ -90,7 +90,8 @@ rebuilds only its own `ext_*` tables. Labs 11 and 13 run their optional
 sections only when you switch them on in the Lab. Labs 5A and 5B recreate the
 Doris container with a 6 GiB memory limit, which leaves its BE 2.4 GiB: before
 you go back to the main Labs, run Lab 1's **Start and Connect**, which recreates
-the container without the limit and keeps its data.
+the container without the limit, keeps its data, and restores its existing
+connections to the lake, dashboard, and backup networks.
 
 ### Lab dependencies
 
@@ -232,7 +233,7 @@ extensions start with `ext_`.
    .venv/bin/jupyter lab
    ```
 
-3. Open the lesson
+3. Jupyter may open a Markdown file as source text. Right-click in its editor and choose **Show Markdown Preview** to read the page and follow its links. Open the lesson
    [Module 1: Meet Doris and Analyze Your First Orders](level1/module01-introduction/course.md)
    and its Lab, `level1/module01-introduction/lab01_connect_and_query.ipynb`.
    Run **Initialize the Lab Tools**, read the reset notice, then run **Start

@@ -1,10 +1,11 @@
 """Notebook display for the order-domain course, built on the shared doris_labkit components."""
 
+import html
 import json
 
 import pandas as pd
 from IPython import get_ipython
-from IPython.display import display
+from IPython.display import HTML, display
 
 from doris_labkit.db import report_sql_error
 from doris_labkit.results import result_frame, show_frame
@@ -44,6 +45,14 @@ class WorkflowProgress:
     def log(self, text):
         self.logs.append(text)
 
+    def update(self, detail):
+        """Show the latest observation while an asynchronous step is running."""
+        self.log(detail)
+        if self.notebook:
+            self._render("running", detail)
+        else:
+            print(detail, flush=True)
+
     def finish(self):
         if self.notebook:
             self._render("success")
@@ -60,11 +69,21 @@ class WorkflowProgress:
             print("\n".join(self.logs), flush=True)
 
 
-def show_records(title, rows, *, columns=None):
+def show_records(title, rows, *, columns=None, collapsed=False):
     """Display structured observations without changing their values or returning duplicate output."""
     frame = pd.DataFrame(rows, columns=columns)
     if in_notebook():
-        show_frame(title, frame)
+        if collapsed:
+            table = frame.to_html(index=False, classes="doris-table", border=0, escape=True)
+            display(HTML('<details class="doris-log"><summary>' + html.escape(title) +
+                         '</summary><div class="doris-result-table-wrap">' + table + '</div></details>'))
+        else:
+            show_frame(title, frame)
+        if {"query_id", "profile_url"}.issubset(frame.columns):
+            links = [f'<a href="{html.escape(str(row.profile_url))}" target="_blank" rel="noopener">'
+                     f'{html.escape(str(row.query_id))}</a>'
+                     for row in frame.itertuples() if str(row.profile_url).startswith(("http://", "https://"))]
+            display(HTML('<p>Open the corresponding FE Profile: ' + ' · '.join(links) + '</p>'))
     else:
         print(title)
         print(frame.to_string(index=False))

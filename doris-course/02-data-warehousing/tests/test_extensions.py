@@ -115,11 +115,11 @@ class ExtensionsTest(unittest.TestCase):
         nb = self.notebook("extension23_physical_design.ipynb")
         source = next(c.source for c in nb.cells if c.cell_type == "code" and 'previous_profile' in c.source)
         lab = Mock()
-        lab.query.return_value = [(False,)]
+        lab.query.return_value = [(False, True, True)]
         lab.sql.side_effect = RuntimeError("expected-query-failure")
         with self.assertRaisesRegex(RuntimeError,"expected-query-failure"):
             exec(compile(source,"profile-cell","exec"),dict(lab=lab))
-        lab.execute.assert_called_with("SET enable_profile = %s", (False,))
+        lab.execute.assert_called_with("SET enable_profile = %s, enable_sql_cache = %s, enable_condition_cache = %s", (False, True, True))
 
     def test_readings_separate_main_scope_and_optional_integrations(self):
         level = ROOT / "level1"

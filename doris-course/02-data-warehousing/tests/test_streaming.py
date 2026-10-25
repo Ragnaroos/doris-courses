@@ -260,7 +260,7 @@ class StreamingTest(unittest.TestCase):
 
     def test_streaming_startup_uses_overlay_for_every_compose_command(self):
         with patch.object(streaming, "check_resources") as check, patch.object(docker_runtime, "_run") as run, patch.object(docker_runtime, "_verify_sql"), \
-                patch.object(docker_runtime, "check_host_ports"), patch.object(docker_runtime, "WorkflowProgress"):
+                patch.object(docker_runtime, "check_host_ports"), patch.object(docker_runtime, "_course_networks", return_value=("", {})), patch.object(docker_runtime, "WorkflowProgress"):
             docker_runtime.prepare_environment(start=True, streaming=True)
             check.assert_called_once()
             commands = [call.args[0] for call in run.call_args_list if call.args[0][:2] == ["docker", "compose"] and "--project-name" in call.args[0]]

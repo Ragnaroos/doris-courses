@@ -175,7 +175,7 @@ FROM orders_partitioned
 WHERE order_date = '2013-01-01';
 ```
 
-Expect five orders and 3944.20, with or without the order ID filter; adding `order_id = 1` returns order 1's original 2300.00, not the 2250.00 of the model experiment, which used separate tables.
+The date filter returns five orders and 3944.20. Adding `order_id = 1` narrows the answer to one order and its original 2300.00, not the 2250.00 of the model experiment, which used separate tables. Pruning must preserve the answer to the same SQL predicates; adding a business filter can change the answer.
 
 A plan that reads a quarter of the tablets will not necessarily run four times faster: the time also depends on how much each tablet holds, caching, and fixed costs, and on ten orders all three queries take about the same time. A smaller plan is a reason to expect less work; a speedup is something you measure, with the same data and machine, and the Query Profile of Module 2 shows what each scan read.
 

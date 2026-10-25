@@ -218,7 +218,7 @@ Simulated new orders (CSV) ── Stream Load ──> orders_imported (ten order
 Raw new orders (JSON, with three errors) ── Stream Load in Module 6 ──> orders_raw ──> orders_clean ──> Module 7
 ```
 
-`orders_imported` is where Lab 5 practices loading, retrying, and rejecting; Level 2 starts from it. Module 6 loads the same new orders again, this time with three wrong inputs, into its own raw table, and Modules 6 and 7 continue from there. The WWI tables are the history: Module 6 reads its customer dimension from `wwi_customers` and Module 7 its products from `wwi_products`.
+`orders_imported` is only the practice table for loading, retrying, and rejecting in Lab 5. Module 6 loads the same new orders again, this time with three wrong inputs, into its own raw table and produces `orders_clean`. Module 7 builds `orders_current` and `order_events` from the clean orders; Level 2 starts from that current state and history. The WWI tables are the history: Module 6 reads its customer dimension from `wwi_customers` and Module 7 its products from `wwi_products`.
 
 The history package keeps orders, order lines, customers, products, invoices, account transactions, and lookup tables: 701,846 rows in ten tables, which is not a number of orders. Each WWI order line is one product of an order, so `COUNT(*)` after joining lines to orders counts lines, and a daily report counts orders with `COUNT(DISTINCT o.OrderID)`:
 
