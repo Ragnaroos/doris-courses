@@ -10,6 +10,8 @@ A learner who already runs Doris 4.x can point the labs at it instead of the
 sandbox: set ``DORIS_AI_HOST``, the three ports, and the administrator account
 below, and skip the sandbox step. The labs then create the course database and
 the read-only MCP account in that Doris.
+
+Module 2 adds a local model server, ``doris-ai-llm``, on the sandbox's network.
 """
 
 from __future__ import annotations
@@ -40,3 +42,31 @@ ADMIN_PASSWORD = os.environ.get("DORIS_AI_ADMIN_PASSWORD", "")
 DATABASE = "ai_course"
 TABLE = "events"
 MCP_USER = "mcp_reader"
+
+# Module 2's local model: the server of llama.cpp (MIT), which answers OpenAI's
+# chat completions API, with Qwen2.5 1.5B Instruct (Apache 2.0), quantized to 4
+# bits. The model file is downloaded once into LLM_VOLUME, from a fixed commit of
+# its Hugging Face repository, and checked against its SHA-256;
+# DORIS_AI_LLM_MODEL_URL may point to the same file on a mirror.
+LLM_IMAGE = "ghcr.io/ggml-org/llama.cpp:server-b11429"
+LLM_CONTAINER = "doris-ai-llm"
+LLM_VOLUME = "doris-ai-llm-models"
+LLM_PORT = env_port("DORIS_AI_LLM_PORT", 38080)  # forwards to the llama.cpp server port 8080
+LLM_MODEL = "qwen2.5-1.5b-instruct"  # the name under which the server offers the model
+LLM_MODEL_FILE = "qwen2.5-1.5b-instruct-q4_k_m.gguf"
+LLM_MODEL_BYTES = 1_117_320_736
+LLM_MODEL_SHA256 = "6a1a2eb6d15622bf3c96857206351ba97e1af16c30d7a74ee38970e434e9407e"
+LLM_MODEL_URL = os.environ.get("DORIS_AI_LLM_MODEL_URL", "").strip() or (
+    "https://huggingface.co/Qwen/Qwen2.5-1.5B-Instruct-GGUF/resolve/"
+    f"91cad51170dc346986eccefdc2dd33a9da36ead9/{LLM_MODEL_FILE}"
+)
+# The address that the Doris BE uses: the container's name on DORIS_NETWORK. A
+# Doris that is not the sandbox needs an address that its own BE can reach.
+LLM_ENDPOINT = os.environ.get("DORIS_AI_LLM_ENDPOINT", "").strip() or (
+    f"http://{LLM_CONTAINER}:8080/v1/chat/completions"
+)
+
+# Module 2's tables and the AI Resource that its functions use.
+TICKETS_TABLE = "support_tickets"
+ENRICHMENT_TABLE = "ticket_enrichment"
+AI_RESOURCE = "ai_course_llm"

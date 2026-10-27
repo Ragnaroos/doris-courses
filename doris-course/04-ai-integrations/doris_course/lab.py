@@ -176,6 +176,9 @@ class AiIntegrationsLab:
         self.connection = None
         self.doris_clock_at_trace: str | None = None
         install_styles()
+        self._show_ready()
+
+    def _show_ready(self) -> None:
         target = "the course sandbox" if self.uses_sandbox else "your own Doris"
         card(
             f"Doris: {env.HOST}:{env.QUERY_PORT} (MySQL protocol), FE HTTP {env.HTTP_PORT}, "
@@ -897,12 +900,17 @@ FROM {env.DATABASE}.{env.TABLE}""")
         self.sql(f"DROP USER IF EXISTS '{env.MCP_USER}'@'%'", title="Remove the read-only account")
 
     def teardown(self) -> None:
-        """Remove the sandbox container, its volumes and network, and the files Lab 1 wrote."""
+        """Remove the course's containers, volumes, and network, and the files Lab 1 wrote.
+
+        That includes Module 2's model server and its downloaded model file, when
+        they exist: the server is on the sandbox's network.
+        """
         removed = []
-        if container_inspect(env.DORIS_CONTAINER) is not None:
-            run(["docker", "rm", "-f", env.DORIS_CONTAINER], show=True)
-            removed.append(f"container {env.DORIS_CONTAINER}")
-        for volume in (env.FE_VOLUME, env.BE_VOLUME):
+        for container in (env.LLM_CONTAINER, env.DORIS_CONTAINER):
+            if container_inspect(container) is not None:
+                run(["docker", "rm", "-f", container], show=True)
+                removed.append(f"container {container}")
+        for volume in (env.FE_VOLUME, env.BE_VOLUME, env.LLM_VOLUME):
             if labkit_docker.docker_exists("volume", volume):
                 run(["docker", "volume", "rm", volume], show=True)
                 removed.append(f"volume {volume}")
@@ -918,8 +926,10 @@ FROM {env.DATABASE}.{env.TABLE}""")
         self.connection = None
         message = ("Removed " + ", ".join(removed) + ".") if removed else "Nothing was left to remove."
         if not self.uses_sandbox:
-            message += (f" Your own Doris still has the {env.DATABASE} database and {env.MCP_USER}; "
-                        f"run lab.drop_mcp_account() and DROP DATABASE {env.DATABASE} if you no longer need them.")
+            message += (f" Your own Doris still has the {env.DATABASE} database, {env.MCP_USER}, and, after "
+                        f"Module 2, the AI Resource {env.AI_RESOURCE}; run lab.drop_mcp_account(), "
+                        f"DROP RESOURCE IF EXISTS {env.AI_RESOURCE}, and DROP DATABASE {env.DATABASE} if you "
+                        "no longer need them.")
         card(message + " Remove the doris entry from each Host you configured (see Clean up in the lesson).",
              "ok", "Environment removed")
 
