@@ -1,0 +1,46 @@
+# Module 2's support tickets: the columns of support_tickets.csv, and the numbers
+# that the Lab checks after loading it. The tickets were written for this course;
+# the people, orders, and addresses in them are made up (example.com is reserved
+# for examples). The tests compare this file with the CSV, so change them together.
+file: support_tickets.csv
+table: support_tickets
+comment: Synthetic customer support tickets in English and Chinese
+columns:
+  - name: ticket_id
+    type: INT
+    comment: Ticket number
+  - name: created_at
+    type: DATETIME
+    comment: When the customer opened the ticket
+  - name: language
+    type: VARCHAR(8)
+    comment: Language of the text, en or zh
+  - name: raw_text
+    type: STRING
+    comment: The words of the customer, unchanged
+  - name: expected_topic
+    type: VARCHAR(32)
+    comment: The topic that a person chose for the ticket
+  - name: expected_sentiment
+    type: VARCHAR(16)
+    comment: The sentiment that a person chose for the ticket
+row_count: 14
+first_ticket: 1001
+last_ticket: 1014
+languages:
+  en: 7
+  zh: 7
+# The labels of the Lab's AI_CLASSIFY call, and the four that AI_SENTIMENT returns.
+topics: [refund, shipping, quality, account, product_question]
+sentiments: [positive, negative, neutral, mixed]
+topic_counts:
+  shipping: 5
+  quality: 3
+  account: 2
+  product_question: 2
+  refund: 2
+sentiment_counts:
+  negative: 7
+  positive: 3
+  neutral: 3
+  mixed: 1

@@ -1,0 +1,15 @@
+ticket_id,created_at,language,raw_text,expected_topic,expected_sentiment
+1001,2026-10-01 09:00:00,zh,包裹三天没有更新物流，请告诉我现在到哪里了。,shipping,negative
+1002,2026-10-01 09:12:00,zh,订单 A-3017 中的无线耳机收到后无法充电。我换过充电线和插座，问题仍然存在，希望尽快退货退款。,quality,negative
+1003,2026-10-01 09:25:00,en,I reset my password twice but still cannot sign in to my account. Please help me regain access.,account,negative
+1004,2026-10-01 09:38:00,en,Does the blue travel mug fit a standard car cup holder?,product_question,neutral
+1005,2026-10-01 10:03:00,zh,商品还没有发货，我不想等了，请取消订单并退款。,refund,negative
+1006,2026-10-01 10:17:00,en,The tracking page has not changed for four days and the parcel is already late.,shipping,negative
+1007,2026-10-01 10:31:00,zh,键盘手感很好，灯光也符合描述，我很满意。,quality,positive
+1008,2026-10-01 10:44:00,en,The replacement arrived earlier than expected. Thank you for the quick shipping.,shipping,positive
+1009,2026-10-01 11:08:00,zh,物流慢得真是太棒了，我已经多等了五天。,shipping,negative
+1010,2026-10-01 11:22:00,en,"The camera quality is excellent, but the battery drains much faster than advertised.",quality,mixed
+1011,2026-10-01 11:39:00,zh,耳机无法充电，我想退货，但找不到订单号。,refund,negative
+1012,2026-10-01 12:04:00,en,This is Alice Chen. Please change the email on my account to alice.chen@example.com. My last order was A-2048.,account,neutral
+1013,2026-10-01 12:19:00,zh,页面显示包裹将在周五送达，我只是想确认是否需要本人签收。,shipping,neutral
+1014,2026-10-01 12:33:00,en,I love the green color. Is the same backpack available in a smaller size?,product_question,positive
