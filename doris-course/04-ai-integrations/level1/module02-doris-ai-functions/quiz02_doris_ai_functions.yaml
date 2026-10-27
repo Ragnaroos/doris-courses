@@ -1,0 +1,130 @@
+title: "Module 2 Quiz: Call Language Models from SQL with AI Functions"
+description: Six questions check whether you can tell which address an AI Resource needs, protect a hosted
+  provider's key and budget, choose a function by the shape of its answer, count the requests that a statement
+  makes, check an extracted fact, and keep model calls out of reports.
+questions:
+- id: which_address_the_resource_uses
+  objective: Explain how an AI function reaches a model, which Doris process sends the request, which address
+    it needs, and what Doris adds to your text.
+  prompt: The Doris sandbox runs in the container doris-ai. The model server runs in the container doris-ai-llm,
+    on the same Docker network, and Docker publishes its port 8080 on your computer as 127.0.0.1:38080, where
+    your notebook reaches it. Which endpoint should the AI Resource use?
+  options:
+  - id: server_name_on_the_shared_network
+    text: http://doris-ai-llm:8080/v1/chat/completions, the server's name on the network that the BE is on
+  - id: port_that_the_notebook_uses
+    text: http://127.0.0.1:38080/v1/chat/completions, the address that already works from your notebook
+  - id: port_inside_the_server_container
+    text: http://127.0.0.1:8080/v1/chat/completions, the port that the model server listens on in its container
+  - id: any_address_that_the_fe_reaches
+    text: Any address that the FE can reach, because the FE calls the model while it plans the query
+  answer: server_name_on_the_shared_network
+  explanation: The BE sends the request, from inside the doris-ai container, so the endpoint has to work
+    there. Docker finds doris-ai-llm by its name on the network that both containers share, and the Lab's route
+    check gets HTTP 200 for it. Inside the doris-ai container, 127.0.0.1 is that container itself, so neither the
+    published port 38080 nor port 8080 on 127.0.0.1 reaches the model server; from the BE, both fail to connect.
+    The FE checks that the Resource exists and plans the query, but it never calls the model.
+- id: protect_a_hosted_provider_key
+  objective: Create an AI Resource for a local, OpenAI-compatible model server, test it with one call, and
+    explain what changes, and what to protect, with a hosted provider.
+  prompt: Your team wants to use a hosted model on Doris 4.1.3, and an administrator will create the AI Resource
+    with the provider's API key. Which plan fits how Doris 4.1.3 treats the key and the Resource?
+  options:
+  - id: dedicated_key_and_audit_log_readers
+    text: Use a dedicated key with a spending limit, and limit who reads the audit log, which keeps the key
+  - id: usage_privilege_for_callers
+    text: Grant USAGE_PRIV on the Resource only to the analysts who should call it; others cannot use it
+  - id: masked_in_show_resources
+    text: Rely on SHOW RESOURCES masking the key as ******, which shows that Doris never stores the key in clear text
+  - id: one_key_per_analyst_notebook
+    text: Let each analyst create a Resource in a notebook with their own key, so no key is ever shared
+  answer: dedicated_key_and_audit_log_readers
+  explanation: In Doris 4.1.3 the audit log records the CREATE RESOURCE statement as it was typed, key
+    included, and an AI function checks only that the Resource exists, so any account that can run a query can
+    spend the key's budget. A dedicated key with a limit at the provider bounds that cost, and the audit log needs
+    the same protection as the key. SHOW RESOURCES does mask the key, but it is the only place that does.
+    USAGE_PRIV on the Resource changes what SHOW RESOURCES lists, not who can call the Resource. A key typed in a
+    notebook ends up in a file that is saved and shared, and every statement that creates a Resource with it is
+    in the audit log as well.
+- id: function_for_one_label_from_a_list
+  objective: Choose the AI function whose answer fits a task, and say what Doris returns for it.
+  prompt: A support team wants every ticket to get exactly one value from a fixed list of five labels (refund,
+    shipping, quality, account, and product_question). Which function fits, and what does the team still have to do?
+  options:
+  - id: classify_and_check_the_label
+    text: AI_CLASSIFY with the labels as an array, then check that each answer is one of the labels
+  - id: sentiment_with_the_labels
+    text: AI_SENTIMENT with the labels as its second argument, which returns one of the labels it gets
+  - id: extract_a_topic_field
+    text: AI_EXTRACT with the label topic, which returns only values that appear in the label list
+  - id: filter_once_per_label
+    text: AI_FILTER once for each label, which returns true for exactly one of the labels of a ticket
+  answer: classify_and_check_the_label
+  explanation: AI_CLASSIFY takes the text and an array of labels and returns one string per row, the model's
+    choice. Doris does not check that the string is one of the labels; in the Lab, some answers came back as a
+    label inside brackets and quotes, so a check is still needed. AI_SENTIMENT takes only the text and always
+    chooses among positive, negative, neutral, and mixed. AI_EXTRACT returns label=value text with whatever value
+    the model finds, which need not come from any list. AI_FILTER returns one BOOLEAN per call, and nothing makes
+    exactly one of five separate calls true; with the Lab's model it often returns no usable answer at all.
+- id: requests_for_two_functions
+  objective: Predict and measure the model requests that a statement makes, and control batching with
+    ai_context_window_size.
+  prompt: After SET ai_context_window_size = 1, one statement selects AI_CLASSIFY and AI_SENTIMENT for each of
+    14 tickets. How many requests does the model server receive?
+  options:
+  - id: one_per_function_and_row
+    text: 28, because each of the two functions sends its own request for every row
+  - id: one_per_row
+    text: 14, because the two functions of a row share one request to the model
+  - id: one_per_function
+    text: 2, because each function sends all 14 rows to the model in one request
+  - id: one_per_statement
+    text: 1, because Doris sends all of the statement's model work in one request
+  answer: one_per_function_and_row
+  explanation: Each AI function in a statement builds its own requests, and with a window of 1 byte every row is
+    larger than the window, so each row goes on its own, and 2 functions times 14 rows make 28 requests, which is
+    what the Lab measured from the model server's log. Doris never merges the work of two functions into one request.
+    One request per function is what the default window of 131072 bytes gives for 14 short tickets, and then each
+    answer must be an array of 14 strings or the statement fails. No setting sends a whole statement as one
+    request.
+- id: extracted_value_not_in_the_text
+  objective: Check a model's answers before you use them, against the allowed labels, the source text, and the
+    labels that people gave.
+  prompt: AI_EXTRACT returns order_id=A-2049 for a ticket whose text says "My last order was A-2048". The
+    Resource sets ai.temperature to 0. What should a pipeline do with A-2049?
+  options:
+  - id: reject_what_is_not_in_the_text
+    text: Treat it as a candidate that failed a check, because it is not in the text, and let a person decide
+  - id: trust_a_temperature_of_zero
+    text: Load it, because a temperature of 0 makes the model's answers exact and the same on every run
+  - id: doris_checks_the_extract
+    text: Load it, because AI_EXTRACT returns only values that Doris has found in the source text itself
+  - id: rerun_until_two_agree
+    text: Run the extraction again, and load the value as soon as two of the answers in a row agree with each other
+  answer: reject_what_is_not_in_the_text
+  explanation: An extracted value is the model's candidate, and the Lab checks it the way a pipeline should, by
+    looking for the order number in the ticket's text. A-2049 is not there, so it must not be loaded as a fact. A temperature of 0
+    asks for the most likely answer; it does not make the answer correct, and the Lab saw answers change between
+    runs at 0. Doris does not compare extracted values with the text. Two answers that agree can be wrong in the
+    same way, so agreement is not a check against the source.
+- id: report_that_calls_the_model
+  objective: Store checked answers once, with the model and prompt that produced them, so that reports and reruns
+    do not call the model again.
+  prompt: A dashboard runs a query that calls AI_CLASSIFY on every ticket and counts the tickets per topic, on
+    every refresh. Which change does the lesson recommend?
+  options:
+  - id: store_once_and_report_on_the_table
+    text: Store each answer once, with the model and prompt version, and report on the stored table
+  - id: one_row_per_request
+    text: Set ai_context_window_size = 1, so that every refresh sends smaller requests to the model server
+  - id: session_default_resource
+    text: Set default_ai_resource for the dashboard, so that its query does not name the Resource
+  - id: temperature_zero_for_stable_counts
+    text: Set ai.temperature to 0 on the Resource, so that every refresh shows the same counts
+  answer: store_once_and_report_on_the_table
+  explanation: Every refresh calls the model again for every ticket, so the dashboard is slow, costs something on
+    every refresh, and can show different counts each time. Storing each answer once, with what produced it, and
+    checking it with SQL turns the dashboard into an ordinary query. The Lab's report made 0 requests, and
+    rerunning the anti-join insert made 0 requests as well. A window of 1 byte means more requests on every
+    refresh, not fewer. default_ai_resource only saves naming the Resource. A temperature of 0 does not make
+    answers repeatable, and the dashboard would still call the model on every refresh.
