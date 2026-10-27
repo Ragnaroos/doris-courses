@@ -74,5 +74,5 @@ check them by hand when that commit moves.
 | `litefuse/litefuse-worker:26.3.0` | Observability: Lab 7 | `sha256:334c72e3312186b7653c5a79cb81f2b3fb4dbc0159ecf3e89ba372ba7880a739` |
 | `postgres:17.11` | Observability: Lab 7 (Litefuse) | `sha256:b8faeff7712663c2773a190181e1246e37e364b887611c04658c28b44e2408fe` |
 | `redis:7.4.11` | Observability: Lab 7 (Litefuse) | `sha256:44960b3100c48159a66d28c18b0588c193492e25f7551d60e51dd464fc3eca5b` |
-| `ghcr.io/ggml-org/llama.cpp:server-b11429` | Observability: the optional Lab 7A | `sha256:2f8ebc2dde83c4bd7e5c6d61efa57965e0d5a79d29802c246c4593740d9c04c1` |
+| `ghcr.io/ggml-org/llama.cpp:server-b11429` | Observability: the optional Lab 7A; AI Integrations: Module 2 | `sha256:2f8ebc2dde83c4bd7e5c6d61efa57965e0d5a79d29802c246c4593740d9c04c1` |
 | `busybox:1.37.0` | Observability: Lab 8 | `sha256:bdf57e528e45e4433820e045b29b4597825a1c9e38353532d90a01445013f82e` |
