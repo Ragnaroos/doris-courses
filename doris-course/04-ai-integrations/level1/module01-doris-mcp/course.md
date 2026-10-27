@@ -879,7 +879,8 @@ with a direct login, and put the password back. No Doris privilege changes.
 
 ## Clean up
 
-When you have finished the module:
+Module 2 uses the same sandbox, so keep it if you go on to Module 2. When you
+have finished the course:
 
 1. Remove the `doris` entry from each Host you connected, so that it no longer
    starts the launcher:
@@ -893,7 +894,8 @@ When you have finished the module:
    - Codex: run `codex mcp remove doris`.
 2. In the last section of the Lab, set `REMOVE_EVERYTHING = True` and run the
    cell. It removes the `doris-ai` container with its two volumes and its
-   network, `.env.mcp.local`, and `logs/`. The `mcp_reader` account goes with
+   network, `.env.mcp.local`, and `logs/`, and, if you ran Module 2, its model
+   server `doris-ai-llm` with the volume that holds the model file. The `mcp_reader` account goes with
    the sandbox. With your own Doris, run `lab.drop_mcp_account()` and drop the
    `ai_course` database instead.
 3. Optionally, delete the course's virtual environment,
@@ -1023,9 +1025,8 @@ explanation for every answer.
 
 ## Next
 
-This is the only module of the course for now. The
-[course README](../../README.md#roadmap) lists the modules that are planned:
-Hybrid Search, AI Functions, and Lakehouse federated retrieval.
+Next module: [Module 2: Call Language Models from SQL with AI Functions](../module02-doris-ai-functions/course.md).
+It uses the same Doris sandbox, so you can keep it running.
 
 ## References
 

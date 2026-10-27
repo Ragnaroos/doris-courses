@@ -6,7 +6,7 @@ title: AI Integrations with Apache Doris
 status: preview
 language: en
 doris_version: "4.1.3"
-estimated_minutes: 90
+estimated_minutes: 175
 modules:
   - slug: doris-mcp
     level: 1
@@ -16,3 +16,11 @@ modules:
     lab: level1/module01-doris-mcp/lab01_connect_agent_to_doris.ipynb
     quiz: level1/module01-doris-mcp/quiz01_doris_mcp.yaml
     estimated_minutes: 90
+  - slug: doris-ai-functions
+    level: 1
+    order: 2
+    title: Call Language Models from SQL with AI Functions
+    course: level1/module02-doris-ai-functions/course.md
+    lab: level1/module02-doris-ai-functions/lab02_doris_ai_functions.ipynb
+    quiz: level1/module02-doris-ai-functions/quiz02_doris_ai_functions.yaml
+    estimated_minutes: 85
