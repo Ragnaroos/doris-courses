@@ -5,11 +5,10 @@ import re
 import unittest
 from pathlib import Path
 
+from doris_course.ai_functions import AiFunctionsLab
 from doris_course.lab import AiIntegrationsLab
 
 ROOT = Path(__file__).resolve().parents[1]
-MODULE = ROOT / "level1/module01-doris-mcp"
-LAB = MODULE / "lab01_connect_agent_to_doris.ipynb"
 
 
 def cells(path):
@@ -20,19 +19,27 @@ def source(cell):
     return "".join(cell["source"])
 
 
-class LabNotebookTests(unittest.TestCase):
+class LabNotebookChecks:
+    """The structure that every Lab of the course has; each subclass names one Lab."""
+
+    lab_path: Path
+    module_line: str
+    init_import: str
+    lab_class: type
+    solution_text: str
+
     def setUp(self):
-        self.cells = cells(LAB)
+        self.cells = cells(self.lab_path)
 
     def test_header_links_the_lesson(self):
         header = source(self.cells[0])
         self.assertTrue(header.startswith("# "))
-        self.assertIn("**Module 1: Connect AI Agents to Apache Doris with MCP** · [Lesson](course.md)", header)
+        self.assertIn(self.module_line + " · [Lesson](course.md)", header)
 
     def test_first_code_cell_initializes_the_lab(self):
         first_code = next(cell for cell in self.cells if cell["cell_type"] == "code")
         self.assertEqual(first_code["id"], "init")
-        self.assertIn("from doris_course import DorisLab", source(first_code))
+        self.assertIn(self.init_import, source(first_code))
 
     def test_last_cell_is_next(self):
         self.assertTrue(source(self.cells[-1]).startswith("## Next"))
@@ -59,7 +66,8 @@ class LabNotebookTests(unittest.TestCase):
         solution = by_id["exercise-solution"]
         self.assertEqual(solution["cell_type"], "code")
         self.assertTrue(solution["metadata"]["jupyter"]["source_hidden"])
-        self.assertIn("lab.update_env_file(DORIS_PASSWORD=correct)", source(solution))
+        self.assertIn("reference-solution", solution["metadata"]["tags"])
+        self.assertIn(self.solution_text, source(solution))
 
     def test_teardown_needs_an_explicit_choice(self):
         teardown = next(cell for cell in self.cells if cell["id"] == "teardown")
@@ -75,7 +83,49 @@ class LabNotebookTests(unittest.TestCase):
         self.assertTrue(called)
         for name in sorted(called):
             with self.subTest(method=name):
-                self.assertTrue(hasattr(AiIntegrationsLab, name), f"lab.{name} does not exist")
+                self.assertTrue(hasattr(self.lab_class, name), f"lab.{name} does not exist")
+
+
+class Lab1NotebookTests(LabNotebookChecks, unittest.TestCase):
+    lab_path = ROOT / "level1/module01-doris-mcp/lab01_connect_agent_to_doris.ipynb"
+    module_line = "**Module 1: Connect AI Agents to Apache Doris with MCP**"
+    init_import = "from doris_course import DorisLab"
+    lab_class = AiIntegrationsLab
+    solution_text = "lab.update_env_file(DORIS_PASSWORD=correct)"
+
+
+class Lab2NotebookTests(LabNotebookChecks, unittest.TestCase):
+    lab_path = ROOT / "level1/module02-doris-ai-functions/lab02_doris_ai_functions.ipynb"
+    module_line = "**Module 2: Call Language Models from SQL with AI Functions**"
+    init_import = "from doris_course import AiFunctionsLab"
+    lab_class = AiFunctionsLab
+    solution_text = "REGEXP_EXTRACT(topic_raw"
+
+    def code(self, cell_id):
+        return next(source(cell) for cell in self.cells if cell["id"] == cell_id)
+
+    def test_optional_functions_are_off_by_default(self):
+        self.assertIn("TRY_THE_OTHER_FUNCTIONS = False", self.code("gallery"))
+
+    def test_one_row_per_request_is_set_before_the_tickets_are_labeled(self):
+        ids = [cell["id"] for cell in self.cells]
+        self.assertIn("lab.set_session(ai_context_window_size=1)", self.code("batch-one"))
+        self.assertLess(ids.index("batch-one"), ids.index("enrich"))
+
+    def test_enrichment_runs_per_ticket_and_skips_stored_tickets(self):
+        enrich = self.code("enrich")
+        self.assertIn("LEFT ANTI JOIN ai_course.ticket_enrichment", enrich)
+        self.assertIn("WHERE t.ticket_id = {ticket_id}", enrich)
+        self.assertIn("each=pending", enrich)
+        self.assertEqual(self.code("enrich-again").strip(), "\n".join(enrich.strip().splitlines()[-3:]))
+
+    def test_every_call_names_the_course_resource(self):
+        for cell in self.cells:
+            if cell["cell_type"] != "code":
+                continue
+            for call in re.findall(r"\bAI_[A-Z]+\((.*?)[,)]", source(cell)):
+                with self.subTest(cell=cell["id"], call=call):
+                    self.assertEqual(call, "'ai_course_llm'")
 
 
 if __name__ == "__main__":

@@ -11,6 +11,8 @@ from doris_course.lab import ENV_EXAMPLE, LAUNCHER, env_file_values, read_env_fi
 
 ROOT = Path(__file__).resolve().parents[1]
 MODULE = ROOT / "level1/module01-doris-mcp"
+LESSON_2 = ROOT / "level1/module02-doris-ai-functions/course.md"
+IMAGES = ROOT.parents[1] / "maintenance/images.md"
 DEFAULTS = dict(re.findall(r'env_port\("(DORIS_AI_\w+)", (\d+)\)', (ROOT / "doris_course/environment.py").read_text()))
 
 
@@ -31,11 +33,13 @@ class EnvironmentTests(unittest.TestCase):
             "DORIS_AI_QUERY_PORT": "39030",
             "DORIS_AI_HTTP_PORT": "38030",
             "DORIS_AI_BE_HTTP_PORT": "38040",
+            "DORIS_AI_LLM_PORT": "38080",
         })
 
     def test_names_use_the_course_prefix(self):
         for name in (environment.DORIS_CONTAINER, environment.DORIS_NETWORK,
-                     environment.FE_VOLUME, environment.BE_VOLUME):
+                     environment.FE_VOLUME, environment.BE_VOLUME,
+                     environment.LLM_CONTAINER, environment.LLM_VOLUME):
             with self.subTest(name=name):
                 self.assertTrue(name.startswith("doris-ai"))
 
@@ -80,11 +84,45 @@ class EnvironmentTests(unittest.TestCase):
 
     def test_course_files_use_the_course_ports(self):
         ports = re.compile(r"127\.0\.0\.1:(\d{4,5})")
-        allowed = {DEFAULTS[name] for name in DEFAULTS}
+        # 8080 is the model server's port inside its container: Module 2 names 127.0.0.1:8080
+        # as an address that does not reach the model server from the Doris BE.
+        allowed = {DEFAULTS[name] for name in DEFAULTS} | {"8080"}
         for path, text in course_texts():
             for port in ports.findall(text):
                 with self.subTest(file=path.name, port=port):
                     self.assertIn(port, allowed)
+
+
+class ModelPinTests(unittest.TestCase):
+    """Module 2's model server and model file are pinned, and the lesson names the same ones."""
+
+    def test_the_model_file_comes_from_a_fixed_commit(self):
+        if os.environ.get("DORIS_AI_LLM_MODEL_URL"):
+            self.skipTest("DORIS_AI_LLM_MODEL_URL points to a mirror")
+        url = environment.LLM_MODEL_URL
+        self.assertRegex(url, r"^https://huggingface\.co/Qwen/Qwen2\.5-1\.5B-Instruct-GGUF/resolve/[0-9a-f]{40}/")
+        self.assertTrue(url.endswith("/" + environment.LLM_MODEL_FILE))
+        self.assertRegex(environment.LLM_MODEL_SHA256, r"^[0-9a-f]{64}$")
+
+    def test_the_lesson_names_the_pinned_versions(self):
+        if os.environ.get("DORIS_AI_LLM_MODEL_URL"):
+            self.skipTest("DORIS_AI_LLM_MODEL_URL points to a mirror")
+        tested_with = LESSON_2.read_text().split("### Tested with", 1)[1]
+        commit = re.search(r"/resolve/([0-9a-f]{40})/", environment.LLM_MODEL_URL).group(1)
+        for value in (environment.DORIS_IMAGE, environment.LLM_IMAGE, environment.LLM_MODEL_FILE,
+                      environment.LLM_MODEL_SHA256, commit):
+            with self.subTest(value=value):
+                self.assertIn(value, tested_with)
+
+    def test_the_model_server_image_is_listed(self):
+        rows = [line for line in IMAGES.read_text().splitlines() if f"`{environment.LLM_IMAGE}`" in line]
+        self.assertEqual(len(rows), 1)
+        self.assertIn("AI Integrations", rows[0])
+
+    def test_the_be_reaches_the_model_server_by_its_name(self):
+        if os.environ.get("DORIS_AI_LLM_ENDPOINT"):
+            self.skipTest("DORIS_AI_LLM_ENDPOINT points to another server")
+        self.assertEqual(environment.LLM_ENDPOINT, f"http://{environment.LLM_CONTAINER}:8080/v1/chat/completions")
 
 
 if __name__ == "__main__":

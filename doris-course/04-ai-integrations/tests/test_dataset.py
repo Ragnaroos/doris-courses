@@ -101,5 +101,62 @@ class DatasetTests(unittest.TestCase):
             self.assertEqual(normalized_sql(block), normalized_sql(lab_sql))
 
 
+TICKETS_SPEC = yaml.safe_load((DATASETS / "support_tickets.yaml").read_text())
+LESSON_2 = ROOT / "level1/module02-doris-ai-functions/course.md"
+LAB_2 = ROOT / "level1/module02-doris-ai-functions/lab02_doris_ai_functions.ipynb"
+
+
+class SupportTicketTests(unittest.TestCase):
+    """Module 2's tickets agree with their description and with what the lesson and the Lab say about them."""
+
+    @classmethod
+    def setUpClass(cls):
+        with (DATASETS / TICKETS_SPEC["file"]).open(newline="", encoding="utf-8") as handle:
+            reader = csv.DictReader(handle)
+            cls.columns, cls.rows = reader.fieldnames, list(reader)
+        cls.by_id = {int(row["ticket_id"]): row for row in cls.rows}
+
+    def test_columns_are_the_described_ones(self):
+        self.assertEqual(self.columns, [column["name"] for column in TICKETS_SPEC["columns"]])
+
+    def test_numbers_in_the_description_match_the_file(self):
+        self.assertEqual(len(self.rows), TICKETS_SPEC["row_count"])
+        self.assertEqual(len(self.by_id), len(self.rows), "ticket ids must be unique")
+        self.assertEqual((min(self.by_id), max(self.by_id)),
+                         (TICKETS_SPEC["first_ticket"], TICKETS_SPEC["last_ticket"]))
+        self.assertEqual(dict(Counter(row["language"] for row in self.rows)), TICKETS_SPEC["languages"])
+        self.assertEqual(dict(Counter(row["expected_topic"] for row in self.rows)), TICKETS_SPEC["topic_counts"])
+        self.assertEqual(dict(Counter(row["expected_sentiment"] for row in self.rows)),
+                         TICKETS_SPEC["sentiment_counts"])
+
+    def test_labels_are_the_ones_the_lab_offers(self):
+        self.assertEqual(set(TICKETS_SPEC["topic_counts"]), set(TICKETS_SPEC["topics"]))
+        self.assertEqual(set(TICKETS_SPEC["sentiment_counts"]), set(TICKETS_SPEC["sentiments"]))
+        labels = "[" + ", ".join(f"'{topic}'" for topic in TICKETS_SPEC["topics"]) + "]"
+        lab = "\n".join("".join(cell["source"]) for cell in json.loads(LAB_2.read_text())["cells"])
+        self.assertIn(labels, lab)
+        self.assertIn("IN (" + ", ".join(f"'{topic}'" for topic in TICKETS_SPEC["topics"]) + ")", lab)
+        self.assertIn("IN (" + ", ".join(f"'{label}'" for label in TICKETS_SPEC["sentiments"]) + ")", lab)
+
+    def test_addresses_in_the_tickets_are_reserved_for_examples(self):
+        for row in self.rows:
+            for address in re.findall(r"[\w.+-]+@[\w-]+(?:\.[\w-]+)+", row["raw_text"]):
+                with self.subTest(ticket=row["ticket_id"]):
+                    self.assertTrue(address.endswith("@example.com"), address)
+
+    def test_the_lesson_quotes_the_tickets(self):
+        lesson = LESSON_2.read_text()
+        for ticket in (1009, 1010, 1011):
+            with self.subTest(ticket=ticket):
+                self.assertIn(f"| {ticket} | {self.by_id[ticket]['raw_text']} |", lesson)
+
+    def test_the_lab_extracts_order_numbers_that_are_in_the_text(self):
+        # Section 7 relies on 1002 and 1012 naming an order and 1011 naming none.
+        order = re.compile(r"\bA-\d{4}\b")
+        self.assertEqual(order.findall(self.by_id[1002]["raw_text"]), ["A-3017"])
+        self.assertEqual(order.findall(self.by_id[1012]["raw_text"]), ["A-2048"])
+        self.assertEqual(order.findall(self.by_id[1011]["raw_text"]), [])
+
+
 if __name__ == "__main__":
     unittest.main()
